@@ -146,7 +146,6 @@ skip: true
 # flows:                                  # flow membership - which tests cluster into a named flow (the agent's call)
 #   - title: <flow name>
 #     include: [ ]                        # slugs that MUST be clustered into this flow
-# runs: 1                                 # >1 requires EVERY run to pass (stability measurement)
 #
 # unknownSlugs is checked ALWAYS (a flow citing a test outside the branch map fails the case); the swept and
 # duplicate flow counts are recorded, never gating.

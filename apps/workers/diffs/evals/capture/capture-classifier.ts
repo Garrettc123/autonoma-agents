@@ -390,7 +390,6 @@ capturedCategory: ${classification.category}
 # planFidelity: exact | partial | diverged
 # expectRewrite: true    # a plan_mismatch must carry a revised plan; false when the
 #                        # right answer is no viable rewrite (the loop keeps the test)
-# runs: 1                # >1 requires EVERY run to pass, which measures stability
 ---
 
 TODO: author the LLM-judge rubric here.

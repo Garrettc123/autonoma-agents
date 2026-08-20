@@ -13,10 +13,10 @@ import { type ReporterCaseInput, rehydrateReporterInput } from "./reporter-input
 export type ReporterCase = LoadedCase<ReporterCaseInput, ReporterFrontmatter>;
 
 /**
- * Per-run timeout. A report is a tool loop over a real clone plus on-demand screenshot reads and finish-time
- * self-heal retries, and `runs: N` multiplies all of it, so the budget is per run rather than per case.
+ * Per-case timeout. A report is a tool loop over a real clone plus on-demand screenshot reads and finish-time
+ * self-heal retries.
  */
-const TIMEOUT_PER_RUN_MS = 900_000;
+const TIMEOUT_MS = 900_000;
 
 /**
  * The finish-time `FixableToolError` prefixes worth counting: the coverage-guarantee rejection and the
@@ -39,7 +39,7 @@ const FIXABLE_RETRY_PREFIXES = ["Cannot finish yet.", "Nothing was left of"];
  * Reporter has no live-infra tool (no preview backend, no log stream), so - unlike the classifier - there is no
  * production-only capability to record, and a replay grades an agent that saw exactly what production's did.
  *
- * A case passes when every run satisfies the deterministic checks AND the judge passes. Cases whose codebase or
+ * A case passes when its run satisfies the deterministic checks AND the judge passes. Cases whose codebase or
  * media can no longer be fetched are skipped, not failed.
  *
  * Cases run concurrently: each rehydrates into its own git worktree off the shared repo clone.
@@ -49,12 +49,11 @@ export class ReporterEvaluation extends Evaluation<ReporterCase> {
     private readonly logger = rootLogger.child({ name: this.constructor.name });
 
     constructor(resultsDir: string, cases: ReporterCase[]) {
-        const slowestCase = cases.reduce((most, testCase) => Math.max(most, testCase.frontmatter.runs), 1);
         super(
             {
                 name: "diffs-reporter",
                 parallel: true,
-                testOptions: { timeout: slowestCase * TIMEOUT_PER_RUN_MS },
+                testOptions: { timeout: TIMEOUT_MS },
                 resultsDir,
             },
             cases,
@@ -105,58 +104,40 @@ export class ReporterEvaluation extends Evaluation<ReporterCase> {
         // credential at import time and would break the credential-free zero-case no-op.
         const { createModelSession } = await import("../../src/services");
 
-        const results: ReporterResult[] = [];
-        const failuresByRun: string[] = [];
-        const costs: ReturnType<typeof summarizeSessionCost>[] = [];
-        const fixableRetries: number[] = [];
+        const session = createModelSession();
+        const agent = new ReporterAgent({ model: session.getModel({ model: "reporter", tag: "reporter-eval" }) });
 
-        for (let run = 1; run <= testCase.frontmatter.runs; run++) {
-            const session = createModelSession();
-            const agent = new ReporterAgent({ model: session.getModel({ model: "reporter", tag: "reporter-eval" }) });
+        this.logger.info("Reporting eval case", { extra: { case: testCase.name } });
 
-            this.logger.info("Reporting eval case", {
-                extra: { case: testCase.name, run, runs: testCase.frontmatter.runs },
-            });
+        const { result, conversation } = await this.report(agent, input);
 
-            const { result, conversation } = await this.report(agent, input);
-            results.push(result);
-            costs.push(summarizeSessionCost(session.costCollector));
-            fixableRetries.push(countFixableRetries(conversation));
-
-            const failures = checkReporterResult(result, testCase.frontmatter);
-            if (failures.length > 0) {
-                failuresByRun.push(`run ${run}: ${failures.map((f) => `${f.check}: ${f.message}`).join("; ")}`);
-            }
-        }
-
-        // The full output of every run, not just a pass flag: diffing two result files is how a change is shown to
-        // have moved the Reporter. The swept/duplicate/unknown counts and the finish-time retry count are the
-        // quality signals the deterministic checks deliberately do not gate on (bar `unknownSlugs`, which does).
+        // The full output, not just a pass flag: diffing two result files is how a change is shown to have moved the
+        // Reporter. The swept/duplicate/unknown counts and the finish-time retry count are the quality signals the
+        // deterministic checks deliberately do not gate on (bar `unknownSlugs`, which does). Stability is measured by
+        // running the whole suite more than once and diffing, not by re-running one case in a serial loop.
         addInfo({
-            titles: results.map((r) => r.title),
-            headlines: results.map((r) => r.headline),
-            issueReconciliations: results.map(describeIssues),
-            flowCounts: results.map((r) => r.flows.length),
-            sweptSlugCounts: results.map((r) => r.flowCorrections.sweptSlugs.length),
-            duplicateSlugCounts: results.map((r) => r.flowCorrections.duplicateSlugs.length),
-            unknownSlugCounts: results.map((r) => r.flowCorrections.unknownSlugs.length),
-            fixableRetries,
-            deterministicFailures: failuresByRun,
-            agentCosts: costs,
+            title: result.title,
+            headline: result.headline,
+            issueReconciliation: describeIssues(result),
+            flowCount: result.flows.length,
+            sweptSlugCount: result.flowCorrections.sweptSlugs.length,
+            duplicateSlugCount: result.flowCorrections.duplicateSlugs.length,
+            unknownSlugCount: result.flowCorrections.unknownSlugs.length,
+            fixableRetries: countFixableRetries(conversation),
+            agentCost: summarizeSessionCost(session.costCollector),
         });
 
         // Deterministic checks gate the (paid) judge call: a case that already fails a dedup or membership check
         // cannot pass, so there is nothing to judge.
-        if (failuresByRun.length > 0) {
-            expect.fail(`Deterministic checks failed: ${failuresByRun.join(" | ")}`);
+        const failures = checkReporterResult(result, testCase.frontmatter);
+        if (failures.length > 0) {
+            const detail = failures.map((f) => `${f.check}: ${f.message}`).join("; ");
+            addInfo({ deterministicFailures: detail });
+            expect.fail(`Deterministic checks failed: ${detail}`);
         }
 
-        // One judge call, on the first result. The rubric grades prose quality, which the deterministic checks
-        // have already confirmed is consistent across every run of this case.
-        const [judged] = results;
-        if (judged == null) expect.fail("No result was produced");
-
-        const judgeVerdict = await this.judge.judge({ output: judged, rubric: testCase.rubric });
+        // One judge call. The rubric grades prose quality, which the deterministic checks have gated.
+        const judgeVerdict = await this.judge.judge({ output: result, rubric: testCase.rubric });
         addInfo({
             judgePassed: judgeVerdict.passed,
             judgeReasoning: judgeVerdict.reasoning,

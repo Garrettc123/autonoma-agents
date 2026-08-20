@@ -2,9 +2,6 @@ import { Category, PlanFidelity, type RunVerdict } from "@autonoma/diffs/analysi
 import { type CheckFailure, baseFrontmatterSchema, checkEnumEquality } from "@autonoma/evals";
 import { z } from "zod";
 
-/** How many times a single case is classified per suite run. One is enough to gate; more measures stability. */
-const DEFAULT_RUNS = 1;
-
 /**
  * The shortest a revised plan can be and still carry instruction. A `plan_mismatch` carries the COMPLETE
  * rewritten plan, so anything under this is a placeholder ("n/a", "TODO", "same") - present but empty of steps,
@@ -47,11 +44,6 @@ export const classifierFrontmatterSchema = baseFrontmatterSchema.extend({
      * it", a real answer that a blanket requirement would train the classifier out of giving.
      */
     expectRewrite: z.boolean().default(true),
-    /**
-     * How many times to classify this case. Above one, EVERY run must satisfy the checks, so this measures
-     * whether a verdict is stable rather than whether it is reachable.
-     */
-    runs: z.number().int().positive().default(DEFAULT_RUNS),
 });
 
 export type ClassifierFrontmatter = z.infer<typeof classifierFrontmatterSchema>;

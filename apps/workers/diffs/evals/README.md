@@ -102,7 +102,6 @@ capturedCategory: engine_artifact   # what production said when frozen. Provenan
 category: passed                    # the verdict this case ASSERTS (blank at capture, by design)
 planFidelity: exact                 # optional: exact | partial | diverged
 expectRewrite: true                 # a plan_mismatch must carry a revised plan (see below)
-runs: 1                             # >1 requires EVERY run to pass, which measures stability
 ---
 
 Free-text judge rubric. The judge sees only the structured verdict plus this body -
@@ -126,7 +125,8 @@ test without re-running it" - a real answer a blanket requirement would train aw
 **The vision probes run live, every time.** A case stores no scans: the agent reads the
 recording itself on every run, exactly as production does. Each run therefore costs four
 full-recording vision reads on top of the loop, and the probes are one of the places a
-verdict moves between two runs of an unchanged classifier - which is what `runs: N` measures.
+verdict can move between two runs of an unchanged classifier. To measure that stability,
+run the whole suite more than once and diff the result files - there is no per-case repeat.
 
 **What a replay cannot serve.** One of the classifier's live-infra capabilities has no
 frozen form: the preview's live backend (`run_script`). A replay passes it as absent, and
@@ -221,9 +221,9 @@ Captured `input.json` files store media as **S3 keys**, never bytes.
 The classifier stores the recording key alongside an `isOptimizedMp4` flag, because the
 uploader has to be told a mime type and the key alone does not say: production reads the
 dead-time-stripped mp4 when the optimizer produced one and the original webm otherwise.
-Its recording is re-uploaded **per run**, not once per case - an uploaded video is a
-handle with its own lifetime at the provider, so a `runs: N` case would otherwise replay
-a handle that may have expired mid-sweep.
+Its recording is uploaded fresh each time the case is classified, never cached - an
+uploaded video is a handle with its own lifetime at the provider, so a stored handle
+could have expired by the next suite run.
 
 ### Reporter frontmatter
 
@@ -248,7 +248,6 @@ issueDetails:                           # per asserted issue: its kind + severit
 flows:                                  # flow MEMBERSHIP - which tests cluster into a named flow (the agent's call)
   - title: Guest checkout                #   matched case-insensitively against the authored flow titles
     include: [guest-checkout-happy-path] #   slugs that MUST land in this flow (also exclude / exact)
-runs: 1                                 # >1 requires EVERY run to pass, which measures stability
 ---
 
 Free-text judge rubric. The judge sees only the Reporter's structured output plus this

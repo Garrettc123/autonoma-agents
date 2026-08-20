@@ -21,11 +21,8 @@ import { createFrozenAppLogsLoader } from "./frozen-app-logs";
 /** A loaded Classifier eval case: frozen classification input + authored expectations. */
 export type ClassifierCase = LoadedCase<ClassifierCaseInput, ClassifierFrontmatter>;
 
-/**
- * Per-case timeout. A classification is a tool loop over a real clone plus four full-recording vision reads,
- * and `runs: N` multiplies all of it, so the budget is per run rather than per case.
- */
-const TIMEOUT_PER_RUN_MS = 900_000;
+/** Per-case timeout: a classification is a tool loop over a real clone plus four full-recording vision reads. */
+const TIMEOUT_MS = 900_000;
 
 /**
  * Scored eval for the Investigator's classifier.
@@ -42,7 +39,7 @@ const TIMEOUT_PER_RUN_MS = 900_000;
  * than guessing; each case records in `productionCapabilities` whether production had more to work with than
  * this replay does.
  *
- * A case passes when every classification satisfies the deterministic checks AND the judge passes. Cases whose
+ * A case passes when its classification satisfies the deterministic checks AND the judge passes. Cases whose
  * codebase or media can no longer be fetched are skipped, not failed.
  *
  * Cases run concurrently: each rehydrates into its own git worktree off the shared repo clone.
@@ -52,12 +49,11 @@ export class ClassifierEvaluation extends Evaluation<ClassifierCase> {
     private readonly logger = rootLogger.child({ name: this.constructor.name });
 
     constructor(resultsDir: string, cases: ClassifierCase[]) {
-        const slowestCase = cases.reduce((most, testCase) => Math.max(most, testCase.frontmatter.runs), 1);
         super(
             {
                 name: "diffs-classifier",
                 parallel: true,
-                testOptions: { timeout: slowestCase * TIMEOUT_PER_RUN_MS },
+                testOptions: { timeout: TIMEOUT_MS },
                 resultsDir,
             },
             cases,
@@ -122,66 +118,50 @@ export class ClassifierEvaluation extends Evaluation<ClassifierCase> {
         // GitHub App and OpenAI credentials at import time and would break the credential-free zero-case no-op.
         const { createModelSession } = await import("../../src/services");
 
-        const verdicts: RunVerdict[] = [];
-        const failuresByRun: string[] = [];
-        const costs: ReturnType<typeof summarizeSessionCost>[] = [];
+        const session = createModelSession();
+        const videoModel = session.getVideoModel({ model: "smart-video", tag: "classifier-eval-video" });
+        const recording = await this.loadRecording(media, evidenceLoader);
+        const classifier = new ClassifierAgent({
+            model: session.getModel({ model: "classifier", tag: "classifier-eval" }),
+            videoModel: videoModel.model,
+        });
 
-        for (let run = 1; run <= testCase.frontmatter.runs; run++) {
-            const session = createModelSession();
-            const videoModel = session.getVideoModel({ model: "smart-video", tag: "classifier-eval-video" });
-            const recording = await this.loadRecording(media, evidenceLoader);
-            const classifier = new ClassifierAgent({
-                model: session.getModel({ model: "classifier", tag: "classifier-eval" }),
-                videoModel: videoModel.model,
-            });
+        this.logger.info("Classifying eval case", { extra: { case: testCase.name } });
 
-            this.logger.info("Classifying eval case", {
-                extra: { case: testCase.name, run, runs: testCase.frontmatter.runs },
-            });
+        const verdict = await this.classify(classifier, {
+            ...input,
+            run: { ...input.run, recording, finalScreenshot },
+            codebase,
+            diffSummary,
+            screenshotLoader: evidenceLoader,
+            loadBaseline: async () => baseline,
+            // `previewEnv` rides in on `input` when the case froze one. `run_script` has no frozen form.
+            previewScript: undefined,
+            loadAppLogs: this.appLogsFor(appLogWindow, input.run),
+        });
 
-            const verdict = await this.classify(classifier, {
-                ...input,
-                run: { ...input.run, recording, finalScreenshot },
-                codebase,
-                diffSummary,
-                screenshotLoader: evidenceLoader,
-                loadBaseline: async () => baseline,
-                // `previewEnv` rides in on `input` when the case froze one. `run_script` has no frozen form.
-                previewScript: undefined,
-                loadAppLogs: this.appLogsFor(appLogWindow, input.run),
-            });
-            verdicts.push(verdict);
-            costs.push(summarizeSessionCost(session.costCollector));
-
-            const failures = checkClassifierVerdict(verdict, testCase.frontmatter);
-            if (failures.length > 0) {
-                failuresByRun.push(`run ${run}: ${failures.map((f) => `${f.check}: ${f.message}`).join("; ")}`);
-            }
-        }
-
-        // The full verdict of every run, not just a pass flag: diffing two result files is how a change is shown
-        // to have moved the classifier.
+        // The full verdict, not just a pass flag: diffing two result files is how a change is shown to have moved
+        // the classifier. Stability is measured by running the whole suite more than once and diffing, not by
+        // re-classifying one case in a serial loop.
         addInfo({
-            categories: verdicts.map((verdict) => verdict.category),
-            confidences: verdicts.map((verdict) => verdict.confidence),
-            planFidelities: verdicts.map((verdict) => verdict.planFidelity),
-            headlines: verdicts.map((verdict) => verdict.headline),
-            evidenceCounts: verdicts.map((verdict) => verdict.evidence.length),
-            deterministicFailures: failuresByRun,
-            agentCosts: costs,
+            category: verdict.category,
+            confidence: verdict.confidence,
+            planFidelity: verdict.planFidelity,
+            headline: verdict.headline,
+            evidenceCount: verdict.evidence.length,
+            agentCost: summarizeSessionCost(session.costCollector),
         });
 
         // Deterministic checks gate the (paid) judge call: a case that already fails enum-equality cannot pass.
-        if (failuresByRun.length > 0) {
-            expect.fail(`Deterministic checks failed: ${failuresByRun.join(" | ")}`);
+        const failures = checkClassifierVerdict(verdict, testCase.frontmatter);
+        if (failures.length > 0) {
+            const detail = failures.map((f) => `${f.check}: ${f.message}`).join("; ");
+            addInfo({ deterministicFailures: detail });
+            expect.fail(`Deterministic checks failed: ${detail}`);
         }
 
-        // One judge call, on the first verdict. The rubric grades reasoning quality, which the deterministic
-        // checks have already confirmed is consistent across every run of this case.
-        const [judged] = verdicts;
-        if (judged == null) expect.fail("No verdict was produced");
-
-        const judgeVerdict = await this.judge.judge({ output: judged, rubric: testCase.rubric });
+        // One judge call. The rubric grades reasoning quality, which the deterministic checks have gated.
+        const judgeVerdict = await this.judge.judge({ output: verdict, rubric: testCase.rubric });
         addInfo({
             judgePassed: judgeVerdict.passed,
             judgeReasoning: judgeVerdict.reasoning,
@@ -290,8 +270,8 @@ export class ClassifierEvaluation extends Evaluation<ClassifierCase> {
     /**
      * Fetch the recording and hand it to the vision models in the form they take.
      *
-     * Re-uploaded per run rather than once per case: an uploaded video is a handle with its own lifetime at the
-     * provider, and a `runs: N` case would otherwise be replaying a handle that may have expired mid-sweep.
+     * Uploaded fresh each time the case is classified, never cached across suite runs: an uploaded video is a
+     * handle with its own lifetime at the provider, so a stored handle could have expired by the next run.
      * The uploader is built with this host's ffmpeg for the same reason production builds its own - which
      * binary exists is not something the model registry can know.
      */

@@ -15,9 +15,6 @@ import {
 } from "@autonoma/evals";
 import { z } from "zod";
 
-/** How many times a single case is reported per suite run. One is enough to gate; more measures stability. */
-const DEFAULT_RUNS = 1;
-
 /**
  * The headline dedup assertion: how this run reconciled its findings against the branch's existing issues. This is
  * the one judgement nothing downstream corrects - the coverage guarantees self-heal a dropped bug or an unresolved
@@ -81,12 +78,6 @@ export const reporterFrontmatterSchema = baseFrontmatterSchema.extend({
     issues: reporterIssueChecksSchema.optional(),
     issueDetails: z.array(reporterIssueDetailSchema).optional(),
     flows: z.array(reporterFlowCheckSchema).optional(),
-    /**
-     * How many times to report this case. Above one, EVERY run must satisfy the checks, so this measures whether a
-     * reconciliation is stable rather than whether it is reachable. Defaults to one - the Reporter reads no live
-     * vision, so a single run is a sound gate.
-     */
-    runs: z.number().int().positive().default(DEFAULT_RUNS),
 });
 
 export type ReporterFrontmatter = z.infer<typeof reporterFrontmatterSchema>;
