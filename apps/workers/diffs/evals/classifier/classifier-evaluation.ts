@@ -1,4 +1,5 @@
-import { InlineMp4VideoUploader, type UploadedVideo } from "@autonoma/ai";
+import path from "node:path";
+import { InlineMp4VideoUploader, type ModelMessage, type UploadedVideo } from "@autonoma/ai";
 import { type EvidenceLoader, StorageEvidenceLoader, readPrDiffStat, summarizeSessionCost } from "@autonoma/diffs";
 import { ClassifierAgent, type RunVerdict } from "@autonoma/diffs/analysis";
 import { Evaluation, type LoadedCase, type RunCaseHelpers } from "@autonoma/evals";
@@ -17,6 +18,7 @@ import {
 } from "./classifier-input";
 import { FrozenAppLogArtifactError, FrozenAppLogArtifactStore } from "./frozen-app-log-artifact";
 import { createFrozenAppLogsLoader } from "./frozen-app-logs";
+import { writeClassifierTranscript } from "./transcript-artifact";
 
 /** A loaded Classifier eval case: frozen classification input + authored expectations. */
 export type ClassifierCase = LoadedCase<ClassifierCaseInput, ClassifierFrontmatter>;
@@ -47,6 +49,7 @@ const TIMEOUT_MS = 900_000;
 export class ClassifierEvaluation extends Evaluation<ClassifierCase> {
     private readonly judge = new DiffsJudge();
     private readonly logger = rootLogger.child({ name: this.constructor.name });
+    private readonly transcriptDir: string;
 
     constructor(resultsDir: string, cases: ClassifierCase[]) {
         super(
@@ -58,6 +61,7 @@ export class ClassifierEvaluation extends Evaluation<ClassifierCase> {
             },
             cases,
         );
+        this.transcriptDir = path.join(resultsDir, "transcripts");
     }
 
     protected override caseName(testCase: ClassifierCase): string {
@@ -128,7 +132,7 @@ export class ClassifierEvaluation extends Evaluation<ClassifierCase> {
 
         this.logger.info("Classifying eval case", { extra: { case: testCase.name } });
 
-        const verdict = await this.classify(classifier, {
+        const { verdict, conversation } = await this.classify(classifier, {
             ...input,
             run: { ...input.run, recording, finalScreenshot },
             codebase,
@@ -139,16 +143,24 @@ export class ClassifierEvaluation extends Evaluation<ClassifierCase> {
             previewScript: undefined,
             loadAppLogs: this.appLogsFor(appLogWindow, input.run),
         });
+        const transcriptPath = await writeClassifierTranscript({
+            dir: this.transcriptDir,
+            caseName: testCase.name,
+            conversation,
+        });
 
         // The full verdict, not just a pass flag: diffing two result files is how a change is shown to have moved
-        // the classifier. Stability is measured by running the whole suite more than once and diffing, not by
-        // re-classifying one case in a serial loop.
+        // the classifier. `evidence` and `transcriptPath` carry the REASONING - the cited proof in the result file,
+        // the whole tool loop on disk - so a verdict can be explained, not just counted. Stability is measured by
+        // running the whole suite more than once and diffing, not by re-classifying one case in a serial loop.
         addInfo({
             category: verdict.category,
             confidence: verdict.confidence,
             planFidelity: verdict.planFidelity,
             headline: verdict.headline,
+            evidence: verdict.evidence,
             evidenceCount: verdict.evidence.length,
+            transcriptPath,
             agentCost: summarizeSessionCost(session.costCollector),
         });
 
@@ -223,10 +235,10 @@ export class ClassifierEvaluation extends Evaluation<ClassifierCase> {
     private async classify(
         classifier: ClassifierAgent,
         input: Parameters<ClassifierAgent["run"]>[0],
-    ): Promise<RunVerdict> {
+    ): Promise<{ verdict: RunVerdict; conversation: ModelMessage[] }> {
         try {
-            const { result } = await classifier.run(input);
-            return result;
+            const { result, conversation } = await classifier.run(input);
+            return { verdict: result, conversation };
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             this.logger.warn("Classifier produced no verdict", { extra: { err: message } });

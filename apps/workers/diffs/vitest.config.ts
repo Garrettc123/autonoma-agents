@@ -21,7 +21,10 @@ export default defineConfig({
         globalSetup: ["./test/global-setup.ts"],
         // TESTING=true makes packages/db/src/env.ts skip its DATABASE_URL validation at
         // import (createClient/applyMigrations take an explicit connection string instead).
-        env: { ...config({ path: join(__dirname, "../../../.env") }).parsed, TESTING: "true" },
+        env: {
+            ...config({ path: process.env.EVAL_ENV_FILE ?? join(__dirname, "../../../.env") }).parsed,
+            TESTING: "true",
+        },
         watch: false,
         // Per-case worktrees make within-suite concurrency safe, but the suites still run one file
         // at a time: `fileParallelism: false` keeps only one suite's model burst in flight, and the
