@@ -109,6 +109,10 @@ function RunRow({ row, prNumber, snapshotId }: { row: RunRow; prNumber: number; 
       <AppLink
         to="/app/$appSlug/pull-requests/$prNumber/snapshots/$snapshotId/running/finding/$findingId"
         params={{ prNumber, snapshotId, findingId: row.findingId }}
+        // Warm the finding drawer's (code-split) chunk as the list renders - one shared chunk for every row - so
+        // the first click opens the drawer instantly instead of waiting on its JS. The route's loader skips its
+        // data fetch on a preload, so this costs one static asset, never a per-row read.
+        preload="render"
         className={rowClass}
       >
         {body}
@@ -119,6 +123,9 @@ function RunRow({ row, prNumber, snapshotId }: { row: RunRow; prNumber: number; 
     <AppLink
       to="/app/$appSlug/pull-requests/$prNumber/snapshots/$snapshotId/running/removed/$testCaseId"
       params={{ prNumber, snapshotId, testCaseId: row.testCase.id }}
+      // Same as the finding row: warm this drawer's chunk on render so the first click is instant. This route has
+      // no loader (its content rides on the already-cached run view), so a preload only ever fetches the chunk.
+      preload="render"
       className={rowClass}
     >
       {body}

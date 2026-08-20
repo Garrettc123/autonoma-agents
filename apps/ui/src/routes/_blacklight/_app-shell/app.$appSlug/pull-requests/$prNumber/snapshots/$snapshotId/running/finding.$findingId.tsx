@@ -20,7 +20,11 @@ export const Route = createFileRoute(
   loaderDeps: ({ search }) => ({ iteration: search.iteration }),
   // Fire-and-forget: warm the finding-detail cache without blocking navigation, so the drawer opens instantly and
   // its own Suspense boundary shows the skeleton while this resolves - rather than the whole run stage pending.
-  loader: ({ context, params, deps }) => {
+  // The run list preloads this route on render to warm its (code-split) chunk; a preload must only warm the CODE,
+  // never fetch a row's data - otherwise rendering the list would fire one finding-detail read per row. So the
+  // data fetch runs on a real navigation only.
+  loader: ({ context, params, deps, cause }) => {
+    if (cause === "preload") return;
     void ensureAnalysisFindingDetailData(context.queryClient, params.findingId, deps.iteration);
   },
   component: FindingDrawerPage,

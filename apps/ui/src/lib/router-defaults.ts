@@ -14,6 +14,12 @@ import { RoutePendingSkeleton } from "components/route-pending-skeleton";
  * `createRoot`. Options that are genuinely app-only - Sentry's `defaultOnCatch`, browser scroll
  * restoration - stay at their call site, so the distinction is stated rather than left to whoever
  * next compares the two files.
+ *
+ * Preloading is deliberately NOT a global default here: `defaultPreload: "intent"` would run every
+ * `<Link>`'s loader on hover, turning a mouse sweep across any list into a burst of data reads. Routes
+ * that need their split chunk warmed opt in at the call site with `preload` on the specific link (see the
+ * checkpoint run list), and pair it with a `cause === "preload"` guard in the loader so only the code is
+ * warmed, never the data.
  */
 export const DEFAULT_ROUTER_OPTIONS = {
     defaultPendingMs: 200,
