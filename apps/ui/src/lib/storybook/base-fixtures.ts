@@ -305,6 +305,33 @@ const baseTrpcFixtures: TrpcFixtures = {
             },
         ],
     },
+    // Staff-only billing settings panel (ComputePricingPanel) - a regular customer's session would
+    // 403 on these `internalProcedure` calls and the panel self-hides, but the fixture system has
+    // no way to model that, so the baseline answers as a staff viewer would.
+    admin: {
+        billing: {
+            getComputePricing: { creditsPerVcpuHour: 52, creditsPerGbMemoryHour: 6 },
+            getComputePricingReference: [
+                {
+                    pool: "buildkit",
+                    usdPerVcpuHour: 0.02772,
+                    usdPerGbHour: 0.00315,
+                    spotFraction: 0.62,
+                    sampleSize: 148,
+                    updatedAt: new Date("2026-01-27T03:00:00.000Z"),
+                },
+                {
+                    pool: "previewkit",
+                    usdPerVcpuHour: 0.03465,
+                    usdPerGbHour: 0.0039375,
+                    spotFraction: null,
+                    sampleSize: null,
+                    updatedAt: new Date("2026-01-27T03:00:00.000Z"),
+                },
+            ],
+        },
+    },
+
     billing: {
         // The billing page asks this to explain a zero balance, so the baseline answers the ordinary
         // case - entitled, nothing to explain - and a story overrides it to show the notice.

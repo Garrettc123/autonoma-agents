@@ -37,6 +37,7 @@ import {
 } from "lib/query/billing.queries";
 import { toastManager } from "lib/toast-manager";
 import { useEffect, useState } from "react";
+import { ComputePricingPanel } from "./-compute-pricing-panel";
 import { VercelOveragePanel } from "./-vercel-overage-panel";
 
 export function BillingPanel() {
@@ -333,6 +334,9 @@ export function BillingPanel() {
             )}
           </PanelBody>
         </Panel>
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <ComputePricingPanel />
       </div>
     </div>
   );

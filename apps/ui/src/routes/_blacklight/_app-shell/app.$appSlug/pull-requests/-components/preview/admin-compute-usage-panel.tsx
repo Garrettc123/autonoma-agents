@@ -1,13 +1,8 @@
-import { Badge, Button, Input, Skeleton } from "@autonoma/blacklight";
+import { Badge, Skeleton } from "@autonoma/blacklight";
 import { CaretRightIcon } from "@phosphor-icons/react/CaretRight";
 import { CoinsIcon } from "@phosphor-icons/react/Coins";
-import { formatMicrodollars, formatRelativeTime } from "lib/format";
-import {
-  useAdminComputePricingReference,
-  useAdminEnvironmentComputeUsage,
-  useUpdateComputePricing,
-} from "lib/query/admin.queries";
-import { useEffect, useState } from "react";
+import { formatMicrodollars } from "lib/format";
+import { useAdminEnvironmentComputeUsage } from "lib/query/admin.queries";
 
 /**
  * Admin-only Previewkit compute usage for this environment - build and running compute,
@@ -69,12 +64,6 @@ export function AdminComputeUsagePanel({
               Priced at {data.creditsPerVcpuHour} credits/vCPU-hr, {data.creditsPerGbMemoryHour} credits/GB-hr
               {data.creditsPerVcpuHour === 0 && data.creditsPerGbMemoryHour === 0 && " (shadow mode - not yet billed)"}
             </div>
-            <ComputePricingSettings
-              organizationId={data.organizationId}
-              organizationName={data.organizationName}
-              currentCreditsPerVcpuHour={data.creditsPerVcpuHour}
-              currentCreditsPerGbMemoryHour={data.creditsPerGbMemoryHour}
-            />
           </div>
         )}
       </div>
@@ -122,112 +111,6 @@ function ComputeUsageRowsSkeleton() {
     <div className="flex flex-col gap-2 p-4">
       <Skeleton className="h-5 w-full" />
       <Skeleton className="h-5 w-full" />
-    </div>
-  );
-}
-
-/**
- * The AWS reference rate (informational, global) plus a form to set one org's live rate.
- *
- * The org comes from the ENVIRONMENT being viewed, never from whichever org the admin is currently
- * acting as: the rates displayed here are read from the environment's owner, so writing them back
- * anywhere else would edit an org the admin is not looking at while the toast confirms success. An
- * admin can genuinely be switched into a different org than the environment's owner (see
- * `admin.switchToOrg` and the cross-org deep-link recovery in `-app-not-found.tsx`), so the read and
- * the write have to name the same org by construction rather than by convention.
- */
-function ComputePricingSettings({
-  organizationId,
-  organizationName,
-  currentCreditsPerVcpuHour,
-  currentCreditsPerGbMemoryHour,
-}: {
-  organizationId: string;
-  organizationName: string;
-  currentCreditsPerVcpuHour: number;
-  currentCreditsPerGbMemoryHour: number;
-}) {
-  const { data: reference, isPending: referencePending } = useAdminComputePricingReference(true);
-  const updateComputePricing = useUpdateComputePricing();
-  const [creditsPerVcpuHour, setCreditsPerVcpuHour] = useState(String(currentCreditsPerVcpuHour));
-  const [creditsPerGbMemoryHour, setCreditsPerGbMemoryHour] = useState(String(currentCreditsPerGbMemoryHour));
-
-  // Keep the inputs in sync if the org's live rate changes underneath us (e.g. another admin
-  // applied a change, or the environment/org selection changed).
-  useEffect(() => {
-    setCreditsPerVcpuHour(String(currentCreditsPerVcpuHour));
-    setCreditsPerGbMemoryHour(String(currentCreditsPerGbMemoryHour));
-  }, [currentCreditsPerVcpuHour, currentCreditsPerGbMemoryHour]);
-
-  return (
-    <div className="flex flex-col gap-2 border-t border-border-dim px-4 py-3">
-      <span className="font-mono text-2xs font-semibold uppercase tracking-widest text-text-secondary">
-        AWS pricing reference
-      </span>
-      {referencePending ? (
-        <Skeleton className="h-5 w-full" />
-      ) : reference == null || reference.length === 0 ? (
-        <span className="text-2xs text-text-secondary">No reference data yet - the weekly sync hasn't run.</span>
-      ) : (
-        <div className="flex flex-col gap-1">
-          {reference.map((row) => (
-            <div key={row.pool} className="flex flex-wrap items-center gap-3 font-mono text-2xs text-text-secondary">
-              <span className="w-16 shrink-0 text-text-primary">{row.pool}</span>
-              <span>${row.usdPerVcpuHour.toFixed(5)}/vCPU-hr</span>
-              <span>${row.usdPerGbHour.toFixed(5)}/GB-hr</span>
-              {row.spotFraction != null && (
-                <span>
-                  {(row.spotFraction * 100).toFixed(0)}% spot (n={row.sampleSize})
-                </span>
-              )}
-              <span className="ml-auto">updated {formatRelativeTime(row.updatedAt)}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <span className="mt-2 font-mono text-2xs font-semibold uppercase tracking-widest text-text-secondary">
-        {organizationName}'s billed rate
-      </span>
-      <form
-        className="flex flex-wrap items-center gap-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          updateComputePricing.mutate({
-            organizationId,
-            creditsPerVcpuHour: Number(creditsPerVcpuHour),
-            creditsPerGbMemoryHour: Number(creditsPerGbMemoryHour),
-          });
-        }}
-      >
-        <label htmlFor="credits-per-vcpu-hour" className="flex items-center gap-1.5 text-2xs text-text-secondary">
-          credits/vCPU-hr
-          <Input
-            id="credits-per-vcpu-hour"
-            type="number"
-            min={0}
-            step="any"
-            value={creditsPerVcpuHour}
-            onChange={(event) => setCreditsPerVcpuHour(event.target.value)}
-            className="h-7 w-24 font-mono text-xs"
-          />
-        </label>
-        <label htmlFor="credits-per-gb-hour" className="flex items-center gap-1.5 text-2xs text-text-secondary">
-          credits/GB-hr
-          <Input
-            id="credits-per-gb-hour"
-            type="number"
-            min={0}
-            step="any"
-            value={creditsPerGbMemoryHour}
-            onChange={(event) => setCreditsPerGbMemoryHour(event.target.value)}
-            className="h-7 w-24 font-mono text-xs"
-          />
-        </label>
-        <Button type="submit" variant="outline" size="xs" disabled={updateComputePricing.isPending}>
-          {updateComputePricing.isPending ? "Saving..." : "Save"}
-        </Button>
-      </form>
     </div>
   );
 }

@@ -213,6 +213,14 @@ export function useAdminEnvironmentComputeUsage(environmentId: string, enabled: 
     });
 }
 
+/** An org's live previewkit compute-usage rate, to pre-fill the billing settings pricing form. Admin-only. */
+export function useAdminComputePricing(organizationId: string, enabled: boolean) {
+    return useQuery({
+        ...trpc.admin.billing.getComputePricing.queryOptions({ organizationId }),
+        enabled,
+    });
+}
+
 /**
  * The global, AWS-derived compute pricing reference (one row per pool) the pricing-drift
  * cronjob keeps current. Admin-only, see above.

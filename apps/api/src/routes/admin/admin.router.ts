@@ -209,6 +209,16 @@ export const adminRouter = router({
             .mutation(({ ctx: { services }, input }) =>
                 services.billing.setPromoCodeActive(input.promoCodeId, input.isActive),
             ),
+        /** An org's live previewkit compute-usage rate, for the billing settings pricing form to pre-fill. */
+        getComputePricing: internalProcedure
+            .input(z.object({ organizationId: z.string().min(1) }))
+            .query(async ({ ctx: { services }, input }) => {
+                const pricing = await services.billing.getPricing(input.organizationId);
+                return {
+                    creditsPerVcpuHour: pricing.creditsPerVcpuHour,
+                    creditsPerGbMemoryHour: pricing.creditsPerGbMemoryHour,
+                };
+            }),
         /**
          * The global, AWS-derived reference rates the aws-compute-pricing-drift cronjob keeps
          * current (one row per compute pool) - purely informational, never billed directly.
