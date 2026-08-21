@@ -157,17 +157,18 @@ function InlineEvidenceImage({
   if (asset == null || asset.kind !== "screenshot") return null;
 
   return (
-    <div className="my-3 flex flex-col gap-1.5">
-      {/* `mx-auto block` is load-bearing, not cosmetic: ScreenshotWithOverlay's pin math assumes the image is
-          centered in its full-width container, so once the height cap makes the image narrower than the column it
-          must be centered or the pin drifts right by half the gap. */}
+    <figure className="my-3 flex w-fit max-w-md flex-col gap-1.5">
+      {/* `mx-auto` on the image looks removable - the `w-fit` figure already hugs it, so it usually centers
+          nothing. It stays because ScreenshotWithOverlay's pin math assumes the image is centered in its
+          container: when the height cap leaves a tall shot narrower than the figure, only centering keeps the
+          pin from drifting. */}
       <ScreenshotLightbox
         src={asset.url}
         alt={alt != null && alt.length > 0 ? alt : "Bug evidence screenshot"}
-        className="mx-auto block max-h-[32rem] w-auto max-w-full border border-border-dim"
+        className="mx-auto block max-h-80 w-auto max-w-full rounded-md border border-border-dim"
         points={asset.pin != null ? [asset.pin] : undefined}
       />
-      {alt != null && alt.length > 0 && <span className="text-xs italic text-text-secondary">{alt}</span>}
-    </div>
+      {alt != null && alt.length > 0 && <figcaption className="text-xs italic text-text-secondary">{alt}</figcaption>}
+    </figure>
   );
 }
