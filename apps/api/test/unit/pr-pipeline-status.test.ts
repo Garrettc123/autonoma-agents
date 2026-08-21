@@ -125,6 +125,27 @@ describe("computePrPipelineStatus", () => {
         expect(computePrPipelineStatus({})).toEqual({ kind: "none" });
     });
 
+    it("returns blocked instead of none when the branch's last trigger was declined", () => {
+        expect(computePrPipelineStatus({ blockedReason: "insufficient_credits" })).toEqual({
+            kind: "blocked",
+            reason: "insufficient_credits",
+        });
+    });
+
+    it("lets a real signal win over a stale blocked reason", () => {
+        // A blocked flag only ever means "nothing happened since" - any higher-precedence branch
+        // reaching this point would mean a trigger already cleared the gate, which is exactly when
+        // the flag gets cleared. This just documents that ordering never lets a stale block hide a
+        // real signal, should the flag somehow still be set.
+        const status = computePrPipelineStatus({
+            activeSnapshot: { headSha: "abc", summary },
+            latestRun: { status: "active", headSha: "abc" },
+            previewEnv: { status: "ready", headSha: "abc" },
+            blockedReason: "insufficient_credits",
+        });
+        expect(status).toEqual({ kind: "checkpoint", summary });
+    });
+
     it("does not let an env with an empty head sha falsely supersede a completed analysis", () => {
         const status = computePrPipelineStatus({
             activeSnapshot: { headSha: "abc", summary },

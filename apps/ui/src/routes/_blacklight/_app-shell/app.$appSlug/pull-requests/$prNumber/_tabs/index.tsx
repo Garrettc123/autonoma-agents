@@ -1,4 +1,4 @@
-import { Badge, Panel, PanelBody, Skeleton, StatusDot, ZeroState } from "@autonoma/blacklight";
+import { Badge, Panel, PanelBody, Skeleton, StatusDot } from "@autonoma/blacklight";
 import { ArrowRightIcon } from "@phosphor-icons/react/ArrowRight";
 import { CaretRightIcon } from "@phosphor-icons/react/CaretRight";
 import { CircleNotchIcon } from "@phosphor-icons/react/CircleNotch";
@@ -29,7 +29,6 @@ import {
 import { useCommitFromGitHub } from "lib/query/github.queries";
 import { trpc } from "lib/trpc";
 import type { RouterOutputs } from "lib/trpc";
-import { SURFACE_COPY } from "lib/zero-state/copy";
 import { Suspense, useMemo } from "react";
 import { AppLink } from "routes/_blacklight/_app-shell/-app-link";
 import { useCurrentApplication } from "routes/_blacklight/_app-shell/-use-current-application";
@@ -89,7 +88,11 @@ function OverviewContent({ prNumber }: { prNumber: number }) {
   if (latestSnapshot == null) {
     return (
       <div className="p-6">
-        <NoSnapshotsPanel />
+        {branch.lastBlockedReason != null ? (
+          <BlockedPanel reason={branch.lastBlockedReason} blockedAt={branch.lastBlockedAt} />
+        ) : (
+          <NoSnapshotsPanel />
+        )}
       </div>
     );
   }
@@ -491,7 +494,7 @@ function CompactTestsRun({
     // No executed tests yet; surface suite changes when the suite was edited.
     return (
       <div className="flex flex-col gap-2 bg-surface-void px-4 py-4 text-sm text-text-secondary">
-        <span>No run has finished for this pull request yet.</span>
+        <span>No tests have run for this PR yet.</span>
         {suiteChangeCount > 0 && (
           <span className="text-text-secondary">
             {suiteChangeCount} test suite {suiteChangeCount === 1 ? "change" : "changes"} were made -{" "}
@@ -666,13 +669,32 @@ function NoSnapshotsPanel() {
   return (
     <Panel>
       <PanelBody>
-        <ZeroState
-          variant="bare"
-          icon={<GitPullRequestIcon size={28} />}
-          title={SURFACE_COPY.pr_checkpoints.zero.title}
-          description={SURFACE_COPY.pr_checkpoints.zero.description}
-          pending="Waiting for the first run on this pull request"
-        />
+        <div className="flex flex-col items-center justify-center gap-3 py-14 text-center text-text-secondary">
+          <GitPullRequestIcon size={28} />
+          <p className="text-sm">No checkpoints yet for this pull request</p>
+        </div>
+      </PanelBody>
+    </Panel>
+  );
+}
+
+const BLOCKED_REASON_LABEL: Record<string, string> = {
+  insufficient_credits: "This organization is out of credits, so no analysis has run for this pull request yet.",
+};
+
+// Distinguishes a declined trigger (never created anything to show) from a PR that was simply never
+// triggered - `NoSnapshotsPanel`'s empty state above looks identical to both without this.
+function BlockedPanel({ reason, blockedAt }: { reason: string; blockedAt: Date | undefined }) {
+  return (
+    <Panel>
+      <PanelBody>
+        <div className="flex flex-col items-center justify-center gap-3 py-14 text-center">
+          <StatusDot status="critical" />
+          <p className="max-w-md text-sm text-text-primary">
+            {BLOCKED_REASON_LABEL[reason] ?? "The last trigger for this pull request was declined."}
+          </p>
+          {blockedAt != null && <p className="text-2xs text-text-secondary">Blocked {formatRelativeTime(blockedAt)}</p>}
+        </div>
       </PanelBody>
     </Panel>
   );

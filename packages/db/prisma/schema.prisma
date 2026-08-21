@@ -690,9 +690,24 @@ model Branch {
 
   previewkitEnvironment PreviewkitEnvironment?
 
+  // Last known reason a NEW trigger (previewkit deploy or PR analysis) was declined before it ever
+  // created a BranchSnapshot/PreviewkitEnvironment row - without this, a blocked PR is indistinguishable
+  // from one that was simply never triggered, since neither writes anything the UI can read. Cleared
+  // (both fields set back to null) the next time a trigger for this branch actually clears the gate,
+  // so a resolved block never lingers as a stale message. Last-known-state, not a history log - matches
+  // activeSnapshotId/pendingSnapshotId's single-slot style above.
+  lastBlockedReason BranchTriggerBlockReason? @map("last_blocked_reason")
+  lastBlockedAt     DateTime?                 @map("last_blocked_at")
+
   @@index([applicationId])
   @@index([organizationId])
   @@map("branch")
+}
+
+enum BranchTriggerBlockReason {
+  insufficient_credits
+
+  @@map("branch_trigger_block_reason")
 }
 
 enum PullRequestCacheState {

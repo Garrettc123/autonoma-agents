@@ -74,6 +74,8 @@ const SHARED_FIXTURES: TrpcFixtures = {
       updatedAt: FIXTURE_EPOCH,
       prNumber: PR_NUMBER,
       prTitle: PR_TITLE,
+      lastBlockedReason: undefined,
+      lastBlockedAt: undefined,
     },
     pipelineStatusByBranchId: { kind: "none" },
   },

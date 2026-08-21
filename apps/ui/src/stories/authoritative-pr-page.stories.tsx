@@ -317,6 +317,8 @@ const chromeFixtures: TrpcFixtures = {
       updatedAt: FIXTURE_EPOCH,
       prNumber: PR_NUMBER,
       prTitle: "Rework the checkout submit flow",
+      lastBlockedReason: undefined,
+      lastBlockedAt: undefined,
     },
     pipelineStatusByBranchId: { kind: "none" },
   },
@@ -780,6 +782,39 @@ export const AnalysisFailed: Story = {
           },
           snapshotHistory: [failedSnapshotHistoryItem, ...snapshotHistory.slice(1)],
           pipelineStatusByBranchId: { kind: "analysis_failed" },
+        }),
+      ),
+    },
+  },
+};
+
+/**
+ * A push refused before it created anything. Both the previewkit deploy gate and the PR analysis gate
+ * decline at the credit floor *before* writing a BranchSnapshot, so the snapshot history is empty -
+ * and without `lastBlockedReason` this page would be indistinguishable from a PR that was simply never
+ * triggered. That emptiness is exactly the condition the panel exists to explain.
+ */
+export const TriggerBlocked: Story = {
+  args: { path: OVERVIEW_PATH },
+  parameters: {
+    msw: {
+      handlers: appShellHandlers(
+        pageFixtures({
+          snapshotHistory: [],
+          // The PR loader prefetches these regardless of whether anything ever ran.
+          analysisIssues: [],
+          analysisReport: null,
+          detailByPr: {
+            id: BRANCH_ID,
+            name: BRANCH_NAME,
+            createdAt: FIXTURE_EPOCH,
+            updatedAt: FIXTURE_EPOCH,
+            prNumber: PR_NUMBER,
+            prTitle: "Rework the checkout submit flow",
+            lastBlockedReason: "insufficient_credits",
+            lastBlockedAt: new Date("2026-01-02T09:15:00.000Z"),
+          },
+          pipelineStatusByBranchId: { kind: "blocked", reason: "insufficient_credits" },
         }),
       ),
     },

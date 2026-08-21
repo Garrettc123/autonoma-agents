@@ -1403,6 +1403,74 @@ apiTestSuite({
             expect(harness.triggerWorkflow).toHaveBeenCalledTimes(1);
         });
 
+        test("blocking records lastBlockedReason on the branch, which clears once credits are restored", async ({
+            harness,
+            seedResult: { app },
+        }) => {
+            const service = gateTestService(harness);
+            harness.triggerWorkflow.mockClear();
+            await setCreditBalance(harness, harness.organizationId, 0);
+
+            await withBillingEnforced(harness, harness.organizationId, async () => {
+                await expect(
+                    service.startRunFromPullRequestWebhook("opened", harness.organizationId, pullRequestPayload(42)),
+                ).rejects.toThrow(InsufficientPreviewCreditsError);
+            });
+
+            const blockedBranch = await harness.db.branch.findFirstOrThrow({
+                where: { applicationId: app.id, prInfo: { prNumber: 42 } },
+                select: { id: true, lastBlockedReason: true, lastBlockedAt: true },
+            });
+            expect(blockedBranch.lastBlockedReason).toBe("insufficient_credits");
+            expect(blockedBranch.lastBlockedAt).not.toBeNull();
+
+            await setCreditBalance(harness, harness.organizationId, 1_000);
+
+            await withBillingEnforced(harness, harness.organizationId, async () => {
+                await service.startRunFromPullRequestWebhook("opened", harness.organizationId, pullRequestPayload(42));
+            });
+
+            const clearedBranch = await harness.db.branch.findUniqueOrThrow({
+                where: { id: blockedBranch.id },
+                select: { lastBlockedReason: true, lastBlockedAt: true },
+            });
+            expect(clearedBranch.lastBlockedReason).toBeNull();
+            expect(clearedBranch.lastBlockedAt).toBeNull();
+        });
+
+        test("a block recorded while enforcement was on clears once enforcement is switched off", async ({
+            harness,
+            seedResult: { app },
+        }) => {
+            const service = gateTestService(harness);
+            harness.triggerWorkflow.mockClear();
+            await setCreditBalance(harness, harness.organizationId, 0);
+
+            await withBillingEnforced(harness, harness.organizationId, async () => {
+                await expect(
+                    service.startRunFromPullRequestWebhook("opened", harness.organizationId, pullRequestPayload(44)),
+                ).rejects.toThrow(InsufficientPreviewCreditsError);
+            });
+
+            const blockedBranch = await harness.db.branch.findFirstOrThrow({
+                where: { applicationId: app.id, prInfo: { prNumber: 44 } },
+                select: { id: true, lastBlockedReason: true },
+            });
+            expect(blockedBranch.lastBlockedReason).toBe("insufficient_credits");
+
+            // Still at zero balance - only the switches went off. The deploy now runs, so the block it
+            // would have shown on the branch must not survive it.
+            await service.startRunFromPullRequestWebhook("opened", harness.organizationId, pullRequestPayload(44));
+            expect(harness.triggerWorkflow).toHaveBeenCalledTimes(1);
+
+            const clearedBranch = await harness.db.branch.findUniqueOrThrow({
+                where: { id: blockedBranch.id },
+                select: { lastBlockedReason: true, lastBlockedAt: true },
+            });
+            expect(clearedBranch.lastBlockedReason).toBeNull();
+            expect(clearedBranch.lastBlockedAt).toBeNull();
+        });
+
         test("deploy is not blocked when the global PREVIEWKIT_BILLING_ENABLED switch is off", async ({ harness }) => {
             const service = gateTestService(harness);
             harness.triggerWorkflow.mockClear();

@@ -1,8 +1,11 @@
+import { AnalysisEventStore } from "@autonoma/analysis";
 import type { PrismaClient } from "@autonoma/db";
 import { ApplicationArchitecture, TriggerSource } from "@autonoma/db";
-import { BadRequestError, NotFoundError } from "@autonoma/errors";
+import { BadRequestError, InsufficientAnalysisCreditsError, NotFoundError } from "@autonoma/errors";
 import { expect } from "vitest";
+import { DiffsTriggerService } from "../../src/diffs/diffs-trigger.service";
 import { apiTestSuite } from "../api-test";
+import type { APITestHarness } from "../harness";
 
 /** Open the run a workflow would have opened for this head, so the attach path has something to attach to. */
 async function openRunFor(db: PrismaClient, branchId: string, headSha: string): Promise<string> {
@@ -26,6 +29,34 @@ async function setActiveSnapshotHeadSha(db: PrismaClient, branchId: string, head
         where: { id: branch.activeSnapshotId },
         data: { headSha },
     });
+}
+
+/**
+ * A `DiffsTriggerService` whose credits gate reads the real balance in the DB. `harness.services.diffsTrigger`
+ * runs against `DisabledBillingService` (tests leave `STRIPE_ENABLED` off), which no-ops the gate entirely, so the
+ * blocked path is unreachable through it. Mirrors `checkFloorGate`'s `balance <= floor` rule; the gate's own
+ * arithmetic is covered in packages/billing - this exercises the trigger orchestration (block, record, clear).
+ */
+function gateTestService(harness: APITestHarness): DiffsTriggerService {
+    return new DiffsTriggerService(
+        harness.db,
+        harness.services.github,
+        {
+            checkAnalysisCreditsGate: async (organizationId: string) => {
+                const customer = await harness.db.billingCustomer.findUnique({
+                    where: { organizationId },
+                    select: { creditBalance: true, creditFloor: true },
+                });
+                const balance = customer?.creditBalance ?? 0;
+                const floor = customer?.creditFloor ?? 0;
+                return balance <= floor
+                    ? { allowed: false as const, reason: "out_of_credits" as const }
+                    : { allowed: true as const };
+            },
+        },
+        harness.startAnalysisRun,
+        new AnalysisEventStore(harness.db),
+    );
 }
 
 apiTestSuite({
@@ -189,6 +220,63 @@ apiTestSuite({
             expect(harness.startAnalysisRun).toHaveBeenCalledWith(
                 expect.objectContaining({ branchId: result.branchId, headSha: "head-sha-10" }),
             );
+        });
+
+        test("blocks a new run and records it on the branch when the org is out of credits, then clears it once credits are restored", async ({
+            harness,
+            seedResult: { app },
+        }) => {
+            const service = gateTestService(harness);
+            const fakeClient = harness.githubApp.defaultClient;
+            fakeClient.addPullRequest("org/my-repo", {
+                number: 91,
+                title: "Test PR #91",
+                headRef: "feature/branch-91",
+                baseSha: "initial-sha",
+                commits: ["head-sha-91"],
+            });
+
+            await harness.db.billingCustomer.upsert({
+                where: { organizationId: harness.organizationId },
+                create: { organizationId: harness.organizationId, creditBalance: 0, creditFloor: 0 },
+                update: { creditBalance: 0, creditFloor: 0 },
+            });
+
+            await expect(
+                service.triggerPrDiffs({
+                    source: "webhook",
+                    organizationId: harness.organizationId,
+                    repoId: 1001,
+                    prNumber: 91,
+                }),
+            ).rejects.toThrow(InsufficientAnalysisCreditsError);
+
+            const blockedBranch = await harness.db.branch.findFirstOrThrow({
+                where: { applicationId: app.id, prInfo: { prNumber: 91 } },
+                select: { id: true, lastBlockedReason: true, lastBlockedAt: true },
+            });
+            expect(blockedBranch.lastBlockedReason).toBe("insufficient_credits");
+            expect(blockedBranch.lastBlockedAt).not.toBeNull();
+
+            await harness.db.billingCustomer.update({
+                where: { organizationId: harness.organizationId },
+                data: { creditBalance: 1000 },
+            });
+
+            const result = await service.triggerPrDiffs({
+                source: "webhook",
+                organizationId: harness.organizationId,
+                repoId: 1001,
+                prNumber: 91,
+            });
+            expect(result.branchId).toBe(blockedBranch.id);
+
+            const clearedBranch = await harness.db.branch.findUniqueOrThrow({
+                where: { id: blockedBranch.id },
+                select: { lastBlockedReason: true, lastBlockedAt: true },
+            });
+            expect(clearedBranch.lastBlockedReason).toBeNull();
+            expect(clearedBranch.lastBlockedAt).toBeNull();
         });
 
         test("a PR run dual-writes exactly one pending event, and an attach writes none", async ({

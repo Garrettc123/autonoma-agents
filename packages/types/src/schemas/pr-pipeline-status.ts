@@ -17,6 +17,10 @@ import { checkpointPresentationSummarySchema } from "./checkpoint-summary";
  *                       dependency). Distinct from `build_failed` because it sends the reader somewhere
  *                       else entirely: a build failure is explained by the build logs, a rollout failure
  *                       by the app's own runtime logs.
+ * - `blocked`         - the branch's last trigger attempt was declined before it created anything
+ *                       (e.g. insufficient credits) - distinct from `none` so a blocked PR is never
+ *                       mistaken for one that was simply never triggered. `reason` is generic so a
+ *                       future block reason needs no new `kind`.
  * - `none`            - nothing to show yet.
  *
  * The backend derives this from SHA-equality between the preview environment's commit and the branch's
@@ -30,6 +34,7 @@ export const prPipelineStatusSchema = z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("analysis_failed") }),
     z.object({ kind: z.literal("build_failed") }),
     z.object({ kind: z.literal("deploy_failed") }),
+    z.object({ kind: z.literal("blocked"), reason: z.literal("insufficient_credits") }),
     z.object({ kind: z.literal("none") }),
 ]);
 export type PrPipelineStatus = z.infer<typeof prPipelineStatusSchema>;

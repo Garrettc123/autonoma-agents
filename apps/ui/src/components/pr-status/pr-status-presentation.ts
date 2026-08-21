@@ -46,6 +46,8 @@ export function prStatusPresentation(status: PrPipelineStatus): PrStatusPresenta
         // preview page, next to the logs that explain it.
         case "deploy_failed":
             return { tone: "critical", label: "Deploy failed" };
+        case "blocked":
+            return { tone: "critical", label: "Insufficient credits" };
         case "none":
             return undefined;
     }

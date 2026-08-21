@@ -1,5 +1,5 @@
 import type { AnalysisEventStore } from "@autonoma/analysis";
-import type { BillingService } from "@autonoma/billing";
+import { type BillingService, clearBranchTriggerBlock, recordBranchTriggerBlocked } from "@autonoma/billing";
 import type { PrismaClient } from "@autonoma/db";
 import { BadRequestError, InsufficientAnalysisCreditsError, InternalError, NotFoundError } from "@autonoma/errors";
 import { recordBranchDeployment } from "@autonoma/scenario";
@@ -108,11 +108,17 @@ export class DiffsTriggerService extends Service {
         repoId: number,
         prNumber: number,
         headSha: string,
+        branchId: string,
     ): Promise<void> {
         const gate = await this.billingService.checkAnalysisCreditsGate(organizationId);
-        if (gate.allowed) return;
+        if (gate.allowed) {
+            await clearBranchTriggerBlock(this.db, branchId);
+            return;
+        }
 
         this.logger.info("Blocking PR analysis: organization is out of credits", { organizationId, repoId, prNumber });
+
+        await recordBranchTriggerBlocked(this.db, branchId, "insufficient_credits");
 
         try {
             const repository = await this.githubInstallationService.getRepository(organizationId, repoId);
@@ -271,7 +277,7 @@ export class DiffsTriggerService extends Service {
             }
         }
 
-        await this.assertAnalysisCreditsAvailable(organizationId, repoId, prNumber, headSha);
+        await this.assertAnalysisCreditsAvailable(organizationId, repoId, prNumber, headSha, branch.id);
 
         await this.startRun({
             branchId: branch.id,

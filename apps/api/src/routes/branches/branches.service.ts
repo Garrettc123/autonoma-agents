@@ -924,6 +924,7 @@ export class BranchesService extends Service {
                     },
                 },
                 activeSnapshot: { select: { id: true, status: true, headSha: true } },
+                lastBlockedReason: true,
             },
             orderBy: PR_LIST_ORDER,
             skip: (effectivePage - 1) * BRANCH_PAGE_SIZE,
@@ -959,7 +960,7 @@ export class BranchesService extends Service {
         // Postgres, so this no-ops when the cache is fresh and never blocks the response.
         this.prCache.kickOff(applicationId, organizationId);
 
-        const items = branches.map(({ prInfo, activeSnapshot, ...branch }) => {
+        const items = branches.map(({ prInfo, activeSnapshot, lastBlockedReason, ...branch }) => {
             const checkpoint =
                 activeSnapshot != null
                     ? presentCheckpoint({
@@ -975,6 +976,7 @@ export class BranchesService extends Service {
                     activeSnapshot != null ? { headSha: activeSnapshot.headSha ?? undefined, summary } : undefined,
                 latestRun: latestRunByBranch.get(branch.id),
                 previewEnv: previewStateByPr.get(prInfo!.prNumber),
+                blockedReason: lastBlockedReason ?? undefined,
             });
 
             return {
@@ -1137,6 +1139,7 @@ export class BranchesService extends Service {
             select: {
                 prInfo: { select: { prNumber: true } },
                 activeSnapshot: { select: { id: true, status: true, headSha: true } },
+                lastBlockedReason: true,
             },
         });
         if (branch == null) throw new NotFoundError("Branch not found");
@@ -1170,6 +1173,7 @@ export class BranchesService extends Service {
             activeSnapshot: active != null ? { headSha: active.headSha ?? undefined, summary } : undefined,
             latestRun: latestRunByBranch.get(branchId),
             previewEnv: previewStateByPr.get(prNumber),
+            blockedReason: branch.lastBlockedReason ?? undefined,
         });
     }
 
@@ -1330,14 +1334,24 @@ export class BranchesService extends Service {
                 // Cached GitHub PR metadata. The detail page falls back to this title when the live
                 // GitHub fetch is unavailable, matching the PR list (which always reads from cache).
                 prInfo: { select: { prNumber: true, prTitle: true } },
+                // Surfaced so the overview tab can tell "blocked" apart from "never triggered" when it
+                // has no snapshots yet - see `computePrPipelineStatus`'s `blocked` kind for the PR list.
+                lastBlockedReason: true,
+                lastBlockedAt: true,
             },
         });
 
         if (branch == null) throw new NotFoundError("Pull request not found");
         if (branch.prInfo == null) throw new InternalError("Branch has no PR info");
 
-        const { prInfo, ...rest } = branch;
-        return { ...rest, prNumber: prInfo.prNumber, prTitle: prInfo.prTitle ?? undefined };
+        const { prInfo, lastBlockedReason, lastBlockedAt, ...rest } = branch;
+        return {
+            ...rest,
+            prNumber: prInfo.prNumber,
+            prTitle: prInfo.prTitle ?? undefined,
+            lastBlockedReason: lastBlockedReason ?? undefined,
+            lastBlockedAt: lastBlockedAt ?? undefined,
+        };
     }
 
     /**

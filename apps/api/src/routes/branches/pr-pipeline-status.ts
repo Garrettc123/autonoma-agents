@@ -1,3 +1,4 @@
+import type { BranchTriggerBlockReason } from "@autonoma/db";
 import type { CheckpointPresentationSummary, PrPipelineStatus } from "@autonoma/types";
 
 // Raw `previewkit_environment.status` values that mean the preview is still coming up (not yet
@@ -41,6 +42,13 @@ interface PrPipelineStatusInput {
     latestRun?: LatestRunState;
     /** The branch's most-recent live preview environment (resolved by repo + PR), if any. */
     previewEnv?: PreviewEnvState;
+    /**
+     * `Branch.lastBlockedReason` - set when the last trigger attempt for this branch was declined
+     * before it created anything (e.g. insufficient credits), cleared the next time a trigger clears
+     * the gate. Only ever surfaces as the deepest fallback (see below): any higher-precedence branch
+     * below means a real trigger got through since the block, which is exactly when this gets cleared.
+     */
+    blockedReason?: BranchTriggerBlockReason;
 }
 
 /**
@@ -55,12 +63,14 @@ interface PrPipelineStatusInput {
  *    (`build_failed` / `deploy_failed` / `building` / `pending_checks`). A failure on a commit a newer
  *    deploy has already replaced is stale and falls through to here rather than staying sticky.
  * 4. The completed analysis is current -> `checkpoint`.
- * 5. Otherwise `none`.
+ * 5. The branch's last trigger was blocked and nothing since has cleared it -> `blocked`.
+ * 6. Otherwise `none`.
  */
 export function computePrPipelineStatus({
     activeSnapshot,
     latestRun,
     previewEnv,
+    blockedReason,
 }: PrPipelineStatusInput): PrPipelineStatus {
     if (latestRun?.status === "processing") return { kind: "analyzing" };
 
@@ -89,6 +99,7 @@ export function computePrPipelineStatus({
         return { kind: "pending_checks" };
     }
 
+    if (blockedReason != null) return { kind: "blocked", reason: blockedReason };
     return { kind: "none" };
 }
 

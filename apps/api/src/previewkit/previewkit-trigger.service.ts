@@ -1,5 +1,5 @@
 import type { AnalysisEventStore } from "@autonoma/analysis";
-import type { BillingService } from "@autonoma/billing";
+import { type BillingService, clearBranchTriggerBlock, recordBranchTriggerBlocked } from "@autonoma/billing";
 import type {
     OnboardingPreviewEnvironmentMode,
     OnboardingStep,
@@ -170,6 +170,7 @@ export class PreviewkitTriggerService extends Service {
             request.repoFullName,
             request.prNumber,
             request.headSha,
+            request.branchId,
         );
 
         if (request.branchId == null) {
@@ -227,6 +228,7 @@ export class PreviewkitTriggerService extends Service {
             request.repoFullName,
             request.prNumber,
             request.headSha,
+            request.branchId,
         );
 
         await this.startPreviewBuild({
@@ -399,33 +401,37 @@ export class PreviewkitTriggerService extends Service {
     }
 
     /**
-     * Declines a new run (never teardown) once the org is at/below its credit floor. Dual-switched -
-     * global and per-org, either off is a no-op - so enforcement rolls out per org. Comments on the
+     * Declines a new run (never teardown) once the org is at/below its credit floor. Comments on the
      * PR (the shared, dedup'd "out of credits" notice - also used by the PR-analysis gate) before
-     * throwing, so every caller explains itself.
+     * throwing, so every caller explains itself. Every path that lets a run through clears the
+     * branch's recorded block, including the unenforced one: a block written while enforcement was on
+     * would otherwise outlive it and keep showing on a branch that now deploys fine.
      */
     private async assertDeployCreditsAvailable(
         organizationId: string,
         repoFullName: string,
         prNumber: number,
         headSha: string,
+        branchId: string | undefined,
     ): Promise<void> {
-        if (!env.PREVIEWKIT_BILLING_ENABLED) return;
-
-        const settings = await this.db.organizationSettings.findUnique({
-            where: { organizationId },
-            select: { previewkitBillingEnabled: true },
-        });
-        if (settings?.previewkitBillingEnabled !== true) return;
+        if (!(await this.isDeployBillingEnforced(organizationId))) {
+            await this.clearTriggerBlock(branchId);
+            return;
+        }
 
         const gate = await this.billingService.checkPreviewDeployCreditsGate(organizationId);
-        if (gate.allowed) return;
+        if (gate.allowed) {
+            await this.clearTriggerBlock(branchId);
+            return;
+        }
 
         this.logger.info("Blocking preview deploy: organization is out of credits", {
             organizationId,
             repo: repoFullName,
             pr: prNumber,
         });
+
+        if (branchId != null) await recordBranchTriggerBlocked(this.db, branchId, "insufficient_credits");
 
         await postInsufficientCreditsComment(
             this.githubInstallationService,
@@ -444,6 +450,23 @@ export class PreviewkitTriggerService extends Service {
         });
 
         throw new InsufficientPreviewCreditsError();
+    }
+
+    /** Dual-switched - global env plus a per-org opt-in - so enforcement rolls out one org at a time. */
+    private async isDeployBillingEnforced(organizationId: string): Promise<boolean> {
+        if (!env.PREVIEWKIT_BILLING_ENABLED) return false;
+
+        const settings = await this.db.organizationSettings.findUnique({
+            where: { organizationId },
+            select: { previewkitBillingEnabled: true },
+        });
+        return settings?.previewkitBillingEnabled === true;
+    }
+
+    /** An unlinked deploy has no branch to have recorded a block on, so there is nothing to clear. */
+    private async clearTriggerBlock(branchId: string | undefined): Promise<void> {
+        if (branchId == null) return;
+        await clearBranchTriggerBlock(this.db, branchId);
     }
 
     /** Defaults to false, so drafts are skipped unless an org opts in. */
@@ -1009,6 +1032,7 @@ export class PreviewkitTriggerService extends Service {
                     githubRepositoryId: true,
                     status: true,
                     resolvedConfig: true,
+                    branchId: true,
                     appInstances: { select: { appName: true } },
                 },
             }),
@@ -1031,6 +1055,7 @@ export class PreviewkitTriggerService extends Service {
             repoFullName,
             prNumber,
             environment.headSha,
+            environment.branchId ?? undefined,
         );
 
         await this.triggerRedeployApp({

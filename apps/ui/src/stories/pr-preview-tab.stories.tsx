@@ -301,6 +301,8 @@ const SHARED_FIXTURES: TrpcFixtures = {
       updatedAt: FIXTURE_EPOCH,
       prNumber: PR_NUMBER,
       prTitle: "Make the search icon clickable for the search widget",
+      lastBlockedReason: undefined,
+      lastBlockedAt: undefined,
     },
     pipelineStatusByBranchId: { kind: "none" },
   },
