@@ -9,6 +9,9 @@ It writes `analysis_job`, `analysis_finding`, `analysis_classification`, `analys
 and `analysis_report`, and never touches an assignment (the suite is `@autonoma/test-suite`'s aggregate; the two
 write sets are disjoint).
 
+It also owns the **analysis inbox** (`analysis_event`): the transactional queue producers enqueue occurrences into
+and a run drains. `AnalysisEventStore` is its sole reader and writer - see the interface below.
+
 ## Interface
 
 ```ts
@@ -45,6 +48,14 @@ await store.priorRuns({ applicationId, testSlug, currentSnapshotId });
 // One finding with its full classification history (the checkpoint drawer's read; addressed by finding
 // id because the caller starts from a URL param and learns the snapshot from the row):
 await store.findingDetail(findingId, { organizationId });
+
+// The analysis inbox - producers enqueue, a run claims, in-transaction with opening its snapshot:
+const events = new AnalysisEventStore(db);
+await events.enqueue({ branchId, organizationId, source: "webhook", event: { type: "commits_pushed", payload: { headSha } } });
+const latest = await events.peekLatestPending(branchId);   // newest pending, for the workflow's pre-open steps
+await events.claimPending(tx, branchId, snapshotId);        // steals from superseded/cancelled/failed claims
+await events.markHandledByActiveSnapshot(branchId);         // the already-analyzed path (no new snapshot opens)
+await events.listForSnapshot(snapshotId);                   // what this run analyzed
 ```
 
 ## Invariants the module holds
@@ -71,6 +82,11 @@ await store.findingDetail(findingId, { organizationId });
   (`resolvedByFindingId`, `resolutionNote`), so which passing test closed an issue stays auditable.
 - **Every queued test is covered**: settlement refuses to write a report while a test that queued a run has
   neither a verdict nor a recorded containment.
+- **The inbox has no status column**: whether an `analysis_event` is handled is derived - unclaimed, or claimed by
+  a snapshot whose run was thrown away (`superseded`/`cancelled`/`failed`), is pending; claimed by a live
+  (`processing`/`active`) snapshot is handled. That predicate lives in exactly one place (`AnalysisEventStore`), so a
+  terminated run's stranded claim is stolen by its successor with no release step and no second source of truth to
+  keep in sync.
 
 ## Testing
 

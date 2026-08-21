@@ -1,7 +1,8 @@
-import { type PrismaClient, createClient } from "@autonoma/db";
+import { type PrismaClient, type SnapshotStatus, createClient } from "@autonoma/db";
 import { createTestDatabase, type IntegrationHarness, integrationTestSuite } from "@autonoma/integration-test";
 import { analysisVerdictSchema } from "@autonoma/types";
 import type { TestAPI } from "vitest";
+import { AnalysisEventStore } from "../src/analysis-event-store";
 import { AnalysisStore } from "../src/analysis-store";
 import type { IssueReconciliation, ReportSettlement } from "../src/settle-report";
 
@@ -18,12 +19,14 @@ const SEED_RESOLVED_AT = new Date("2026-01-01T00:00:00.000Z");
 export class AnalysisHarness implements IntegrationHarness {
     public readonly db: PrismaClient;
     public readonly store: AnalysisStore;
+    public readonly eventStore: AnalysisEventStore;
 
     private counter = 0;
 
     constructor(db: PrismaClient) {
         this.db = db;
         this.store = new AnalysisStore(db);
+        this.eventStore = new AnalysisEventStore(db);
     }
 
     static async create(): Promise<AnalysisHarness> {
@@ -66,6 +69,18 @@ export class AnalysisHarness implements IntegrationHarness {
         });
         await this.store.open({ snapshotId: snapshot.id, organizationId });
         return snapshot.id;
+    }
+
+    async addSnapshotWithStatus(branchId: string, status: SnapshotStatus): Promise<string> {
+        const snapshot = await this.db.branchSnapshot.create({
+            data: { branchId, source: "GITHUB_PUSH", status },
+            select: { id: true },
+        });
+        return snapshot.id;
+    }
+
+    async setActiveSnapshot(branchId: string, snapshotId: string): Promise<void> {
+        await this.db.branch.update({ where: { id: branchId }, data: { activeSnapshotId: snapshotId } });
     }
 
     /** The test case / plan / generation chain a classification points at; the slug names the test. */

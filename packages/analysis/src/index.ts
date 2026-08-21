@@ -1,4 +1,5 @@
 export { AnalysisStore, type OpenAnalysisInput } from "./analysis-store";
+export { AnalysisEventStore, type AnalysisEventRecord, type EnqueueAnalysisEventInput } from "./analysis-event-store";
 export {
     Analysis,
     type RecordClassificationInput,

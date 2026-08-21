@@ -7,6 +7,7 @@ export const TestStatusSchema = z.enum(["pending", "running", "passed", "failed"
 export type TestStatus = z.infer<typeof TestStatusSchema>;
 
 export * from "./analysis";
+export * from "./analysis-event";
 export * from "./scenarios";
 export * from "./onboarding";
 export * from "./onboarding-step";

@@ -162,6 +162,7 @@ model Organization {
   analysisClassifications AnalysisClassification[]
   analysisIssues          AnalysisIssue[]
   analysisIssueVersions   AnalysisIssueVersion[]
+  analysisEvents          AnalysisEvent[]
   vercelInstallations     VercelInstallation[]
 
   @@map("organization")
@@ -674,6 +675,7 @@ model Branch {
   snapshots         BranchSnapshot[]
   deployments       BranchDeployment[]
   analysisIssues    AnalysisIssue[]
+  analysisEvents    AnalysisEvent[]
 
   createdAt      DateTime     @default(now()) @map("created_at")
   updatedAt      DateTime     @updatedAt @map("updated_at")
@@ -744,6 +746,27 @@ enum TriggerSource {
   @@map("trigger_source")
 }
 
+enum AnalysisEventType {
+  commits_pushed
+
+  @@map("analysis_event_type")
+}
+
+enum AnalysisEventSource {
+  webhook
+  label
+  comment
+  ui
+  vercel
+  ci
+  onboarding
+  mcp
+  admin
+  http
+
+  @@map("analysis_event_source")
+}
+
 enum SnapshotStatus {
   processing
   active
@@ -796,9 +819,45 @@ model BranchSnapshot {
   investigationAiCosts  AiCostRecord[]         @relation("InvestigationAiCost")
   vercelDeployments     VercelDeployment[]
   analysisIssueVersions AnalysisIssueVersion[]
+  claimedAnalysisEvents AnalysisEvent[]
 
   @@index([branchId, createdAt])
   @@map("branch_snapshot")
+}
+
+/// The analysis inbox: one pending occurrence a run drains. Producers insert a row (in-transaction with their
+/// other writes) then send a contentless poke; the workflow reads rows, never the poke payload. There is
+/// deliberately no status/handled_at column - handled-ness is derived from `claimedBySnapshotId` plus the claiming
+/// snapshot's status, behind one encapsulated query in `AnalysisEventStore`. Rows are kept indefinitely (audit
+/// trail + future event timeline); only branch/org deletion cascades them away.
+model AnalysisEvent {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now()) @map("created_at")
+
+  branchId String @map("branch_id")
+  branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  type   AnalysisEventType
+  source AnalysisEventSource
+
+  /// The event's kind-specific data, validated against the `analysis_event` Zod union at the store boundary.
+  /// ![AnalysisEventPayload]
+  payload Json
+
+  /// The snapshot whose run claimed this event, stamped in the same transaction that opens the snapshot; null
+  /// while pending. A claim is stealable: an event claimed by a snapshot that ended `superseded`/`cancelled`/
+  /// `failed` returns to pending for a successor, since a terminated run runs no cleanup code. Only
+  /// `AnalysisEventStore` reads or writes this column.
+  claimedBySnapshotId String?         @map("claimed_by_snapshot_id")
+  claimedBySnapshot   BranchSnapshot? @relation(fields: [claimedBySnapshotId], references: [id], onDelete: SetNull)
+
+  @@index([branchId, createdAt])
+  @@index([organizationId])
+  @@index([claimedBySnapshotId])
+  @@map("analysis_event")
 }
 
 model TestCaseAssignment {

@@ -3,6 +3,7 @@ import { execSync } from "node:child_process";
 import path from "node:path";
 import type {
     AgentLogEntrySchema,
+    analysisEventBodySchema,
     analysisFlowSchema,
     Blueprint as PreviewkitConfigBlueprint,
     Build as PreviewkitBuild,
@@ -221,6 +222,9 @@ declare global {
          * classifications is a contained investigation.
          */
         export type AnalysisFindingFailure = { kind: "investigator_crashed"; message: string };
+
+        /** The kind-specific payload on `AnalysisEvent.payload`, validated against the event Zod union at the store boundary. */
+        export type AnalysisEventPayload = z.infer<typeof analysisEventBodySchema>["payload"];
 
         /** The agent activity stream on `OnboardingState.agentLogs` (plain lines + tool calls). */
         export type AgentLogs = z.infer<typeof AgentLogEntrySchema>[];
