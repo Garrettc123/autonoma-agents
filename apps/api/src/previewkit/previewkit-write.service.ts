@@ -228,7 +228,7 @@ export class PreviewkitWriteService {
             };
         }
 
-        await this.trigger.startRunForRedeploy({ repoFullName, prNumber }, { organizationId });
+        await this.trigger.startRunForRedeploy({ repoFullName, prNumber }, { organizationId }, "mcp");
         this.logger.info("Preview config document applied", { applicationId });
         return { saved: true, applied: true, apps, services };
     }

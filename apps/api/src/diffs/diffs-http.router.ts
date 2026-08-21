@@ -77,6 +77,7 @@ export const diffsHttpRouter = new Hono<{ Variables: UserAuthVariables }>()
                 webhookUrl: body.webhook_url,
                 webhookHeaders: body.webhook_headers,
                 environment: body.environment,
+                source: "ci",
             });
 
             return ctx.json({ ok: true, ...result });

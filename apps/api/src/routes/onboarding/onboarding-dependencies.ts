@@ -1,5 +1,5 @@
 import type { EncryptionHelper } from "@autonoma/scenario";
-import type { SecretItem, SecretSummary } from "@autonoma/types";
+import type { AnalysisEventSource, SecretItem, SecretSummary } from "@autonoma/types";
 
 export interface PreviewkitSecretsUpsertResult {
     created: boolean;
@@ -84,6 +84,7 @@ export interface OnboardingDiffsTrigger {
         repoId: number;
         url: string;
         webhookUrl?: string;
+        source: AnalysisEventSource;
     }): Promise<{ snapshotId?: string; skipped?: boolean }>;
     triggerPrDiffs(params: {
         organizationId: string;
@@ -91,6 +92,7 @@ export interface OnboardingDiffsTrigger {
         prNumber: number;
         url: string;
         webhookUrl?: string;
+        source: AnalysisEventSource;
     }): Promise<{ snapshotId?: string; skipped?: boolean }>;
 }
 

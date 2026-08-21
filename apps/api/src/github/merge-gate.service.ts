@@ -25,7 +25,7 @@ import {
 } from "@autonoma/github/check";
 import { payloadBuilder, renderMarkdown } from "@autonoma/github/comment";
 import { type Logger, logger } from "@autonoma/logger";
-import { ANALYSIS_VERDICT, hasGoneLive } from "@autonoma/types";
+import { type AnalysisEventSource, ANALYSIS_VERDICT, hasGoneLive } from "@autonoma/types";
 import { z } from "zod";
 import type { DiffsTriggerService } from "../diffs/diffs-trigger.service";
 import { readActivationTriggerConfig } from "./activation-trigger-config";
@@ -33,6 +33,25 @@ import type { FalsePositiveCandidateService } from "./false-positive-candidate.s
 import type { MergeGateSlackNotifier } from "./merge-gate-slack-notifier";
 
 const CLIENT_BUG = ANALYSIS_VERDICT.client_bug;
+
+/**
+ * `ready_for_review` never reaches a merge-gate request - the worker stamps it on the preview-ready auto-run - so
+ * it maps to the webhook path that carries it.
+ */
+function analysisEventSourceForRunSource(source: AnalysisRunSource): AnalysisEventSource {
+    switch (source) {
+        case ANALYSIS_RUN_SOURCE.comment:
+            return "comment";
+        case ANALYSIS_RUN_SOURCE.label:
+            return "label";
+        case ANALYSIS_RUN_SOURCE.ui:
+            return "ui";
+        case ANALYSIS_RUN_SOURCE.mcp:
+            return "mcp";
+        case ANALYSIS_RUN_SOURCE.ready_for_review:
+            return "webhook";
+    }
+}
 
 /** The un-requested check a PR opens with under activation: completed + `neutral`, so a required check never wedges. */
 const UNREQUESTED_CHECK_TITLE = "No analysis requested";
@@ -497,6 +516,7 @@ export class MergeGateService {
                 repoId: params.githubRepositoryId,
                 prNumber: params.prNumber,
                 requested: true,
+                source: analysisEventSourceForRunSource(params.source),
             });
             // `requested: true` bypasses the activation gate, so a skip here is either an already-analyzed head or a
             // PR that does not target the trunk (the base gate is absolute - it refuses explicit requests too).

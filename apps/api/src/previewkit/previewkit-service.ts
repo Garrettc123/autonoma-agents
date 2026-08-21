@@ -1,3 +1,4 @@
+import { AnalysisEventStore } from "@autonoma/analysis";
 import { createBillingService } from "@autonoma/billing";
 import { db } from "@autonoma/db";
 import { env } from "../env";
@@ -23,4 +24,5 @@ export const previewkitTriggerService = new PreviewkitTriggerService(
     triggers.startPreviewBuild,
     triggers.teardown,
     triggers.redeployApp,
+    new AnalysisEventStore(db),
 );

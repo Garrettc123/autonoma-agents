@@ -260,6 +260,18 @@ default and bounded by the global `MERGE_GATE_ENABLED` kill switch; enabled per 
   the resolving push (via `resolveFixingPushAuthors`, mapped from the issue's `resolvedAt`), riding their logins on
   `bug.fixed`.
 
+### Analysis event inbox (dual-write)
+
+Every path that starts an analysis run first persists an `AnalysisEvent` (the `@autonoma/analysis` inbox), then
+starts the workflow exactly as before. The single seam is `enqueueAndStartAnalysisRun`
+(`src/analysis/enqueue-and-start-analysis-run.ts`), which both `DiffsTriggerService.startRun` and
+`PreviewkitTriggerService.startRun` route through - so future work can make the workflow drain the inbox, and
+reclassify the credits/activation gates, in one place. Each producer threads its `source`
+(`webhook`/`label`/`comment`/`ui`/`vercel`/`ci`/`onboarding`/`mcp`/`admin`/`http`) down to the seam; the
+merge-gate maps its activation `ANALYSIS_RUN_SOURCE` onto that enum. Gates all sit before the seam, so a gated
+trigger writes no event - byte-equivalent with the pre-inbox behavior. Nothing reads events yet; this is a
+dual-write that validates the write path against production traffic.
+
 ### Explicit deploy requests are not refusable
 
 `PreviewkitTriggerService` has two kinds of entry point, and they answer to different authorities.

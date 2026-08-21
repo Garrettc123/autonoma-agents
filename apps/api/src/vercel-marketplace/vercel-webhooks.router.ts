@@ -506,6 +506,7 @@ async function handleCheckRunStart(payload: CheckRunStartPayload): Promise<void>
             url: deploymentUrl,
             webhookUrl: buildSdkUrl(deploymentUrl),
             webhookHeaders,
+            source: "vercel",
         });
     } catch (error) {
         logger.error("Failed to trigger diffs for Vercel deployment", { deploymentId: deployment.id, error });

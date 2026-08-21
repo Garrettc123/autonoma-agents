@@ -1150,6 +1150,7 @@ export class OnboardingManager {
                     prNumber: params.prNumber,
                     url: params.previewUrl,
                     webhookUrl,
+                    source: "onboarding",
                 });
             } else {
                 await diffsTrigger.triggerMainDiffs({
@@ -1157,6 +1158,7 @@ export class OnboardingManager {
                     repoId: params.repoId,
                     url: params.previewUrl,
                     webhookUrl,
+                    source: "onboarding",
                 });
             }
             this.logger.info("Triggered diff analysis from deployment signal", {

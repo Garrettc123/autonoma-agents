@@ -1430,6 +1430,7 @@ integrationTestSuite({
                 prNumber: 42,
                 url: "https://pr-42.example.com",
                 webhookUrl: "https://pr-42.example.com/api/autonoma",
+                source: "onboarding",
             });
             expect(diffsTrigger.triggerMainDiffs).not.toHaveBeenCalled();
             const state = await manager.getState(appId);
@@ -1466,6 +1467,7 @@ integrationTestSuite({
                 repoId: 91_132,
                 url: "https://main-preview.example.com",
                 webhookUrl: "https://main-preview.example.com/api/autonoma",
+                source: "onboarding",
             });
             expect(diffsTrigger.triggerPrDiffs).not.toHaveBeenCalled();
             const state = await manager.getState(appId);

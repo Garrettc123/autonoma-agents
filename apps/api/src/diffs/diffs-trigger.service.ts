@@ -1,10 +1,12 @@
+import type { AnalysisEventStore } from "@autonoma/analysis";
 import type { BillingService } from "@autonoma/billing";
 import type { PrismaClient } from "@autonoma/db";
 import { BadRequestError, InsufficientAnalysisCreditsError, InternalError, NotFoundError } from "@autonoma/errors";
 import { recordBranchDeployment } from "@autonoma/scenario";
 import { TestSuiteStore } from "@autonoma/test-suite";
-import { hasGoneLive } from "@autonoma/types";
+import { type AnalysisEventSource, hasGoneLive } from "@autonoma/types";
 import type { AnalysisRunWorkflowInput } from "@autonoma/workflow";
+import { enqueueAndStartAnalysisRun } from "../analysis/enqueue-and-start-analysis-run";
 import { isBaseTrunkGateEnforced } from "../github/base-trunk-gate";
 import { sameGitRef } from "../github/git-ref";
 import type { GitHubInstallationService } from "../github/github-installation.service";
@@ -15,6 +17,7 @@ import { Service } from "../routes/service";
 interface BaseTriggerDiffsParams {
     organizationId: string;
     repoId: number;
+    source: AnalysisEventSource;
     /** Set when the CALLER knows the URL - a customer-deployed preview. One Autonoma hosts records its own. */
     url?: string;
     webhookUrl?: string;
@@ -87,6 +90,7 @@ export class DiffsTriggerService extends Service {
         private readonly billingService: Pick<BillingService, "checkAnalysisCreditsGate">,
         /** Injected so a test can observe what a trigger asked for without standing up Temporal. */
         private readonly startAnalysisRun: (input: AnalysisRunWorkflowInput) => Promise<unknown>,
+        private readonly events: AnalysisEventStore,
     ) {
         super();
     }
@@ -160,6 +164,7 @@ export class DiffsTriggerService extends Service {
         webhookUrl,
         webhookHeaders,
         requested,
+        source,
     }: TriggerPrDiffsParams): Promise<TriggerDiffsResult> {
         this.logger.info("Triggering PR diffs analysis", { organizationId, repoId, prNumber, extra: { requested } });
 
@@ -271,6 +276,7 @@ export class DiffsTriggerService extends Service {
         await this.startRun({
             branchId: branch.id,
             organizationId,
+            source,
             headSha,
             baseSha,
             url,
@@ -293,6 +299,7 @@ export class DiffsTriggerService extends Service {
         url,
         webhookUrl,
         webhookHeaders,
+        source,
     }: TriggerMainDiffsParams): Promise<TriggerDiffsResult> {
         this.logger.info("Triggering main branch diffs analysis", { organizationId, repoId });
 
@@ -339,6 +346,7 @@ export class DiffsTriggerService extends Service {
         await this.startRun({
             branchId,
             organizationId,
+            source,
             headSha,
             url,
             webhookUrl,
@@ -357,6 +365,7 @@ export class DiffsTriggerService extends Service {
     private async startRun(params: {
         branchId: string;
         organizationId: string;
+        source: AnalysisEventSource;
         headSha: string;
         /** The PR base, for a branch with no active snapshot yet. Main always has one, so it passes none. */
         baseSha?: string;
@@ -364,7 +373,7 @@ export class DiffsTriggerService extends Service {
         webhookUrl?: string;
         webhookHeaders?: Record<string, string>;
     }): Promise<void> {
-        const { branchId, organizationId, headSha, baseSha, url, webhookUrl, webhookHeaders } = params;
+        const { branchId, organizationId, source, headSha, baseSha, url, webhookUrl, webhookHeaders } = params;
 
         if (url != null) {
             await recordBranchDeployment({
@@ -376,7 +385,10 @@ export class DiffsTriggerService extends Service {
                 webhookHeaders,
             });
         }
-        await this.startAnalysisRun({ branchId, headSha, baseSha });
+        await enqueueAndStartAnalysisRun(
+            { events: this.events, startAnalysisRun: this.startAnalysisRun },
+            { branchId, organizationId, source, headSha, baseSha },
+        );
     }
 
     /**

@@ -38,7 +38,7 @@ export const adminRouter = router({
     redeployPreviewkitEnvironment: internalProcedure
         .input(z.object({ environmentId: z.string().min(1) }))
         .mutation(({ ctx: { services }, input }) =>
-            services.previewkitTrigger.startRunForRedeploy({ environmentId: input.environmentId }),
+            services.previewkitTrigger.startRunForRedeploy({ environmentId: input.environmentId }, {}, "admin"),
         ),
     /**
      * Redeploys a SINGLE app within a preview environment. `mode: "rebuild"`
@@ -72,7 +72,7 @@ export const adminRouter = router({
     deployPreviewkitMainBranch: internalProcedure
         .input(z.object({ applicationId: z.string().min(1) }))
         .mutation(({ ctx: { services }, input }) =>
-            services.previewkitTrigger.startMainBranchRun(input.applicationId, undefined),
+            services.previewkitTrigger.startMainBranchRun(input.applicationId, undefined, "admin"),
         ),
     /**
      * ONE-OFF REMEDIATION - delete these two procedures once the sweep has run.

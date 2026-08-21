@@ -304,7 +304,7 @@ export const previewkitHttpRouter = new Hono<{ Variables: UserAuthVariables }>()
 
         const { repoFullName, prNumber } = parsed.data;
         try {
-            await previewkitTriggerService.startRun({ ...parsed.data, organizationId });
+            await previewkitTriggerService.startRun({ ...parsed.data, organizationId, source: "http" });
         } catch (error) {
             return lifecycleErrorResponse(c, error, { repoFullName, prNumber });
         }
@@ -322,7 +322,11 @@ export const previewkitHttpRouter = new Hono<{ Variables: UserAuthVariables }>()
     .post("/applications/:applicationId/0", requireAuth, async (c) => {
         const applicationId = c.req.param("applicationId");
         try {
-            const result = await previewkitTriggerService.startMainBranchRun(applicationId, c.var.user.organizationId);
+            const result = await previewkitTriggerService.startMainBranchRun(
+                applicationId,
+                c.var.user.organizationId,
+                "http",
+            );
             return c.json(
                 {
                     accepted: true,
@@ -370,6 +374,7 @@ export const previewkitHttpRouter = new Hono<{ Variables: UserAuthVariables }>()
             await previewkitTriggerService.startRunForRedeploy(
                 { repoFullName, prNumber: pr },
                 { organizationId: c.var.user.organizationId },
+                "http",
             );
         } catch (error) {
             return lifecycleErrorResponse(c, error, { repoFullName, prNumber: pr });

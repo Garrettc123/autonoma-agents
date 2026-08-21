@@ -1,3 +1,4 @@
+import { AnalysisEventStore } from "@autonoma/analysis";
 import { analytics } from "@autonoma/analytics";
 import { createBillingService, type BillingService } from "@autonoma/billing";
 import type { PrismaClient } from "@autonoma/db";
@@ -161,6 +162,7 @@ export function buildServices({
     const repoReader = new RepoReader(conn, githubApp);
     const repoIntrospectionService = new RepoIntrospectionService(repoReader);
     const applicationsService = new ApplicationsService(conn, encryptionHelper, env.FALLBACK_DEFAULT_BRANCH);
+    const analysisEvents = new AnalysisEventStore(conn);
     const previewkitTrigger = new PreviewkitTriggerService(
         conn,
         githubService,
@@ -169,17 +171,33 @@ export function buildServices({
         startPreviewBuild,
         triggerPreviewTeardown,
         triggerPreviewRedeployApp,
+        analysisEvents,
     );
-    const diffsTriggerService = new DiffsTriggerService(conn, githubService, billingService, startAnalysisRun);
+    const diffsTriggerService = new DiffsTriggerService(
+        conn,
+        githubService,
+        billingService,
+        startAnalysisRun,
+        analysisEvents,
+    );
     const onboardingOptions = {
         previewkitClient: {
             deployApplicationMain: (applicationId: string, organizationId: string) =>
-                previewkitTrigger.startMainBranchRun(applicationId, organizationId),
+                previewkitTrigger.startMainBranchRun(applicationId, organizationId, "onboarding"),
             redeploy: async (repoFullName: string, prNumber: number, organizationId: string) => {
-                await previewkitTrigger.startRunForRedeploy({ repoFullName, prNumber }, { organizationId });
+                await previewkitTrigger.startRunForRedeploy(
+                    { repoFullName, prNumber },
+                    { organizationId },
+                    "onboarding",
+                );
             },
             startRunForPullRequest: async (organizationId: string, githubRepositoryId: number, prNumber: number) => {
-                await previewkitTrigger.startRunForPullRequest(organizationId, githubRepositoryId, prNumber);
+                await previewkitTrigger.startRunForPullRequest(
+                    organizationId,
+                    githubRepositoryId,
+                    prNumber,
+                    "onboarding",
+                );
             },
         },
         previewkitSecretsService,

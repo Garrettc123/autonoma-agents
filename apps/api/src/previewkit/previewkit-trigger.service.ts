@@ -1,3 +1,4 @@
+import type { AnalysisEventStore } from "@autonoma/analysis";
 import type { BillingService } from "@autonoma/billing";
 import type {
     OnboardingPreviewEnvironmentMode,
@@ -9,6 +10,7 @@ import type {
 import { ConflictError, InsufficientPreviewCreditsError, NotFoundError } from "@autonoma/errors";
 import { autonomaHostsPreviews } from "@autonoma/scenario";
 import {
+    type AnalysisEventSource,
     hasGoneLive,
     type PreviewRedeployAppMode,
     type PreviewTeardownTarget,
@@ -16,6 +18,7 @@ import {
 } from "@autonoma/types";
 import type { AnalysisRunWorkflowInput, PreviewBuildWorkflowInput } from "@autonoma/workflow";
 import { z } from "zod";
+import { enqueueAndStartAnalysisRun } from "../analysis/enqueue-and-start-analysis-run";
 import { env } from "../env";
 import { applicationBranchRefs } from "../github/application-branch-refs";
 import { isBaseTrunkGateEnforced } from "../github/base-trunk-gate";
@@ -36,6 +39,8 @@ export interface PreviewkitRunRequest {
     githubRepositoryId: number;
     headSha: string;
     headRef: string;
+    /** Which producer path this request came in through - stamped on the analysis event when a run opens. */
+    source: AnalysisEventSource;
     /** The commit a run diffs against, when the trigger read one from GitHub. */
     baseSha?: string | undefined;
     /** The autonoma Branch this environment deploys (PR feature branch, or main branch for env 0). */
@@ -147,6 +152,7 @@ export class PreviewkitTriggerService extends Service {
         private readonly startPreviewBuild: (input: PreviewBuildWorkflowInput) => Promise<void>,
         private readonly triggerTeardown: (target: PreviewTeardownTarget) => Promise<void>,
         private readonly triggerRedeployApp: (params: TriggerPreviewRedeployAppParams) => Promise<void>,
+        private readonly events: AnalysisEventStore,
     ) {
         super();
     }
@@ -171,11 +177,16 @@ export class PreviewkitTriggerService extends Service {
             return {};
         }
 
-        const workflowId = await this.startAnalysisRun({
-            branchId: request.branchId,
-            headSha: request.headSha,
-            baseSha: request.baseSha,
-        });
+        const workflowId = await enqueueAndStartAnalysisRun(
+            { events: this.events, startAnalysisRun: this.startAnalysisRun },
+            {
+                branchId: request.branchId,
+                organizationId: request.organizationId,
+                source: request.source,
+                headSha: request.headSha,
+                baseSha: request.baseSha,
+            },
+        );
         return { workflowId };
     }
 
@@ -341,6 +352,7 @@ export class PreviewkitTriggerService extends Service {
                 headRef: pr.head.ref,
                 baseSha: pr.base.sha,
                 branchId,
+                source: "webhook",
             },
             action,
         );
@@ -522,7 +534,11 @@ export class PreviewkitTriggerService extends Service {
      * Deploys the main branch into environment 0, resolving its head on GitHub first. An undefined `callerOrgId`
      * reaches every organization's applications, and only the admin tRPC surface passes it.
      */
-    async startMainBranchRun(applicationId: string, callerOrgId: string | undefined): Promise<MainBranchDeployResult> {
+    async startMainBranchRun(
+        applicationId: string,
+        callerOrgId: string | undefined,
+        source: AnalysisEventSource,
+    ): Promise<MainBranchDeployResult> {
         this.logger.info("Triggering main-branch preview deploy", { applicationId });
 
         if (!env.PREVIEWKIT_MAIN_BRANCH_BUILDS_ENABLED) {
@@ -592,6 +608,7 @@ export class PreviewkitTriggerService extends Service {
                 headRef: branchName,
                 baseSha: headSha,
                 branchId: application.mainBranchId ?? undefined,
+                source,
             },
             "synchronize",
         );
@@ -645,6 +662,7 @@ export class PreviewkitTriggerService extends Service {
                 headRef: target.branch,
                 baseSha: target.headSha,
                 branchId,
+                source: "webhook",
             },
             "synchronize",
         );
@@ -722,7 +740,7 @@ export class PreviewkitTriggerService extends Service {
         // ref already cleared and does nothing - so the preview would never redeploy at
         // all. Logged instead; the next push to the trunk picks it up.
         try {
-            await this.startMainBranchRun(application.id, organizationId);
+            await this.startMainBranchRun(application.id, organizationId, "webhook");
         } catch (err) {
             this.logger.warn("Could not redeploy the base preview on the trunk after its deploy branch was deleted", {
                 applicationId: application.id,
@@ -780,7 +798,11 @@ export class PreviewkitTriggerService extends Service {
      * Config is latest-only: the redeploy resolves the Application's current config, not the deployed one. An
      * environment that was never built is deployed for the first time rather than reported missing.
      */
-    async startRunForRedeploy(key: PreviewEnvironmentKey, scope: PreviewEnvironmentScope = {}): Promise<void> {
+    async startRunForRedeploy(
+        key: PreviewEnvironmentKey,
+        scope: PreviewEnvironmentScope,
+        source: AnalysisEventSource,
+    ): Promise<void> {
         const found = await this.db.previewkitEnvironment.findFirst({
             where: environmentWhere(key, scope),
             select: {
@@ -795,7 +817,7 @@ export class PreviewkitTriggerService extends Service {
         });
 
         if (found == null) {
-            await this.firstDeployForMissingEnvironment(key, scope);
+            await this.firstDeployForMissingEnvironment(key, scope, source);
             return;
         }
 
@@ -819,6 +841,7 @@ export class PreviewkitTriggerService extends Service {
             githubRepositoryId,
             headSha,
             headRef,
+            source,
         });
     }
 
@@ -833,6 +856,7 @@ export class PreviewkitTriggerService extends Service {
     private async firstDeployForMissingEnvironment(
         key: PreviewEnvironmentKey,
         scope: PreviewEnvironmentScope,
+        source: AnalysisEventSource,
     ): Promise<void> {
         if ("environmentId" in key) throw new NotFoundError("Preview environment not found");
 
@@ -855,7 +879,7 @@ export class PreviewkitTriggerService extends Service {
         });
 
         if (prNumber !== MAIN_BRANCH_ENVIRONMENT_NUMBER) {
-            await this.startRunForPullRequest(organizationId, githubRepositoryId, prNumber);
+            await this.startRunForPullRequest(organizationId, githubRepositoryId, prNumber, source);
             return;
         }
 
@@ -868,7 +892,7 @@ export class PreviewkitTriggerService extends Service {
         if (application == null) {
             throw new NotFoundError(`No application deploys ${repoFullName}, so its base preview cannot be deployed`);
         }
-        await this.startMainBranchRun(application.id, organizationId);
+        await this.startMainBranchRun(application.id, organizationId, source);
     }
 
     /**
@@ -891,7 +915,12 @@ export class PreviewkitTriggerService extends Service {
      * building without opening an analysis run: the request is for the preview, and a selection that comes back
      * empty must not be able to take it away.
      */
-    async startRunForPullRequest(organizationId: string, githubRepositoryId: number, prNumber: number): Promise<void> {
+    async startRunForPullRequest(
+        organizationId: string,
+        githubRepositoryId: number,
+        prNumber: number,
+        source: AnalysisEventSource,
+    ): Promise<void> {
         this.logger.info("Triggering first preview deploy for a PR without an environment", {
             organizationId,
             pr: prNumber,
@@ -916,6 +945,7 @@ export class PreviewkitTriggerService extends Service {
             headSha: pr.headSha,
             headRef: pr.headRef,
             branchId,
+            source,
         });
     }
 
