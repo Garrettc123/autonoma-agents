@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from "@autonoma/db";
 import { type Logger, logger as rootLogger } from "@autonoma/logger";
 import {
     ANALYSIS_VERDICT,
+    type AnalysisFlow,
     type AnalysisIssueKind,
     type AnalysisIssueStatus,
     type AnalysisVerdictCounts,
@@ -138,8 +139,32 @@ export class BranchLedger {
      * rather than the whole PR.
      */
     public async verdict(): Promise<AnalysisVerdictSummary> {
+        return (await this.readVerdictAndReport()).verdict;
+    }
+
+    /**
+     * The verdict together with the flow itemization it was resolved from. The PR-page and main-branch headers
+     * need both - the state and open-bug count from the verdict, the "X/Y features verified" ratio from the flows -
+     * so this hands back the very report the verdict resolved against instead of the caller reading it a second
+     * time. The flows are the branch's, accumulated across its commits; a report predating them yields `[]`, which
+     * the pill renders as the verdict's own word.
+     */
+    public async verdictWithFlows(): Promise<{ verdict: AnalysisVerdictSummary; flows: AnalysisFlow[] }> {
+        const { verdict, report } = await this.readVerdictAndReport();
+        return { verdict, flows: report?.flows ?? [] };
+    }
+
+    /**
+     * The one read behind {@link verdict} and {@link verdictWithFlows}: the open-bug count and the branch's latest
+     * settled report (fetched together), resolved into a verdict, with that same report handed back so a caller
+     * that also needs the report's flows does not read it again.
+     */
+    private async readVerdictAndReport(): Promise<{
+        verdict: AnalysisVerdictSummary;
+        report: SettledReport | undefined;
+    }> {
         const [bugCount, report] = await Promise.all([this.openBugCount(), this.latestReport()]);
-        return this.deriveVerdict(bugCount, report);
+        return { verdict: await this.deriveVerdict(bugCount, report), report };
     }
 
     /**

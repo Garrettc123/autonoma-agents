@@ -1,3 +1,4 @@
+import type { AnalysisFlow } from "@autonoma/types";
 import { expect } from "vitest";
 import { analysisSuite } from "./harness";
 
@@ -135,6 +136,59 @@ analysisSuite({
             expect(removed[0]?.name).toBe("gone-feature");
             // No note was recorded, so the reason falls back to the classification headline.
             expect(removed[0]?.reason).toBe("gone-feature invalid_test");
+        });
+
+        test("verdictWithFlows pairs the cumulative-bug verdict with the newest report's flows", async ({
+            harness,
+        }) => {
+            const run = await harness.seedAnalysis();
+            // An open bug issue is the branch's cumulative signal - the verdict must read it, not the report's flows.
+            await harness.seedIssue({
+                branchId: run.branchId,
+                organizationId: run.organizationId,
+                title: "Open bug",
+                kind: "bug",
+                severity: "high",
+            });
+            const flows: AnalysisFlow[] = [
+                {
+                    title: "Checkout",
+                    detail: "The Place order button never enabled.",
+                    status: "broken",
+                    owner: "client",
+                    passedCount: 0,
+                    gapCount: 0,
+                    bugCount: 1,
+                    checkedThisRunCount: 1,
+                    testSlugs: ["checkout"],
+                },
+                {
+                    title: "Search",
+                    detail: "Results rendered end to end.",
+                    status: "verified",
+                    owner: "none",
+                    passedCount: 1,
+                    gapCount: 0,
+                    bugCount: 0,
+                    checkedThisRunCount: 1,
+                    testSlugs: ["search"],
+                },
+            ];
+            await harness.db.analysisReport.create({
+                data: {
+                    snapshotId: run.snapshotId,
+                    organizationId: run.organizationId,
+                    title: "The run",
+                    headline: "cumulative",
+                    flows,
+                    reportMarkdown: "## Report",
+                },
+            });
+
+            const { verdict, flows: read } = await harness.store.forBranch(run.branchId).verdictWithFlows();
+            expect(verdict.state).toBe("bug_found");
+            expect(verdict.bugCount).toBe(1);
+            expect(read.map((f) => f.title)).toEqual(["Checkout", "Search"]);
         });
     },
 });

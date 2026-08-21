@@ -1,9 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { type AnalysisVerdictSummary, analysisVerdictHeadline, analysisVerdictLabel } from "../src/schemas/analysis";
+import {
+    type AnalysisFlow,
+    type AnalysisFlowStatus,
+    type AnalysisVerdictSummary,
+    analysisVerdictHeadline,
+    analysisVerdictLabel,
+    analysisVerdictPill,
+} from "../src/schemas/analysis";
 
 /** A resolved verdict, as `BranchLedger.verdict()` hands it to a renderer. */
 function verdict(summary: AnalysisVerdictSummary): AnalysisVerdictSummary {
     return summary;
+}
+
+/** A flow with the given status; only its status feeds the pill's ratio, so the counts are placeholders. */
+function flow(status: AnalysisFlowStatus): AnalysisFlow {
+    return {
+        title: "Flow",
+        detail: "",
+        status,
+        owner: "none",
+        passedCount: 0,
+        gapCount: 0,
+        bugCount: 0,
+        checkedThisRunCount: 0,
+        testSlugs: [],
+    };
 }
 
 describe("analysisVerdictLabel + analysisVerdictHeadline", () => {
@@ -49,5 +71,49 @@ describe("analysisVerdictLabel + analysisVerdictHeadline", () => {
         // Two of three sampled zero-test runs were user-facing changes we deliberately declined to cover, so the
         // headline may never generalize from "we ran nothing" to "this change does not touch the UI".
         expect(headline).not.toMatch(/UI|user-facing|interface/i);
+    });
+});
+
+describe("analysisVerdictPill", () => {
+    it("leads with the branch's open bugs, in an alarm tone and with no reason", () => {
+        const pill = analysisVerdictPill(
+            verdict({ state: "bug_found", bugCount: 2, coverageGapCount: 0, investigatedCount: 3 }),
+            [flow("broken"), flow("verified")],
+        );
+        expect(pill).toEqual({ tone: "critical", label: "2 bugs", reason: undefined });
+    });
+
+    it("states the accumulated feature ratio with a NEUTRAL tone when a change is unconfirmed, not amber", () => {
+        const flows = [flow("verified"), flow("verified"), ...Array.from({ length: 6 }, () => flow("unverified"))];
+        // coverageGapCount is the newest run's (3), but the ratio and reason both read the branch's 8 flows: 6
+        // features could not be confirmed, not 3 - re-pointing off the per-snapshot count is the whole ticket.
+        const pill = analysisVerdictPill(
+            verdict({ state: "not_confirmed", bugCount: 0, coverageGapCount: 3, investigatedCount: 8 }),
+            flows,
+        );
+        expect(pill).toEqual({ tone: "neutral", label: "2/8 features verified", reason: "6 couldn't confirm" });
+    });
+
+    it("shows a full ratio with no reason when every feature verified", () => {
+        const pill = analysisVerdictPill(
+            verdict({ state: "healthy", bugCount: 0, coverageGapCount: 0, investigatedCount: 4 }),
+            [flow("verified"), flow("verified"), flow("verified"), flow("verified")],
+        );
+        expect(pill).toEqual({ tone: "success", label: "4/4 features verified", reason: undefined });
+    });
+
+    it("falls back to the verdict's word and its own coverage count when no flows were itemized", () => {
+        expect(
+            analysisVerdictPill(
+                verdict({ state: "not_confirmed", bugCount: 0, coverageGapCount: 2, investigatedCount: 5 }),
+                [],
+            ),
+        ).toEqual({ tone: "neutral", label: "Not confirmed", reason: "2 couldn't confirm" });
+        expect(
+            analysisVerdictPill(
+                verdict({ state: "no_tests_needed", bugCount: 0, coverageGapCount: 0, investigatedCount: 0 }),
+                [],
+            ),
+        ).toEqual({ tone: "success", label: "No tests needed", reason: undefined });
     });
 });

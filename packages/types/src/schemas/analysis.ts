@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { MAIN_BRANCH_ENVIRONMENT_NUMBER } from "../types/previewkit";
 import { overlayPointSchema } from "../types/step-overlay-points";
+import type { CheckpointTone } from "./checkpoint-summary";
 import { resolvedEvidenceAssetSchema } from "./evidence-tokens";
 import {
     investigationEvidenceSchema,
@@ -538,6 +539,48 @@ export function analysisFlowPillNamesFeatures(tally: AnalysisFlowTally, openBugC
  */
 export function coverageGapReason(count: number): string {
     return `${count} couldn't confirm`;
+}
+
+/**
+ * The header pill's tone per verdict: only a bug is raised as an alarm, so an unconfirmed change stays NEUTRAL
+ * rather than amber - the coarse feature ratio ("0/8") already looks alarming enough without a warning colour.
+ */
+const VERDICT_PILL_TONE: Record<AnalysisVerdictState, CheckpointTone> = {
+    bug_found: "critical",
+    not_confirmed: "neutral",
+    no_tests_needed: "success",
+    healthy: "success",
+};
+
+/** The PR/main header pill: a verdict's tone, its bugs-first-or-ratio label, and the coverage gap as its reason. */
+export interface AnalysisVerdictPill {
+    tone: CheckpointTone;
+    label: string;
+    reason?: string;
+}
+
+/**
+ * The PR-level verdict as the pipeline-status pill the PR-page and main-branch headers render: "N bugs" when the
+ * branch has open bugs, else the accumulated "X/Y features verified" ratio with the unconfirmed-feature count as
+ * the reason. Shares {@link analysisFlowPillLabel} and {@link coverageGapReason} with the report card, so the
+ * header and the card can never word the same verdict two ways.
+ *
+ * The ratio AND the reason are read off the branch's flow itemization - accumulated across the PR's commits, the
+ * same source the report card and the GitHub comment read - never the newest run alone. A report written before
+ * flows existed has none, so both fall back to the verdict's own (per-run) coverage count.
+ */
+export function analysisVerdictPill(
+    verdict: AnalysisVerdictSummary,
+    flows: readonly AnalysisFlow[],
+): AnalysisVerdictPill {
+    const tally = tallyAnalysisFlows(flows);
+    const unconfirmed = tally.total > 0 ? tally.total - tally.verified : verdict.coverageGapCount;
+    const hasUnconfirmed = verdict.bugCount === 0 && unconfirmed > 0;
+    return {
+        tone: VERDICT_PILL_TONE[verdict.state],
+        label: analysisFlowPillLabel(verdict.state, tally, verdict.bugCount),
+        reason: hasUnconfirmed ? coverageGapReason(unconfirmed) : undefined,
+    };
 }
 
 /** Marks a flow established at an earlier commit and not re-run, so a cumulative list is not read as all-fresh. */

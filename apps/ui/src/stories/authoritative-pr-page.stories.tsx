@@ -1,3 +1,4 @@
+import type { PrPipelineStatus } from "@autonoma/types";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { appShellHandlers, baseApplication, branchPage } from "lib/storybook/base-fixtures";
 import { PageStory } from "lib/storybook/page-story";
@@ -647,16 +648,35 @@ const notConfirmedLatest: (typeof snapshotHistory)[number] = {
   },
 };
 
+// The header speaks for the whole PR, so its pill reads the branch-accumulated verdict - "1/3 features verified"
+// off the report's flow tally - not the newest snapshot's per-run "3/5 verified". Neutral, because only a bug is
+// an alarm. This is the divergence the header re-point creates: the rail row below still shows the per-commit ratio.
+const notConfirmedHeaderStatus: PrPipelineStatus = {
+  kind: "checkpoint",
+  summary: {
+    ...notConfirmedLatest.summary!,
+    tone: "neutral",
+    label: "1/3 features verified",
+    reason: "2 couldn't confirm",
+  },
+};
+
+// The shared not-confirmed PR fixture both stories below read: no client bug, coverage gaps, a flow itemization.
+const notConfirmedBranches: NonNullable<TrpcFixtures["branches"]> = {
+  ...chromeFixtures.branches,
+  snapshotHistory: [notConfirmedLatest, snapshotHistory[1]!],
+  ...notConfirmedReport,
+  analysisIssues: notConfirmedIssues,
+  analysisJob: { status: "completed", startedAt: STARTED_AT, completedAt: COMPLETED_AT },
+};
+
+// NotConfirmed carries the accumulated header pill; FeatureTooltip omits it so its hover has a single "features
+// verified" target - the report-card badge, which owns the tooltip (the header pill has none).
 const notConfirmedHandlers = appShellHandlers({
   ...chromeFixtures,
-  branches: {
-    ...chromeFixtures.branches,
-    snapshotHistory: [notConfirmedLatest, snapshotHistory[1]!],
-    ...notConfirmedReport,
-    analysisIssues: notConfirmedIssues,
-    analysisJob: { status: "completed", startedAt: STARTED_AT, completedAt: COMPLETED_AT },
-  },
+  branches: { ...notConfirmedBranches, pipelineStatusByBranchId: notConfirmedHeaderStatus },
 });
+const featureTooltipHandlers = appShellHandlers({ ...chromeFixtures, branches: notConfirmedBranches });
 
 /** No client bug, but coverage gaps: the verdict headline states how much was verified, and is not green. */
 export const NotConfirmed: Story = {
@@ -667,7 +687,7 @@ export const NotConfirmed: Story = {
 /** The verdict badge's feature-definition tooltip, opened: hovering the "N/M features verified" pill defines the unit. */
 export const FeatureTooltip: Story = {
   args: { path: OVERVIEW_PATH },
-  parameters: { msw: { handlers: notConfirmedHandlers } },
+  parameters: { msw: { handlers: featureTooltipHandlers } },
   play: async ({ canvasElement }) => {
     await userEvent.hover(await within(canvasElement).findByText(/features verified/i));
     // The tooltip renders in a portal, outside `canvasElement` - reach it through the document body.

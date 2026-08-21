@@ -36,6 +36,7 @@ import {
     type AnalysisTestOrigin,
     analysisTestOriginSchema,
     type AnalysisSnapshotIssueChanges,
+    analysisVerdictPill,
     buildAnalysisFindingUrl,
     buildAnalysisIssueUrl,
     buildPrPageUrl,
@@ -1169,12 +1170,29 @@ export class BranchesService extends Service {
                   })?.summary
                 : undefined;
 
-        return computePrPipelineStatus({
+        const status = computePrPipelineStatus({
             activeSnapshot: active != null ? { headSha: active.headSha ?? undefined, summary } : undefined,
             latestRun: latestRunByBranch.get(branchId),
             previewEnv: previewStateByPr.get(prNumber),
             blockedReason: branch.lastBlockedReason ?? undefined,
         });
+
+        // A completed analysis speaks for the whole PR, not just its newest commit, so the header pill reads the
+        // branch-accumulated verdict - the same source the report card, the GitHub comment and the merge gate use
+        // - rather than the active snapshot's per-run checkpoint. Only this resting state is re-pointed; every
+        // in-flight/preview/failure state stays the newest run's, and the per-commit view stays on the rail.
+        //
+        // Only `tone/label/reason` are re-pointed - the fields the header's `prStatusPresentation` reads. The rest
+        // of the summary (`analysis`, `testCounts`, `executionState`, `suiteChangeCount`) is deliberately left the
+        // newest snapshot's and must NOT be read on this path: a metrics line read off `summary.analysis` here
+        // would describe one commit while the label describes the whole PR.
+        if (status.kind !== "checkpoint") return status;
+        const { verdict, flows } = await this.analysisStore.forBranch(branchId).verdictWithFlows();
+        const pill = analysisVerdictPill(verdict, flows);
+        return {
+            kind: "checkpoint",
+            summary: { ...status.summary, tone: pill.tone, label: pill.label, reason: pill.reason },
+        };
     }
 
     /**
