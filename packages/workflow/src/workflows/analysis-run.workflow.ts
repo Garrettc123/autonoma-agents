@@ -397,6 +397,7 @@ async function attachBuiltPreview(params: {
     const attached = await previewkit.attachPreviewDeployment({
         branchId,
         organizationId: target.organizationId,
+        headSha: target.headSha,
         url: built.primaryUrl,
         sdkAppUrl: built.sdkAppUrl,
     });

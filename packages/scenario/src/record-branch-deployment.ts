@@ -10,6 +10,8 @@ export interface RecordBranchDeploymentParams {
     db: PrismaClient;
     branchId: string;
     organizationId: string;
+    /** The commit this deployment serves - what a run reads to know which sha its recorded preview is running. */
+    headSha: string;
     /** The origin the branch's tests run against. */
     url: string;
     webhookUrl?: string;
@@ -24,6 +26,7 @@ export async function recordBranchDeployment({
     db,
     branchId,
     organizationId,
+    headSha,
     url,
     webhookUrl,
     webhookHeaders,
@@ -37,6 +40,7 @@ export async function recordBranchDeployment({
             data: {
                 branchId,
                 organizationId,
+                headSha,
                 webhookUrl,
                 webhookHeaders: mergedWebhookHeaders,
                 webDeployment: { create: { url, organizationId } },

@@ -455,6 +455,9 @@ model BranchDeployment {
   branchId String @map("branch_id")
   branch   Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
 
+  /// The commit SHA this deployment serves. Nullable: rows written before this column existed carry none.
+  headSha String? @map("head_sha")
+
   webhookUrl     String? @map("webhook_url")
   /// ![Record<string, string>]
   webhookHeaders Json?   @map("webhook_headers")

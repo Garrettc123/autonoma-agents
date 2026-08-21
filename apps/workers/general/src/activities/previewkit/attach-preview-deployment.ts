@@ -14,7 +14,7 @@ const logger = rootLogger.child({ name: "attachPreviewDeployment" });
 export async function attachPreviewDeployment(
     input: AttachPreviewDeploymentInput,
 ): Promise<AttachPreviewDeploymentOutput> {
-    const { branchId, organizationId, url, sdkAppUrl } = input;
+    const { branchId, organizationId, headSha, url, sdkAppUrl } = input;
     logger.info("Attaching the branch deployment for a ready preview", {
         branch: { branchId },
         extra: { url, sdkAppUrl },
@@ -26,6 +26,7 @@ export async function attachPreviewDeployment(
         db,
         branchId,
         organizationId,
+        headSha,
         url,
         webhookUrl: buildSdkUrl(sdkAppUrl ?? url, sdkPath),
     });

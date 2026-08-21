@@ -105,6 +105,8 @@ export interface ReadPreviewBuildStatusOutput {
 export interface AttachPreviewDeploymentInput {
     branchId: string;
     organizationId: string;
+    /** The commit this built preview serves. */
+    headSha: string;
     /** The preview origin the branch's tests run against. */
     url: string;
     /** Origin of the app hosting the Environment Factory handler. Falls back to `url` when absent. */

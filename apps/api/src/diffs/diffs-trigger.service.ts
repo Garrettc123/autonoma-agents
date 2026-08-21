@@ -380,6 +380,7 @@ export class DiffsTriggerService extends Service {
                 db: this.db,
                 branchId,
                 organizationId,
+                headSha,
                 url,
                 webhookUrl,
                 webhookHeaders,

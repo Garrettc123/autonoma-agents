@@ -25,6 +25,7 @@ integrationTestSuite({
                 db: harness.db,
                 branchId,
                 organizationId,
+                headSha: "deployed-sha-1",
                 url: "https://preview.example.com",
                 webhookUrl: "https://preview.example.com/api/autonoma",
             });
@@ -37,6 +38,7 @@ integrationTestSuite({
                 include: { webDeployment: true },
             });
             expect(deployment.webDeployment?.url).toBe("https://preview.example.com");
+            expect(deployment.headSha).toBe("deployed-sha-1");
         });
 
         // Without the bypass header every scenario up/down against a sleeping preview is answered by the
@@ -69,6 +71,7 @@ integrationTestSuite({
                 db: harness.db,
                 branchId,
                 organizationId,
+                headSha: "head-1",
                 url,
                 webhookUrl: `${url}/api/autonoma`,
             });
@@ -87,6 +90,7 @@ integrationTestSuite({
                 db: harness.db,
                 branchId,
                 organizationId,
+                headSha: "customer-sha",
                 url: "https://customer-deployed.vercel.app",
                 webhookHeaders: { authorization: "Bearer token" },
             });

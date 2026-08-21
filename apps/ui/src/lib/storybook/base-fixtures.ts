@@ -32,6 +32,7 @@ export const baseApplication: RouterOutputs["applications"]["list"][number] = {
             id: "deployment_fixture_01",
             active: true,
             branchId: "branch_fixture_01",
+            headSha: "a1b2c3d4e5f6",
             webhookUrl: null,
             webhookHeaders: null,
             createdAt: FIXTURE_EPOCH,
