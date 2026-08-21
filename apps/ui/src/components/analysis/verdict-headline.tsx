@@ -1,4 +1,4 @@
-import { Badge, StatusDot } from "@autonoma/blacklight";
+import { Badge, StatusDot, Tooltip, TooltipContent, TooltipTrigger } from "@autonoma/blacklight";
 import type { AnalysisVerdictState } from "@autonoma/types";
 import type * as React from "react";
 
@@ -46,6 +46,7 @@ export const RUN_VERDICT_COPY = {
 export function VerdictHeadline({
   state,
   badge,
+  badgeTooltip,
   title,
   pills,
   children,
@@ -53,6 +54,8 @@ export function VerdictHeadline({
   state: AnalysisVerdictState;
   /** The verdict badge's text, in the surface's own nouns. */
   badge: string;
+  /** When set, the verdict badge becomes a hover tooltip showing this content. */
+  badgeTooltip?: React.ReactNode;
   title: string;
   /** Secondary count pills, rendered after the verdict badge. */
   pills?: React.ReactNode;
@@ -61,13 +64,24 @@ export function VerdictHeadline({
 }) {
   const tone = VERDICT_TONE[state];
 
+  const badgeEl = (
+    <Badge variant={tone.variant} className="gap-1 font-mono uppercase tracking-wider">
+      <StatusDot status={tone.dot} />
+      {badge}
+    </Badge>
+  );
+
   return (
     <div className="flex flex-col gap-3 border border-border-dim bg-surface-base px-5 py-4">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant={tone.variant} className="gap-1 font-mono uppercase tracking-wider">
-          <StatusDot status={tone.dot} />
-          {badge}
-        </Badge>
+        {badgeTooltip != null ? (
+          <Tooltip>
+            <TooltipTrigger render={badgeEl} />
+            <TooltipContent className="max-w-xs normal-case">{badgeTooltip}</TooltipContent>
+          </Tooltip>
+        ) : (
+          badgeEl
+        )}
         {pills}
       </div>
 

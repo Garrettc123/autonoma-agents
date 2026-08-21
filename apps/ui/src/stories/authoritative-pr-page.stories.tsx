@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { appShellHandlers, baseApplication, branchPage } from "lib/storybook/base-fixtures";
 import { PageStory } from "lib/storybook/page-story";
 import type { TrpcFixtures } from "lib/storybook/trpc-handler";
-import { within } from "storybook/test";
+import { userEvent, within } from "storybook/test";
 import { withRunSignals } from "./analysis-run-signals";
 
 const FIXTURE_EPOCH = new Date("2026-01-01T00:00:00.000Z");
@@ -647,22 +647,31 @@ const notConfirmedLatest: (typeof snapshotHistory)[number] = {
   },
 };
 
+const notConfirmedHandlers = appShellHandlers({
+  ...chromeFixtures,
+  branches: {
+    ...chromeFixtures.branches,
+    snapshotHistory: [notConfirmedLatest, snapshotHistory[1]!],
+    ...notConfirmedReport,
+    analysisIssues: notConfirmedIssues,
+    analysisJob: { status: "completed", startedAt: STARTED_AT, completedAt: COMPLETED_AT },
+  },
+});
+
 /** No client bug, but coverage gaps: the verdict headline states how much was verified, and is not green. */
 export const NotConfirmed: Story = {
   args: { path: OVERVIEW_PATH },
-  parameters: {
-    msw: {
-      handlers: appShellHandlers({
-        ...chromeFixtures,
-        branches: {
-          ...chromeFixtures.branches,
-          snapshotHistory: [notConfirmedLatest, snapshotHistory[1]!],
-          ...notConfirmedReport,
-          analysisIssues: notConfirmedIssues,
-          analysisJob: { status: "completed", startedAt: STARTED_AT, completedAt: COMPLETED_AT },
-        },
-      }),
-    },
+  parameters: { msw: { handlers: notConfirmedHandlers } },
+};
+
+/** The verdict badge's feature-definition tooltip, opened: hovering the "N/M features verified" pill defines the unit. */
+export const FeatureTooltip: Story = {
+  args: { path: OVERVIEW_PATH },
+  parameters: { msw: { handlers: notConfirmedHandlers } },
+  play: async ({ canvasElement }) => {
+    await userEvent.hover(await within(canvasElement).findByText(/features verified/i));
+    // The tooltip renders in a portal, outside `canvasElement` - reach it through the document body.
+    await within(document.body).findByText(/recognizable user journey/i);
   },
 };
 

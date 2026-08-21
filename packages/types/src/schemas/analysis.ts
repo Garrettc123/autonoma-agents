@@ -518,8 +518,18 @@ export function analysisFlowPillLabel(
     openBugCount: number,
 ): string {
     if (openBugCount > 0) return `${openBugCount} ${openBugCount === 1 ? "bug" : "bugs"}`;
-    if (tally.total === 0) return DERIVED_PILL[state];
-    return `${tally.verified}/${tally.total} features verified`;
+    if (analysisFlowPillNamesFeatures(tally, openBugCount)) return `${tally.verified}/${tally.total} features verified`;
+    return DERIVED_PILL[state];
+}
+
+/**
+ * Whether the pill states the verified-features RATIO ("X/Y features verified") rather than a bug count or a
+ * verdict-word fallback - the one shape where the noun "feature" appears. The single source of that condition:
+ * {@link analysisFlowPillLabel} returns the ratio exactly when this holds, so a surface that defines the "feature"
+ * unit (the verdict badge's tooltip) can gate on it and never label a bug or no-tests-needed pill.
+ */
+export function analysisFlowPillNamesFeatures(tally: AnalysisFlowTally, openBugCount: number): boolean {
+    return openBugCount === 0 && tally.total > 0;
 }
 
 /**

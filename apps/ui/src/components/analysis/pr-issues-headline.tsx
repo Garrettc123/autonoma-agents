@@ -2,10 +2,18 @@ import {
   type AnalysisFlow,
   type AnalysisVerdictSummary,
   analysisFlowPillLabel,
+  analysisFlowPillNamesFeatures,
   analysisPrTitle,
   tallyAnalysisFlows,
 } from "@autonoma/types";
 import { VerdictHeadline } from "components/analysis/verdict-headline";
+
+/**
+ * The "feature" unit, defined on hover of the verdict badge. Deliberately a definition only - it must never grow
+ * verified / couldn't-confirm counts, which the report card's per-feature list already carries.
+ */
+const FEATURE_DEFINITION =
+  "A feature is a recognizable user journey this PR touches - each one groups several underlying checks.";
 
 /**
  * How the PR reads, as a whole - the Reporter's own words over the branch's cumulative state.
@@ -31,11 +39,14 @@ export function AnalysisPrIssuesHeadline({
 }) {
   const bugCount = verdict.bugCount;
   const tally = tallyAnalysisFlows(flows);
+  // The definition only rides the pill that names the unit; the bug and no-tests-needed pills stay plain.
+  const featureTooltip = analysisFlowPillNamesFeatures(tally, bugCount) ? FEATURE_DEFINITION : undefined;
 
   return (
     <VerdictHeadline
       state={verdict.state}
       badge={analysisFlowPillLabel(verdict.state, tally, bugCount)}
+      badgeTooltip={featureTooltip}
       title={analysisPrTitle(title, verdict.state, bugCount)}
     >
       {headline}
