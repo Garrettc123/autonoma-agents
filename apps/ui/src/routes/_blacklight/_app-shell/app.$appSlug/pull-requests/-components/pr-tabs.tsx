@@ -6,8 +6,10 @@ import { AppLink } from "routes/_blacklight/_app-shell/-app-link";
 export type PRTab = "overview" | "preview" | "usage";
 
 // The tab switcher, rendered as a bare Tabs widget (the meta row that hosts it owns the
-// border/background/padding). Rendered only for PRs backed by a real previewkit_environment: a
-// non-preview PR (BYO deploy, or none) renders no tabs at all.
+// border/background/padding). Analysis is the only tab every PR has, and a lone tab is not a
+// switcher - so the bar appears once a second tab does: Preview Environment for a PR backed by a
+// real previewkit_environment, Usage for an admin. Usage carries the branch's AI cost, which every
+// PR has regardless of who hosts its previews, so a BYO-deploy PR still shows it.
 export function PRTabs({
   applicationId,
   prNumber,
@@ -19,7 +21,8 @@ export function PRTabs({
 }) {
   const { data: summary } = usePreviewEnvironmentSummary(applicationId, prNumber);
   const { isAdmin } = useAuth();
-  if (summary.source !== "previewkit") return null;
+  const hasPreviewEnvironment = summary.source === "previewkit";
+  if (!hasPreviewEnvironment && !isAdmin) return null;
 
   return (
     <Tabs value={active}>
@@ -30,12 +33,14 @@ export function PRTabs({
         >
           Analysis
         </TabsTrigger>
-        <TabsTrigger
-          value="preview"
-          render={<AppLink to="/app/$appSlug/pull-requests/$prNumber/preview" params={{ prNumber }} />}
-        >
-          Preview Environment
-        </TabsTrigger>
+        {hasPreviewEnvironment && (
+          <TabsTrigger
+            value="preview"
+            render={<AppLink to="/app/$appSlug/pull-requests/$prNumber/preview" params={{ prNumber }} />}
+          >
+            Preview Environment
+          </TabsTrigger>
+        )}
         {isAdmin && (
           <TabsTrigger
             value="usage"

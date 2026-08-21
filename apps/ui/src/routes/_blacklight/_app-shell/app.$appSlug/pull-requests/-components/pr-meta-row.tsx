@@ -9,7 +9,7 @@ import { type PRTab, PRTabs } from "./pr-tabs";
 
 type PullRequest = RouterOutputs["github"]["getPullRequest"];
 
-// The row below the top bar: the Overview/Preview tab switcher (only rendered when a previewkit environment exists)
+// The row below the top bar: the tab switcher (rendered only when the PR has more than the Analysis tab)
 // and the PR's author and branch, then Details at the far edge.
 //
 // Author and branch sit on the LEFT, directly under the title they belong to. They used to be pushed right with the
