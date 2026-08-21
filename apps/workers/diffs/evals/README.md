@@ -19,9 +19,14 @@ grade different agents.
 
 Each step lives in its own subdirectory (`<step>/`) with the same four files
 (`<step>-input.ts` schema, `<step>-frontmatter.ts` deterministic checks,
-`<step>-evaluation.ts` Evaluation subclass, `<step>.eval.ts` vitest entry).
-Step-agnostic primitives live in `framework/`; each step also has a
-`capture-<step>.ts` library and a `capture-<step>-cli.ts` entry under `capture/`,
+`<step>-evaluation.ts` `ScoredReplayEvaluation` subclass, `<step>.eval.ts` vitest
+entry). Step-agnostic primitives live in `framework/`, including the
+`ScoredReplayEvaluation` base every step extends: it owns the shared spine (the
+skip guard, session creation and cost metering, the deterministic gate, and the
+one judge call), so each step supplies only the three things that vary - `setUp`
+(rehydrate the frozen case), `runOnce` (run the agent once and project its result
+into the result file), and `check` (the deterministic checks). Each step also has
+a `capture-<step>.ts` library and a `capture-<step>-cli.ts` entry under `capture/`,
 both wired through the package's `capture:<step>` scripts.
 
 ## Where the cases live

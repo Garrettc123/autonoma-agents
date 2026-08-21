@@ -18,6 +18,9 @@ export const baseFrontmatterSchema = z.object({
     skip: z.boolean().optional(),
 });
 
+/** The fields every per-step frontmatter carries, for a harness that reads them off any case. */
+export type BaseFrontmatter = z.infer<typeof baseFrontmatterSchema>;
+
 /**
  * A set-membership check over identifiers (e.g. test slugs). `include` and
  * `exclude` are partial constraints; `exact` pins the whole set. They may be

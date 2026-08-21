@@ -1,6 +1,7 @@
 export { type CaseLoaderConfig, type LoadedCase, loadCases } from "./case-loader";
 export { Evaluation, type EvaluationConfiguration, type RunCaseHelpers } from "./evaluation";
 export {
+    type BaseFrontmatter,
     type CheckFailure,
     type ConfidenceBand,
     type CountBounds,

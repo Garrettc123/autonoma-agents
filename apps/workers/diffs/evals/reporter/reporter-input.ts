@@ -1,7 +1,5 @@
-import type { Codebase } from "@autonoma/diffs";
-import { StorageEvidenceLoader } from "@autonoma/diffs";
+import type { Codebase, ScreenshotLoader } from "@autonoma/diffs";
 import { type ReporterInput, type ReporterScenarioLoader, reporterInputPayloadSchema } from "@autonoma/diffs/analysis";
-import type { StorageProvider } from "@autonoma/storage";
 import type { z } from "zod";
 import { codebaseCoordsSchema } from "../framework";
 
@@ -22,14 +20,16 @@ export type ReporterCaseInput = z.infer<typeof reporterCaseInputSchema>;
 
 /**
  * Rebuild the live {@link ReporterInput} from a parsed case: the clone (rehydrated separately via
- * `ensureCachedCheckout` and passed in) plus the two loaders reconstructed over the frozen data. The screenshot
- * loader fetches bytes from S3 by the frozen keys at run time; the scenario loader replays `read_scenario` as a
- * pure lookup over the frozen recipes - no DB, and no re-run of the production summarize step that could drift.
+ * `ensureCachedCheckout` and passed in) plus the two loaders over the frozen data. The screenshot loader is the
+ * SAME instance the evaluation already probed the frozen keys with - passed in rather than reconstructed, so a
+ * case builds one loader, not two - and fetches bytes from S3 by those keys at run time; the scenario loader
+ * replays `read_scenario` as a pure lookup over the frozen recipes - no DB, and no re-run of the production
+ * summarize step that could drift.
  */
 export function rehydrateReporterInput(
     parsed: ReporterCaseInput,
     codebase: Codebase,
-    storage: StorageProvider,
+    screenshotLoader: ScreenshotLoader,
 ): ReporterInput {
     const recipesById = new Map(parsed.scenarioRecipes.map((recipe) => [recipe.id, recipe]));
     const scenarioLoader: ReporterScenarioLoader = {
@@ -47,7 +47,7 @@ export function rehydrateReporterInput(
         priorReports: parsed.priorReports,
         scenarioIndex: parsed.scenarioIndex,
         codebase,
-        screenshotLoader: new StorageEvidenceLoader(storage),
+        screenshotLoader,
         // Only advertise the scenario loader when there are scenarios to load, matching production: the agent is
         // never offered a dead `read_scenario` tool.
         scenarioLoader: parsed.scenarioIndex.length > 0 ? scenarioLoader : undefined,

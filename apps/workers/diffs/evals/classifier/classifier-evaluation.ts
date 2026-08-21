@@ -1,18 +1,24 @@
 import path from "node:path";
 import { InlineMp4VideoUploader, type ModelMessage, type UploadedVideo } from "@autonoma/ai";
-import { type EvidenceLoader, StorageEvidenceLoader, readPrDiffStat, summarizeSessionCost } from "@autonoma/diffs";
-import { ClassifierAgent, type RunVerdict } from "@autonoma/diffs/analysis";
-import { Evaluation, type LoadedCase, type RunCaseHelpers } from "@autonoma/evals";
-import { logger as rootLogger } from "@autonoma/logger";
+import { type Codebase, type EvidenceLoader, StorageEvidenceLoader, readPrDiffStat } from "@autonoma/diffs";
+import { ClassifierAgent, type ModelSession, type RunVerdict } from "@autonoma/diffs/analysis";
+import { type CheckFailure, type LoadedCase, type RunCaseHelpers } from "@autonoma/evals";
 import { S3Storage } from "@autonoma/storage";
 import ffmpeg from "@ffmpeg-installer/ffmpeg";
 import { expect } from "vitest";
-import { type CaseSkipContext, DiffsJudge, rehydrateOrSkip, skipIfEvidenceUnreachable } from "../framework";
+import {
+    type CaseSkipContext,
+    type RunOutcome,
+    ScoredReplayEvaluation,
+    rehydrateOrSkip,
+    skipIfEvidenceUnreachable,
+} from "../framework";
 import { type ClassifierFrontmatter, checkClassifierVerdict } from "./classifier-frontmatter";
 import {
     type FrozenAppLogArtifact,
     type ClassifierCaseInput,
     type FrozenAppLogWindow,
+    type FrozenClassifierInput,
     type FrozenRunMedia,
     rehydrateClassifierInput,
 } from "./classifier-input";
@@ -25,6 +31,22 @@ export type ClassifierCase = LoadedCase<ClassifierCaseInput, ClassifierFrontmatt
 
 /** Per-case timeout: a classification is a tool loop over a real clone plus four full-recording vision reads. */
 const TIMEOUT_MS = 900_000;
+
+/**
+ * What every run of a Classifier case shares, rehydrated once per case: the checked-out clone, the pure input,
+ * the live diff stat, and the media/log evidence the run reads. The recording itself is NOT here - it is uploaded
+ * fresh in {@link ClassifierEvaluation.runOnce}, since an uploaded handle can expire between suite runs.
+ */
+interface ClassifierContext {
+    input: FrozenClassifierInput;
+    codebase: Codebase;
+    media: FrozenRunMedia;
+    baseline: string;
+    diffSummary: string;
+    finalScreenshot?: Uint8Array;
+    appLogWindow?: FrozenAppLogWindow;
+    evidenceLoader: EvidenceLoader;
+}
 
 /**
  * Scored eval for the Investigator's classifier.
@@ -46,27 +68,17 @@ const TIMEOUT_MS = 900_000;
  *
  * Cases run concurrently: each rehydrates into its own git worktree off the shared repo clone.
  */
-export class ClassifierEvaluation extends Evaluation<ClassifierCase> {
-    private readonly judge = new DiffsJudge();
-    private readonly logger = rootLogger.child({ name: this.constructor.name });
+export class ClassifierEvaluation extends ScoredReplayEvaluation<
+    ClassifierCaseInput,
+    ClassifierFrontmatter,
+    ClassifierContext,
+    RunVerdict
+> {
     private readonly transcriptDir: string;
 
     constructor(resultsDir: string, cases: ClassifierCase[]) {
-        super(
-            {
-                name: "diffs-classifier",
-                parallel: true,
-                testOptions: { timeout: TIMEOUT_MS },
-                resultsDir,
-            },
-            cases,
-        );
+        super({ name: "diffs-classifier", resultsDir, timeoutMs: TIMEOUT_MS }, cases);
         this.transcriptDir = path.join(resultsDir, "transcripts");
-    }
-
-    protected override caseName(testCase: ClassifierCase): string {
-        const note = testCase.frontmatter.description;
-        return note != null ? `${testCase.name} - ${note}` : testCase.name;
     }
 
     protected override testCaseInfo(testCase: ClassifierCase): Record<string, string> {
@@ -87,15 +99,7 @@ export class ClassifierEvaluation extends Evaluation<ClassifierCase> {
         };
     }
 
-    protected override async runCase(
-        testCase: ClassifierCase,
-        addInfo: (info: Record<string, unknown>) => void,
-        helpers: RunCaseHelpers,
-    ): Promise<void> {
-        if (testCase.frontmatter.skip === true) {
-            helpers.skip("case marked skip: true in expected.md frontmatter");
-        }
-
+    protected override async setUp(testCase: ClassifierCase, helpers: RunCaseHelpers): Promise<ClassifierContext> {
         const { coords, input, media, baseline, appLogs } = rehydrateClassifierInput(testCase.input);
         const skipContext = { logger: this.logger, caseName: testCase.name };
 
@@ -118,30 +122,31 @@ export class ClassifierEvaluation extends Evaluation<ClassifierCase> {
         const finalScreenshot = await this.loadFinalScreenshot(media, evidenceLoader);
         const appLogWindow = await this.loadAppLogWindow(appLogs, helpers, testCase.name);
 
-        // Imported here rather than at module scope: `services` pulls the worker's env, which demands the
-        // GitHub App and OpenAI credentials at import time and would break the credential-free zero-case no-op.
-        const { createModelSession } = await import("../../src/services");
+        return { input, codebase, media, baseline, diffSummary, finalScreenshot, appLogWindow, evidenceLoader };
+    }
 
-        const session = createModelSession();
+    protected override async runOnce(
+        session: ModelSession,
+        testCase: ClassifierCase,
+        context: ClassifierContext,
+    ): Promise<RunOutcome<RunVerdict>> {
         const videoModel = session.getVideoModel({ model: "smart-video", tag: "classifier-eval-video" });
-        const recording = await this.loadRecording(media, evidenceLoader);
+        const recording = await this.loadRecording(context.media, context.evidenceLoader);
         const classifier = new ClassifierAgent({
             model: session.getModel({ model: "classifier", tag: "classifier-eval" }),
             videoModel: videoModel.model,
         });
 
-        this.logger.info("Classifying eval case", { extra: { case: testCase.name } });
-
         const { verdict, conversation } = await this.classify(classifier, {
-            ...input,
-            run: { ...input.run, recording, finalScreenshot },
-            codebase,
-            diffSummary,
-            screenshotLoader: evidenceLoader,
-            loadBaseline: async () => baseline,
+            ...context.input,
+            run: { ...context.input.run, recording, finalScreenshot: context.finalScreenshot },
+            codebase: context.codebase,
+            diffSummary: context.diffSummary,
+            screenshotLoader: context.evidenceLoader,
+            loadBaseline: async () => context.baseline,
             // `previewEnv` rides in on `input` when the case froze one. `run_script` has no frozen form.
             previewScript: undefined,
-            loadAppLogs: this.appLogsFor(appLogWindow, input.run),
+            loadAppLogs: this.appLogsFor(context.appLogWindow, context.input.run),
         });
         const transcriptPath = await writeClassifierTranscript({
             dir: this.transcriptDir,
@@ -149,38 +154,24 @@ export class ClassifierEvaluation extends Evaluation<ClassifierCase> {
             conversation,
         });
 
-        // The full verdict, not just a pass flag: diffing two result files is how a change is shown to have moved
-        // the classifier. `evidence` and `transcriptPath` carry the REASONING - the cited proof in the result file,
-        // the whole tool loop on disk - so a verdict can be explained, not just counted. Stability is measured by
-        // running the whole suite more than once and diffing, not by re-classifying one case in a serial loop.
-        addInfo({
-            category: verdict.category,
-            confidence: verdict.confidence,
-            planFidelity: verdict.planFidelity,
-            headline: verdict.headline,
-            evidence: verdict.evidence,
-            evidenceCount: verdict.evidence.length,
-            transcriptPath,
-            agentCost: summarizeSessionCost(session.costCollector),
-        });
+        // `evidence` and `transcriptPath` carry the REASONING - the cited proof in the result file, the whole tool
+        // loop on disk - so a verdict can be explained, not just counted.
+        return {
+            result: verdict,
+            info: {
+                category: verdict.category,
+                confidence: verdict.confidence,
+                planFidelity: verdict.planFidelity,
+                headline: verdict.headline,
+                evidence: verdict.evidence,
+                evidenceCount: verdict.evidence.length,
+                transcriptPath,
+            },
+        };
+    }
 
-        // Deterministic checks gate the (paid) judge call: a case that already fails enum-equality cannot pass.
-        const failures = checkClassifierVerdict(verdict, testCase.frontmatter);
-        if (failures.length > 0) {
-            const detail = failures.map((f) => `${f.check}: ${f.message}`).join("; ");
-            addInfo({ deterministicFailures: detail });
-            expect.fail(`Deterministic checks failed: ${detail}`);
-        }
-
-        // One judge call. The rubric grades reasoning quality, which the deterministic checks have gated.
-        const judgeVerdict = await this.judge.judge({ output: verdict, rubric: testCase.rubric });
-        addInfo({
-            judgePassed: judgeVerdict.passed,
-            judgeReasoning: judgeVerdict.reasoning,
-            judgeCost: judgeVerdict.cost,
-        });
-
-        expect(judgeVerdict.passed, `Judge failed: ${judgeVerdict.reasoning}`).toBe(true);
+    protected override check(verdict: RunVerdict, frontmatter: ClassifierFrontmatter): CheckFailure[] {
+        return checkClassifierVerdict(verdict, frontmatter);
     }
 
     /**

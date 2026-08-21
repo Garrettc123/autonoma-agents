@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { Codebase } from "@autonoma/diffs";
+import { Codebase, StorageEvidenceLoader } from "@autonoma/diffs";
 import { type ReporterInput, type ReporterScenarioRecipe, serializeReporterInput } from "@autonoma/diffs/analysis";
 import type { StorageProvider } from "@autonoma/storage";
 import { describe, expect, it } from "vitest";
@@ -98,7 +98,7 @@ const SOURCE: ReporterInput = {
     scenarioLoader: { loadRecipe: async (id) => (id === RECIPE.id ? RECIPE : undefined) },
 };
 
-/** A typed no-op storage - `rehydrateReporterInput` only constructs a loader over it; the methods never run here. */
+/** A typed no-op storage - `rehydrateReporterInput` only stores a loader over it; the methods never run here. */
 const UNUSED_STORAGE: StorageProvider = {
     upload: async () => "",
     uploadStream: async () => "",
@@ -107,11 +107,14 @@ const UNUSED_STORAGE: StorageProvider = {
     getSignedUrl: async () => "",
 };
 
+/** The evidence loader the eval passes into `rehydrateReporterInput`; its methods are never driven by these tests. */
+const UNUSED_LOADER = new StorageEvidenceLoader(UNUSED_STORAGE);
+
 /** Freeze, serialize to JSON and back, then reparse and rehydrate - exactly what capture then the eval do. */
 async function throughDisk(input: ReporterInput): Promise<ReporterInput> {
     const payload = await serializeReporterInput(input);
     const parsed = reporterCaseInputSchema.parse(JSON.parse(JSON.stringify({ codebase: COORDS, ...payload })));
-    return rehydrateReporterInput(parsed, new Codebase("/tmp/rehydrated-clone"), UNUSED_STORAGE);
+    return rehydrateReporterInput(parsed, new Codebase("/tmp/rehydrated-clone"), UNUSED_LOADER);
 }
 
 describe("reporter eval case round-trip", () => {
@@ -146,7 +149,7 @@ describe("reporter eval case round-trip", () => {
     // is proven to reconstruct - not just an in-memory fixture. Skips in the public mirror, where the case is stripped.
     it.skipIf(!existsSync(EXAMPLE_CASE))("reconstructs the committed example case from disk", async () => {
         const parsed = reporterCaseInputSchema.parse(JSON.parse(readFileSync(EXAMPLE_CASE, "utf8")));
-        const out = rehydrateReporterInput(parsed, new Codebase("/tmp/example-clone"), UNUSED_STORAGE);
+        const out = rehydrateReporterInput(parsed, new Codebase("/tmp/example-clone"), UNUSED_LOADER);
 
         expect(out.findings.length).toBeGreaterThan(0);
         expect(out.branchTests.length).toBeGreaterThan(0);

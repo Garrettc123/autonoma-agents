@@ -1,11 +1,16 @@
 import type { ModelMessage } from "@autonoma/ai";
-import { StorageEvidenceLoader, summarizeSessionCost } from "@autonoma/diffs";
-import { ReporterAgent, type ReporterResult } from "@autonoma/diffs/analysis";
-import { Evaluation, type LoadedCase, type RunCaseHelpers } from "@autonoma/evals";
-import { logger as rootLogger } from "@autonoma/logger";
+import { StorageEvidenceLoader } from "@autonoma/diffs";
+import { type ModelSession, type ReporterInput, ReporterAgent, type ReporterResult } from "@autonoma/diffs/analysis";
+import { type CheckFailure, type LoadedCase, type RunCaseHelpers } from "@autonoma/evals";
 import { S3Storage } from "@autonoma/storage";
 import { expect } from "vitest";
-import { type EvidenceKeys, DiffsJudge, rehydrateOrSkip, skipIfEvidenceUnreachable } from "../framework";
+import {
+    type EvidenceKeys,
+    type RunOutcome,
+    ScoredReplayEvaluation,
+    rehydrateOrSkip,
+    skipIfEvidenceUnreachable,
+} from "../framework";
 import { type ReporterFrontmatter, checkReporterResult } from "./reporter-frontmatter";
 import { type ReporterCaseInput, rehydrateReporterInput } from "./reporter-input";
 
@@ -26,6 +31,11 @@ const TIMEOUT_MS = 900_000;
  */
 const FIXABLE_RETRY_PREFIXES = ["Cannot finish yet.", "Nothing was left of"];
 
+/** What one run of the Reporter case needs: the fully rehydrated live input over the checked-out clone. */
+interface ReporterContext {
+    input: ReporterInput;
+}
+
 /**
  * Scored eval for the analysis Reporter.
  *
@@ -44,25 +54,14 @@ const FIXABLE_RETRY_PREFIXES = ["Cannot finish yet.", "Nothing was left of"];
  *
  * Cases run concurrently: each rehydrates into its own git worktree off the shared repo clone.
  */
-export class ReporterEvaluation extends Evaluation<ReporterCase> {
-    private readonly judge = new DiffsJudge();
-    private readonly logger = rootLogger.child({ name: this.constructor.name });
-
+export class ReporterEvaluation extends ScoredReplayEvaluation<
+    ReporterCaseInput,
+    ReporterFrontmatter,
+    ReporterContext,
+    ReporterResult
+> {
     constructor(resultsDir: string, cases: ReporterCase[]) {
-        super(
-            {
-                name: "diffs-reporter",
-                parallel: true,
-                testOptions: { timeout: TIMEOUT_MS },
-                resultsDir,
-            },
-            cases,
-        );
-    }
-
-    protected override caseName(testCase: ReporterCase): string {
-        const note = testCase.frontmatter.description;
-        return note != null ? `${testCase.name} - ${note}` : testCase.name;
+        super({ name: "diffs-reporter", resultsDir, timeoutMs: TIMEOUT_MS }, cases);
     }
 
     protected override testCaseInfo(testCase: ReporterCase): Record<string, string> {
@@ -78,17 +77,8 @@ export class ReporterEvaluation extends Evaluation<ReporterCase> {
         };
     }
 
-    protected override async runCase(
-        testCase: ReporterCase,
-        addInfo: (info: Record<string, unknown>) => void,
-        helpers: RunCaseHelpers,
-    ): Promise<void> {
-        if (testCase.frontmatter.skip === true) {
-            helpers.skip("case marked skip: true in expected.md frontmatter");
-        }
-
-        const storage = S3Storage.createFromEnv();
-        const evidenceLoader = new StorageEvidenceLoader(storage);
+    protected override async setUp(testCase: ReporterCase, helpers: RunCaseHelpers): Promise<ReporterContext> {
+        const evidenceLoader = new StorageEvidenceLoader(S3Storage.createFromEnv());
         const skipContext = { logger: this.logger, caseName: testCase.name };
 
         // The clone and the S3 probe are independent - the probe reads only the frozen case, not the checkout - so
@@ -98,53 +88,38 @@ export class ReporterEvaluation extends Evaluation<ReporterCase> {
             skipIfEvidenceUnreachable(collectScreenshotKeys(testCase.input), evidenceLoader, helpers, skipContext),
         ]);
 
-        const input = rehydrateReporterInput(testCase.input, codebase, storage);
+        // The same loader the probe just walked the keys with becomes the run's `fetch_evidence` source.
+        const input = rehydrateReporterInput(testCase.input, codebase, evidenceLoader);
+        return { input };
+    }
 
-        // Imported here rather than at module scope: `services` pulls the worker's env, which demands the OpenAI
-        // credential at import time and would break the credential-free zero-case no-op.
-        const { createModelSession } = await import("../../src/services");
-
-        const session = createModelSession();
+    protected override async runOnce(
+        session: ModelSession,
+        _testCase: ReporterCase,
+        context: ReporterContext,
+    ): Promise<RunOutcome<ReporterResult>> {
         const agent = new ReporterAgent({ model: session.getModel({ model: "reporter", tag: "reporter-eval" }) });
+        const { result, conversation } = await this.report(agent, context.input);
 
-        this.logger.info("Reporting eval case", { extra: { case: testCase.name } });
+        // The swept/duplicate/unknown counts and the finish-time retry count are the quality signals the
+        // deterministic checks deliberately do not gate on (bar `unknownSlugs`, which does).
+        return {
+            result,
+            info: {
+                title: result.title,
+                headline: result.headline,
+                issueReconciliation: describeIssues(result),
+                flowCount: result.flows.length,
+                sweptSlugCount: result.flowCorrections.sweptSlugs.length,
+                duplicateSlugCount: result.flowCorrections.duplicateSlugs.length,
+                unknownSlugCount: result.flowCorrections.unknownSlugs.length,
+                fixableRetries: countFixableRetries(conversation),
+            },
+        };
+    }
 
-        const { result, conversation } = await this.report(agent, input);
-
-        // The full output, not just a pass flag: diffing two result files is how a change is shown to have moved the
-        // Reporter. The swept/duplicate/unknown counts and the finish-time retry count are the quality signals the
-        // deterministic checks deliberately do not gate on (bar `unknownSlugs`, which does). Stability is measured by
-        // running the whole suite more than once and diffing, not by re-running one case in a serial loop.
-        addInfo({
-            title: result.title,
-            headline: result.headline,
-            issueReconciliation: describeIssues(result),
-            flowCount: result.flows.length,
-            sweptSlugCount: result.flowCorrections.sweptSlugs.length,
-            duplicateSlugCount: result.flowCorrections.duplicateSlugs.length,
-            unknownSlugCount: result.flowCorrections.unknownSlugs.length,
-            fixableRetries: countFixableRetries(conversation),
-            agentCost: summarizeSessionCost(session.costCollector),
-        });
-
-        // Deterministic checks gate the (paid) judge call: a case that already fails a dedup or membership check
-        // cannot pass, so there is nothing to judge.
-        const failures = checkReporterResult(result, testCase.frontmatter);
-        if (failures.length > 0) {
-            const detail = failures.map((f) => `${f.check}: ${f.message}`).join("; ");
-            addInfo({ deterministicFailures: detail });
-            expect.fail(`Deterministic checks failed: ${detail}`);
-        }
-
-        // One judge call. The rubric grades prose quality, which the deterministic checks have gated.
-        const judgeVerdict = await this.judge.judge({ output: result, rubric: testCase.rubric });
-        addInfo({
-            judgePassed: judgeVerdict.passed,
-            judgeReasoning: judgeVerdict.reasoning,
-            judgeCost: judgeVerdict.cost,
-        });
-
-        expect(judgeVerdict.passed, `Judge failed: ${judgeVerdict.reasoning}`).toBe(true);
+    protected override check(result: ReporterResult, frontmatter: ReporterFrontmatter): CheckFailure[] {
+        return checkReporterResult(result, frontmatter);
     }
 
     /**
