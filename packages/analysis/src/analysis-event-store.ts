@@ -100,20 +100,6 @@ export class AnalysisEventStore {
         return created;
     }
 
-    /**
-     * The newest pending event for a branch, or undefined when the inbox holds none pending. "Pending" is the
-     * {@link pendingWhere} predicate - unclaimed, or claimed by a run whose work was thrown away. The workflow
-     * peeks this for the `headSha` its pre-open steps need, before the authoritative claim at open time.
-     */
-    public async peekLatestPending(branchId: string): Promise<AnalysisEventRecord | undefined> {
-        this.logger.info("Peeking latest pending analysis event", { branch: { branchId } });
-        const row = await this.db.analysisEvent.findFirst({
-            where: this.pendingWhere(branchId),
-            orderBy: { createdAt: "desc" },
-        });
-        return row == null ? undefined : this.toRecord(row);
-    }
-
     /** Whether the branch has any pending event - the sweeper/poke predicate, without loading a row. */
     public async hasPending(branchId: string): Promise<boolean> {
         const row = await this.db.analysisEvent.findFirst({

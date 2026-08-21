@@ -52,7 +52,7 @@ await store.findingDetail(findingId, { organizationId });
 // The analysis inbox - producers enqueue, a run claims, in-transaction with opening its snapshot:
 const events = new AnalysisEventStore(db);
 await events.enqueue({ branchId, organizationId, source: "webhook", event: { type: "commits_pushed", payload: { headSha } } });
-const latest = await events.peekLatestPending(branchId);   // newest pending, for the workflow's pre-open steps
+await events.hasPending(branchId);                          // is there a reason to run - the poke/sweeper predicate
 await events.claimPending(tx, branchId, snapshotId);        // steals from superseded/cancelled/failed claims
 await events.markHandledByActiveSnapshot(branchId);         // the already-analyzed path (no new snapshot opens)
 await events.listForSnapshot(snapshotId);                   // what this run analyzed

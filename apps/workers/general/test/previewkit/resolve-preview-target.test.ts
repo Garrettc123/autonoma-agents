@@ -1,4 +1,5 @@
 import { ApplicationArchitecture, createClient, type PrismaClient } from "@autonoma/db";
+import { FakeGitHubApp, FakeGitHubInstallationClient } from "@autonoma/github";
 import { createTestDatabase, type IntegrationHarness, integrationTestSuite } from "@autonoma/integration-test";
 import { expect } from "vitest";
 import { resolvePreviewTarget } from "../../src/activities/previewkit/resolve-preview-target";
@@ -31,17 +32,25 @@ interface SeedOptions {
 }
 
 class PreviewTargetHarness implements IntegrationHarness {
-    constructor(public readonly db: PrismaClient) {}
+    constructor(
+        public readonly db: PrismaClient,
+        public readonly github: FakeGitHubInstallationClient,
+    ) {}
 
     static async create(): Promise<PreviewTargetHarness> {
         const connectionUri = await createTestDatabase();
         const db = createClient(connectionUri);
         globalThis.prisma = db;
-        return new PreviewTargetHarness(db);
+        // The activity resolves the live head through the GitHub app; the override lets it read this fake instead
+        // of reaching the network, and the seeds below register the repo/PR/branch each case queries.
+        const github = new FakeGitHubInstallationClient();
+        globalThis.__generalGitHubApp = new FakeGitHubApp(github);
+        return new PreviewTargetHarness(db, github);
     }
 
     async beforeAll() {}
     async afterAll() {
+        globalThis.__generalGitHubApp = undefined;
         await this.db.$disconnect();
     }
     async beforeEach() {}
@@ -96,7 +105,36 @@ class PreviewTargetHarness implements IntegrationHarness {
             },
         });
 
+        await this.seedInstallation(org.id, n);
+        this.github.addRepository({
+            id: githubRepositoryId,
+            name: `repo-${n}`,
+            fullName: `acme/repo-${n}`,
+            defaultBranch: "main",
+            commits: [`base-${n}`],
+        });
+        this.github.addPullRequest(`acme/repo-${n}`, {
+            number: n + 1,
+            title: `PR ${n}`,
+            headRef: `feature/${n}`,
+            baseSha: `base-${n}`,
+            commits: [`live-head-${n}`],
+        });
+
         return branch.id;
+    }
+
+    /** The installation the activity looks up before it can authenticate as the org to read the head. */
+    private async seedInstallation(organizationId: string, n: number): Promise<void> {
+        await this.db.gitHubInstallation.create({
+            data: {
+                organizationId,
+                installationId: n + 1,
+                accountLogin: `org-${n}`,
+                accountId: n + 1,
+                accountType: "Organization",
+            },
+        });
     }
 
     /**
@@ -143,6 +181,17 @@ class PreviewTargetHarness implements IntegrationHarness {
             },
         });
 
+        await this.seedInstallation(org.id, n);
+        // The base environment resolves its head via `getBranchHead(headRef)`; making that ref the repo's default
+        // branch is what lets the fake answer it, whether the run pinned a deploy ref or fell back to the trunk.
+        this.github.addRepository({
+            id: githubRepositoryId,
+            name: `repo-${n}`,
+            fullName: `acme/repo-${n}`,
+            defaultBranch: options.previewDeployRef ?? trunkName,
+            commits: [`base-${n}`],
+        });
+
         return { branchId: branch.id, trunkName };
     }
 }
@@ -175,6 +224,22 @@ integrationTestSuite({
 
             expect(resolved.target).toBeDefined();
             expect(resolved.onboardingComplete).toBe(true);
+        });
+
+        // The whole point of resolving at open time: the run analyzes the branch's CURRENT head, not the possibly
+        // stale one its trigger carried - and the same sha lands on the target the build is keyed to.
+        test("resolves the live PR head, not the trigger's, onto both the output and the target", async ({
+            harness,
+        }) => {
+            const branchId = await harness.seedPrBranch({
+                previewEnvironmentMode: "previewkit",
+                step: "completed",
+            });
+
+            const resolved = await resolvePreviewTarget({ branchId, headSha: "stale-trigger-head" });
+
+            expect(resolved.headSha).toMatch(/^live-head-\d+$/);
+            expect(resolved.target?.headSha).toBe(resolved.headSha);
         });
 
         test("reports onboarding on the customer-deployed path, where the run owns no preview", async ({ harness }) => {

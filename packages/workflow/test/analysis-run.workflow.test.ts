@@ -47,6 +47,10 @@ interface Harness {
     hasRecordedPreview: boolean;
     /** Every existing case is an onboarded app; the deadlock case flips it. */
     onboardingComplete: boolean;
+    /** The head `resolvePreviewTarget` resolves. Undefined (the default) falls the run back to its trigger head. */
+    resolvedHead?: string;
+    /** Every head `openAnalysisRun` opened on - proof of which head the run actually analyzed. */
+    analyzedHeads: string[];
     targets: AnalysisInvestigationTarget[];
     impactError?: Error;
     snapshotSkipped: boolean;
@@ -83,6 +87,7 @@ const harness: Harness = {
     everBuilt: false,
     hasRecordedPreview: true,
     onboardingComplete: true,
+    analyzedHeads: [],
     targets: [],
     snapshotSkipped: false,
     snapshotSkipReason: "already_analyzed",
@@ -203,7 +208,8 @@ const analysisActivities: Pick<
     | "runReporter"
     | "settleAnalysisRun"
 > = {
-    async openAnalysisRun() {
+    async openAnalysisRun(input) {
+        harness.analyzedHeads.push(input.headSha);
         harness.events.push("snapshot");
         if (harness.snapshotError != null) throw harness.snapshotError;
         if (harness.snapshotSkipped) return { skipped: true, reason: harness.snapshotSkipReason };
@@ -249,12 +255,14 @@ const previewkitActivities: PreviewkitActivities = {
         return target != null
             ? {
                   organizationId: target.organizationId,
+                  headSha: harness.resolvedHead,
                   target,
                   hasRecordedPreview: harness.hasRecordedPreview,
                   onboardingComplete: harness.onboardingComplete,
               }
             : {
                   organizationId: ORGANIZATION_ID,
+                  headSha: harness.resolvedHead,
                   hasRecordedPreview: harness.hasRecordedPreview,
                   onboardingComplete: harness.onboardingComplete,
               };
@@ -369,6 +377,8 @@ beforeEach(() => {
     harness.everBuilt = false;
     harness.hasRecordedPreview = true;
     harness.onboardingComplete = true;
+    harness.resolvedHead = undefined;
+    harness.analyzedHeads = [];
     harness.targets = [];
     harness.impactError = undefined;
     harness.snapshotSkipped = false;
@@ -676,6 +686,23 @@ describe("analysisRunWorkflow build gate", () => {
     });
 });
 
+describe("analysisRunWorkflow head resolution", () => {
+    it("analyzes the head resolvePreviewTarget resolved, not the trigger's fallback", async () => {
+        harness.resolvedHead = "resolved-head-sha";
+
+        await runToCompletion();
+
+        expect(harness.analyzedHeads).toEqual(["resolved-head-sha"]);
+    });
+
+    it("falls back to the trigger head when nothing resolves one", async () => {
+        await runToCompletion();
+
+        expect(harness.analyzedHeads).toHaveLength(1);
+        expect(harness.analyzedHeads[0]?.startsWith(HEAD_SHA)).toBe(true);
+    });
+});
+
 describe("analysisRunWorkflow on a customer-deployed branch", () => {
     it("opens no snapshot when the customer's preview is not recorded yet", async () => {
         harness.hasRecordedPreview = false;
@@ -692,11 +719,14 @@ describe("analysisRunWorkflow on a customer-deployed branch", () => {
 
     it("analyzes against the recorded preview, building nothing", async () => {
         harness.targets = [target()];
+        // The customer's deployment is the coordinate: the run analyzes the sha they deployed, not the trigger's.
+        harness.resolvedHead = "byo-deployed-sha";
 
         await startCustomerDeployedRun();
 
         expect(await buildWasStarted()).toBe(false);
         expect(harness.attachedUrls).toEqual([]);
+        expect(harness.analyzedHeads).toEqual(["byo-deployed-sha"]);
         expect(harness.webRuns).toEqual(["gen-1"]);
         expect(harness.settlements).toEqual([{ kind: "succeeded" }]);
     });

@@ -107,8 +107,13 @@ snapshot and run state before applying GitHub effects, so a failed or cancelled 
 snapshot or an in-progress merge gate.
 
 One workflow runs that pipeline: `analysisRunWorkflow`, keyed on the branch with a terminate-existing policy so the
-newest commit displaces whatever was in flight. Its input is just `{ branchId, headSha, baseSha? }` - who hosts the
-preview is a fact about the application, resolved by the run's first activity, not something a caller passes in:
+newest commit displaces whatever was in flight. The head it analyzes is resolved at open time from the source of
+truth, not taken from its input: `resolvePreviewTarget` reads the live PR/branch head for a previewkit app (which
+the run then builds) or the recorded deployment's sha for a customer-hosted one, and `openAnalysisRun` claims every
+pending inbox event in the transaction that opens the snapshot. The `{ headSha, baseSha? }` in its input are only a
+fallback for when nothing resolves a head (a pre-field in-flight replay, GitHub unreachable). Who hosts the preview
+is a fact about the application, resolved by the run's
+first activity, not something a caller passes in:
 
 - **absent** - the CUSTOMER deploys the preview, so its URL already exists when the trigger arrives and the run is
   Impact Analysis -> Investigators -> Reporter -> settle.

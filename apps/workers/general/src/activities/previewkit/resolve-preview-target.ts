@@ -1,10 +1,10 @@
 import { db } from "@autonoma/db";
-import { OctokitGitHubApp } from "@autonoma/github";
+import type { GitHubInstallationClient } from "@autonoma/github";
 import { hasGoneLive } from "@autonoma/github/comment";
 import { logger as rootLogger } from "@autonoma/logger";
 import { autonomaHostsPreviews } from "@autonoma/scenario";
 import type { ResolvePreviewTargetInput, ResolvePreviewTargetOutput } from "@autonoma/workflow/activities";
-import { env } from "../../env";
+import { getGitHubApp } from "../../github-app";
 
 const logger = rootLogger.child({ name: "resolvePreviewTarget" });
 
@@ -16,7 +16,7 @@ const MAIN_BRANCH_ENVIRONMENT_NUMBER = 0;
  * is what lets a push, a `/start analysis` comment and a label all be the same call.
  */
 export async function resolvePreviewTarget(input: ResolvePreviewTargetInput): Promise<ResolvePreviewTargetOutput> {
-    const { branchId, headSha } = input;
+    const { branchId } = input;
     logger.info("Resolving whether this run owns a preview", { branch: { branchId } });
 
     const branch = await db.branch.findUnique({
@@ -24,6 +24,7 @@ export async function resolvePreviewTarget(input: ResolvePreviewTargetInput): Pr
         select: {
             name: true,
             deploymentId: true,
+            deployment: { select: { headSha: true } },
             prInfo: { select: { prNumber: true } },
             application: {
                 select: {
@@ -49,11 +50,18 @@ export async function resolvePreviewTarget(input: ResolvePreviewTargetInput): Pr
     // for a column we already had in hand.
     const onboardingComplete = hasGoneLive(application.onboardingState?.step);
     if (!autonomaHostsPreviews(application.onboardingState?.previewEnvironmentMode)) {
+        // The head to analyze is the one the customer actually deployed - only their deployment record knows it,
+        // so it is the coordinate here, not the live GitHub head (which their preview may not yet be running).
         logger.info("The customer deploys this preview; the run is analysis only", {
             branch: { branchId },
             extra: { mode: application.onboardingState?.previewEnvironmentMode, hasRecordedPreview },
         });
-        return { organizationId, hasRecordedPreview, onboardingComplete };
+        return {
+            organizationId,
+            hasRecordedPreview,
+            onboardingComplete,
+            headSha: branch.deployment?.headSha ?? undefined,
+        };
     }
     if (application.githubRepositoryId == null) {
         logger.warn("Application is previewkit-managed but linked to no repository; cannot build a preview", {
@@ -62,7 +70,10 @@ export async function resolvePreviewTarget(input: ResolvePreviewTargetInput): Pr
         return { organizationId, hasRecordedPreview, onboardingComplete };
     }
 
-    const repoFullName = await resolveRepoFullName(organizationId, application.githubRepositoryId);
+    const client = await getInstallationClient(organizationId);
+    if (client == null) return { organizationId, hasRecordedPreview, onboardingComplete };
+
+    const repoFullName = await resolveRepoFullName(client, organizationId, application.githubRepositoryId);
     if (repoFullName == null) return { organizationId, hasRecordedPreview, onboardingComplete };
 
     const prNumber = branch.prInfo?.prNumber ?? MAIN_BRANCH_ENVIRONMENT_NUMBER;
@@ -74,18 +85,22 @@ export async function resolvePreviewTarget(input: ResolvePreviewTargetInput): Pr
     // for the deploy that was asked for. A PR environment has its own head and never consults this.
     const headRef =
         prNumber === MAIN_BRANCH_ENVIRONMENT_NUMBER ? (application.previewDeployRef ?? branch.name) : branch.name;
+    // Resolved live so a deferred, days-later run builds the branch's CURRENT head, not the stale sha its
+    // trigger carried. The build, the Job spec and the tarball fetch are all pinned to this one sha end to end.
+    const headSha = await resolveLiveHead(client, application.githubRepositoryId, prNumber, headRef);
 
     logger.info("This run owns a previewkit preview", {
         organization: { organizationId },
         branch: { branchId },
         preview: { repo: repoFullName, headRef },
-        extra: { pr: prNumber },
+        extra: { pr: prNumber, headSha },
     });
 
     return {
         organizationId,
         hasRecordedPreview,
         onboardingComplete,
+        headSha,
         target: {
             repoFullName,
             prNumber,
@@ -98,11 +113,31 @@ export async function resolvePreviewTarget(input: ResolvePreviewTargetInput): Pr
     };
 }
 
+/** The installation's GitHub client, or undefined when the org has no installation to authenticate as. */
+async function getInstallationClient(organizationId: string): Promise<GitHubInstallationClient | undefined> {
+    const installation = await db.gitHubInstallation.findUnique({
+        where: { organizationId },
+        select: { installationId: true },
+    });
+    if (installation == null) {
+        logger.warn("Organization has no GitHub installation; cannot resolve the head or repository", {
+            organization: { organizationId },
+        });
+        return undefined;
+    }
+
+    return getGitHubApp().getInstallationClient(installation.installationId);
+}
+
 /**
  * Resolved from GitHub rather than stored: `githubRepositoryId` is the stable identity and a repo can be renamed,
- * so a persisted name would go quietly stale. A live preview already knows it, which saves the call.
+ * so a persisted name would go quietly stale. The previewkit environment cache answers without a call when it can.
  */
-async function resolveRepoFullName(organizationId: string, githubRepositoryId: number): Promise<string | undefined> {
+async function resolveRepoFullName(
+    client: GitHubInstallationClient,
+    organizationId: string,
+    githubRepositoryId: number,
+): Promise<string | undefined> {
     const known = await db.previewkitEnvironment.findFirst({
         where: { organizationId, githubRepositoryId },
         select: { repoFullName: true },
@@ -110,24 +145,18 @@ async function resolveRepoFullName(organizationId: string, githubRepositoryId: n
     });
     if (known != null) return known.repoFullName;
 
-    const installation = await db.gitHubInstallation.findUnique({
-        where: { organizationId },
-        select: { installationId: true },
-    });
-    if (installation == null) {
-        logger.warn("Organization has no GitHub installation; cannot resolve the repository", {
-            organization: { organizationId },
-        });
-        return undefined;
-    }
-
-    const app = new OctokitGitHubApp({
-        appId: env.GITHUB_APP_ID,
-        privateKey: env.GITHUB_APP_PRIVATE_KEY,
-        webhookSecret: env.GITHUB_APP_WEBHOOK_SECRET,
-        appSlug: env.GITHUB_APP_SLUG,
-    });
-    const client = await app.getInstallationClient(installation.installationId);
     const repo = await client.getRepository(githubRepositoryId);
     return repo.fullName;
+}
+
+/** The branch's current head: the PR's live head for a PR environment, the deploy ref's head for main. */
+async function resolveLiveHead(
+    client: GitHubInstallationClient,
+    githubRepositoryId: number,
+    prNumber: number,
+    headRef: string,
+): Promise<string> {
+    if (prNumber === MAIN_BRANCH_ENVIRONMENT_NUMBER) return client.getBranchHead(githubRepositoryId, headRef);
+    const pullRequest = await client.getPullRequest(githubRepositoryId, prNumber);
+    return pullRequest.headSha;
 }

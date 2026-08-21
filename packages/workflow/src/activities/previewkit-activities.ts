@@ -13,6 +13,13 @@ export interface ResolvePreviewTargetInput {
 export interface ResolvePreviewTargetOutput {
     /** The branch's owning organization, absent only when the branch resolves to no application. */
     organizationId?: string;
+    /**
+     * The head this run should analyze, resolved at open time from the source of truth: the live PR/branch head for
+     * a previewkit app (which the run then builds), the recorded deployment's sha for a customer-hosted one. Absent
+     * when there is nothing to resolve it from (no owner, no recorded preview) - and, by design, on a run already in
+     * flight before this field existed, whose caller then falls back to the head its trigger carried.
+     */
+    headSha?: string;
     /** Absent when the customer deploys their own preview, or the repo is not onboarded far enough to have one. */
     target?: PreviewDeployTarget;
     /**

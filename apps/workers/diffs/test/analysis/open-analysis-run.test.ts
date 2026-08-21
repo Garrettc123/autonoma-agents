@@ -1,3 +1,4 @@
+import { AnalysisEventStore } from "@autonoma/analysis";
 import { ApplicationArchitecture, type PrismaClient, createClient } from "@autonoma/db";
 import { createTestDatabase, type IntegrationHarness, integrationTestSuite } from "@autonoma/integration-test";
 import { expect } from "vitest";
@@ -20,7 +21,11 @@ interface SeedOptions {
 }
 
 class OpenRunHarness implements IntegrationHarness {
-    constructor(public readonly db: PrismaClient) {}
+    readonly events: AnalysisEventStore;
+
+    constructor(public readonly db: PrismaClient) {
+        this.events = new AnalysisEventStore(db);
+    }
 
     static async create(): Promise<OpenRunHarness> {
         const connectionUri = await createTestDatabase();
@@ -61,6 +66,30 @@ class OpenRunHarness implements IntegrationHarness {
 
     async jobCount(branchId: string): Promise<number> {
         return await this.db.analysisJob.count({ where: { snapshot: { branchId } } });
+    }
+
+    /** Enqueue a pending `commits_pushed` event for the branch and return its id. */
+    async enqueueCommit(branchId: string, headSha: string): Promise<string> {
+        const branch = await this.db.branch.findUniqueOrThrow({
+            where: { id: branchId },
+            select: { organizationId: true },
+        });
+        const { id } = await this.events.enqueue({
+            branchId,
+            organizationId: branch.organizationId,
+            source: "webhook",
+            event: { type: "commits_pushed", payload: { headSha } },
+        });
+        return id;
+    }
+
+    /** The snapshot whose run claimed the event, or undefined while it is still pending. */
+    async claimedBy(eventId: string): Promise<string | undefined> {
+        const row = await this.db.analysisEvent.findUniqueOrThrow({
+            where: { id: eventId },
+            select: { claimedBySnapshotId: true },
+        });
+        return row.claimedBySnapshotId ?? undefined;
     }
 
     /** Make `branchId` the application's main branch, with an active snapshot at the given head carrying one test. */
@@ -187,6 +216,52 @@ integrationTestSuite({
 
             expect(result).toEqual({ skipped: true, reason: "already_analyzed" });
             expect(await harness.jobCount(branchId)).toBe(0);
+        });
+
+        test("claims the branch's pending events for the snapshot it opens", async ({ harness }) => {
+            const branchId = await harness.seedBranch();
+            const older = await harness.enqueueCommit(branchId, "sha-older");
+            const newer = await harness.enqueueCommit(branchId, HEAD_SHA);
+
+            const result = await openAnalysisRun({ branchId, headSha: HEAD_SHA, baseSha: BASE_SHA });
+            if (result.skipped) throw new Error("expected the run to open");
+
+            // Every pending event on the branch coalesces onto this one run's snapshot, even the older head's.
+            expect(await harness.claimedBy(older)).toBe(result.snapshotId);
+            expect(await harness.claimedBy(newer)).toBe(result.snapshotId);
+            expect(await harness.events.hasPending(branchId)).toBe(false);
+        });
+
+        test("hands an already-analyzed head's pending events to the active snapshot", async ({ harness }) => {
+            const branchId = await harness.seedBranch();
+            const { mainSnapshotId } = await harness.seedMainSuite(branchId, HEAD_SHA);
+            const eventId = await harness.enqueueCommit(branchId, HEAD_SHA);
+
+            const result = await openAnalysisRun({ branchId, headSha: HEAD_SHA, baseSha: BASE_SHA });
+
+            expect(result).toEqual({ skipped: true, reason: "already_analyzed" });
+            // No new snapshot opened, but the event must not linger pending and re-poke a run that would skip again.
+            expect(await harness.events.hasPending(branchId)).toBe(false);
+            expect(await harness.claimedBy(eventId)).toBe(mainSnapshotId);
+        });
+
+        // Terminate-and-restart runs no cleanup on the displaced run, so its claim is left on a snapshot the
+        // successor then settles `cancelled`. The successor's own claim steals it back: no event is stranded.
+        test("hands a superseded run's events to the successor that displaces it", async ({ harness }) => {
+            const branchId = await harness.seedBranch();
+            const staleEvent = await harness.enqueueCommit(branchId, "head-old");
+
+            const stale = await openAnalysisRun({ branchId, headSha: "head-old", baseSha: "base-old" });
+            if (stale.skipped) throw new Error("expected the stale run to open");
+            expect(await harness.claimedBy(staleEvent)).toBe(stale.snapshotId);
+
+            const freshEvent = await harness.enqueueCommit(branchId, "head-new");
+            const fresh = await openAnalysisRun({ branchId, headSha: "head-new", baseSha: "base-new" });
+            if (fresh.skipped) throw new Error("expected the fresh run to open");
+
+            expect(await harness.claimedBy(staleEvent)).toBe(fresh.snapshotId);
+            expect(await harness.claimedBy(freshEvent)).toBe(fresh.snapshotId);
+            expect(await harness.events.hasPending(branchId)).toBe(false);
         });
 
         // A new PR branch inherits main's live suite, but the diff base stays its own PR base: main's snapshot

@@ -43,23 +43,27 @@ const LIVE_STATUSES: SnapshotStatus[] = ["processing", "active"];
 analysisSuite({
     name: "AnalysisEventStore",
     cases: (test) => {
-        test("enqueue persists a typed payload that peekLatestPending returns newest-first", async ({ harness }) => {
+        test("enqueue persists a typed payload that a claim reads back, oldest-first", async ({ harness }) => {
             const run = await harness.seedAnalysis();
             const older = await enqueueCommits(harness, run, "sha-older", { baseSha: "base-1", source: "comment" });
             const newer = await enqueueCommits(harness, run, "sha-newer");
             await stampCreatedAt(harness, older, new Date("2026-01-01T00:00:00Z"));
             await stampCreatedAt(harness, newer, new Date("2026-01-02T00:00:00Z"));
 
-            const peeked = await harness.eventStore.peekLatestPending(run.branchId);
-            expect(peeked?.id).toBe(newer);
-            expect(peeked?.type).toBe("commits_pushed");
-            // Narrowing on `type` exposes the payload's shape.
-            if (peeked?.type !== "commits_pushed") throw new Error("expected a commits_pushed event");
-            expect(peeked.payload.headSha).toBe("sha-newer");
-            expect(peeked.source).toBe("webhook");
-
             expect(await harness.eventStore.hasPending(run.branchId)).toBe(true);
-            expect(await harness.eventStore.peekLatestPending("other-branch")).toBeUndefined();
+
+            const snapshotId = await harness.addSnapshotWithStatus(run.branchId, "processing");
+            await claim(harness, run.branchId, snapshotId);
+
+            const listed = await harness.eventStore.listForSnapshot(snapshotId);
+            expect(listed.map((event) => event.id)).toEqual([older, newer]);
+
+            const latest = listed[1];
+            expect(latest?.type).toBe("commits_pushed");
+            // Narrowing on `type` exposes the payload's shape.
+            if (latest?.type !== "commits_pushed") throw new Error("expected a commits_pushed event");
+            expect(latest.payload.headSha).toBe("sha-newer");
+            expect(latest.source).toBe("webhook");
         });
 
         test("enqueue rejects a payload that does not match its type", async ({ harness }) => {
@@ -89,7 +93,6 @@ analysisSuite({
 
             expect(await claim(harness, run.branchId, snapshotId)).toBe(3);
             expect(await harness.eventStore.hasPending(run.branchId)).toBe(false);
-            expect(await harness.eventStore.peekLatestPending(run.branchId)).toBeUndefined();
 
             const listed = await harness.eventStore.listForSnapshot(snapshotId);
             expect(listed.map((event) => event.id).sort()).toEqual([...ids].sort());

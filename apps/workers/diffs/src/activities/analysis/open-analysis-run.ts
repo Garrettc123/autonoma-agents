@@ -7,7 +7,7 @@ import type {
     OpenAnalysisRunOutput,
     OpenAnalysisSkipReason,
 } from "@autonoma/workflow/activities";
-import { getAnalysisStore } from "../../services";
+import { getAnalysisEventStore, getAnalysisStore } from "../../services";
 import { settleAnalysisRunState } from "./settle-analysis-run-state";
 
 /** How many times an open re-resolves after losing to a concurrent settlement or promotion. */
@@ -48,6 +48,9 @@ export async function openAnalysisRun(input: OpenAnalysisRunInput): Promise<Open
     // rather than suppressing the run outright.
     if (resolved.alreadyAnalyzed) {
         logger.info("Run skipped: head already analyzed", { branch: { branchId } });
+        // This head was already analyzed, so its pending events belong to the snapshot that did it: hand them to the
+        // active snapshot rather than leave them pending to re-poke a run that would skip again.
+        await getAnalysisEventStore().markHandledByActiveSnapshot(branchId);
         return { skipped: true, reason: "already_analyzed" };
     }
     if (resolved.source == null || resolved.baseSha == null) throw new NoAnalysisBaseError(branchId);
@@ -90,6 +93,8 @@ async function openSuperseding(
                     { snapshotId: identity.snapshotId, organizationId: identity.organizationId },
                     tx,
                 );
+                // Claim in the open transaction, so the snapshot and the events it analyzes commit together.
+                await getAnalysisEventStore().claimPending(tx, identity.branchId, identity.snapshotId);
             },
         });
     };

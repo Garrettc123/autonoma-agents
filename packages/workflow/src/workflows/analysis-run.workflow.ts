@@ -61,8 +61,9 @@ type BuildHandle = ChildWorkflowHandle<(input: PreviewBuildWorkflowInput) => Pro
 
 export interface AnalysisRunWorkflowInput {
     branchId: string;
+    /** Fallback head, used only when the run cannot resolve a live one (a pre-field in-flight replay, GitHub down). */
     headSha: string;
-    /** Only used for a branch with no active snapshot yet - the PR base the trigger read from GitHub. */
+    /** Fallback PR base, paired with the fallback head; used only for a branch with no active snapshot yet. */
     baseSha?: string;
 }
 
@@ -71,13 +72,17 @@ export interface AnalysisRunWorkflowInput {
  * unconditionally, ahead of opening the run: a customer owed a refresh gets it even if the pipeline fails.
  */
 export async function analysisRunWorkflow(input: AnalysisRunWorkflowInput): Promise<void> {
-    const { branchId, headSha, baseSha } = input;
-    log.info("Analysis run started", { branch: { branchId }, extra: { headSha } });
+    const { branchId } = input;
 
-    // Asked first: the answer decides whether there is a build to warrant at all, and names the branch's owner.
-    const resolved = await previewkitReads.resolvePreviewTarget({ branchId, headSha });
+    // Asked first: it names the branch's owner, decides whether there is a build to warrant, AND resolves the head
+    // to analyze from the source of truth (the live PR/branch head, or the recorded deployment). `?? input.headSha`
+    // is the fallback for a run already in flight before that field existed - its recorded output carries no head.
+    const resolved = await previewkitReads.resolvePreviewTarget({ branchId, headSha: input.headSha });
+    const headSha = resolved.headSha ?? input.headSha;
+    const baseSha = input.baseSha;
     const { target } = resolved;
     const ids = runIds(branchId, resolved);
+    log.info("Analysis run started", { branch: { branchId }, extra: { headSha } });
 
     // Refuse BEFORE opening the run: a snapshot would take this head as analyzed, and the customer's own trigger -
     // the only thing that can record their preview - would then be dropped as a duplicate, stranding the commit.

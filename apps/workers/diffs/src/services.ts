@@ -1,4 +1,4 @@
-import { AnalysisStore } from "@autonoma/analysis";
+import { AnalysisEventStore, AnalysisStore } from "@autonoma/analysis";
 import { db } from "@autonoma/db";
 import { type ModelSession, openModelSession } from "@autonoma/diffs/analysis";
 import { S3Storage } from "@autonoma/storage";
@@ -47,4 +47,14 @@ export function getAnalysisStore(): AnalysisStore {
         analysisStoreSingleton = new AnalysisStore(db);
     }
     return analysisStoreSingleton;
+}
+
+let analysisEventStoreSingleton: AnalysisEventStore | undefined;
+
+/** The analysis inbox over this worker's database client, constructed once. The run peeks and claims through it. */
+export function getAnalysisEventStore(): AnalysisEventStore {
+    if (analysisEventStoreSingleton == null) {
+        analysisEventStoreSingleton = new AnalysisEventStore(db);
+    }
+    return analysisEventStoreSingleton;
 }
