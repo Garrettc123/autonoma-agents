@@ -11,6 +11,15 @@ const FULL_SNAPSHOT = 2;
 const MUTATION = 3;
 
 /**
+ * The dashboard-frame test renders 132x34 scenes on the CPU with no IO to wait on, so its wall time tracks whatever
+ * share of a core it gets. CI's Test job runs every package's vitest suite on one runner at turbo's full concurrency,
+ * and there this has blown the 5s default that it clears by ~25x locally. The budget is far above the worst slowdown
+ * seen there, while still failing a genuine hang inside a minute. Every other test here is an order of magnitude
+ * cheaper and keeps the default.
+ */
+const RENDER_TIMEOUT_MS = 60_000;
+
+/**
  * Replays our events through rrweb itself, the way a player does.
  *
  * This exists because asserting the shape of our own JSON is not evidence that
@@ -91,7 +100,7 @@ describe("rrweb playback of our events", () => {
         for (const add of adds) expect(add.node.childNodes ?? []).toHaveLength(0);
     });
 
-    it("reproduces real dashboard frames through the whole pipeline", () => {
+    it("reproduces real dashboard frames through the whole pipeline", { timeout: RENDER_TIMEOUT_MS }, () => {
         const renderer = new HeadlessRenderer({ columns: 132, rows: 34 });
         const scenes = buildScenes();
         const frames = scenes.map((scene) => renderer.frame(scene.store.getState()));
