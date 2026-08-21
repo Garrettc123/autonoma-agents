@@ -1,4 +1,9 @@
-import { type CheckpointAnalysisSummary, type CheckpointPresentationSummary, PIPELINE_LABEL } from "@autonoma/types";
+import {
+    type CheckpointAnalysisSummary,
+    type CheckpointPresentationSummary,
+    coverageGapReason,
+    PIPELINE_LABEL,
+} from "@autonoma/types";
 import { unresolvedLabel } from "./outcome-vocab";
 
 // Builds the one-line test-result summary shown under each checkpoint row in the
@@ -42,7 +47,7 @@ function formatAuthoritativeMetrics(analysis: CheckpointAnalysisSummary): string
     const parts: string[] = [];
     if (analysis.bugCount > 0) parts.push(`${analysis.bugCount} ${analysis.bugCount === 1 ? "bug" : "bugs"}`);
     if (analysis.passedCount > 0) parts.push(`${analysis.passedCount} passed`);
-    if (analysis.coverageCount > 0) parts.push(`${analysis.coverageCount} couldn't confirm`);
+    if (analysis.coverageCount > 0) parts.push(coverageGapReason(analysis.coverageCount));
 
     if (parts.length > 0) return parts.join(" · ");
 

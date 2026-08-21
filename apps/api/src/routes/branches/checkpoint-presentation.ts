@@ -4,6 +4,7 @@ import {
     type CheckpointExecutionState,
     type CheckpointPresentationSummary,
     type CheckpointTone,
+    coverageGapReason,
     PIPELINE_LABEL,
     type RunPlaneSummary,
 } from "@autonoma/types";
@@ -137,7 +138,7 @@ function derivePresentation(
         return {
             tone: "neutral",
             label: `${run.passedCount}/${checked} verified`,
-            reason: `${run.coverage.total} couldn't complete`,
+            reason: coverageGapReason(run.coverage.total),
             executionState: "not_started",
         };
     }

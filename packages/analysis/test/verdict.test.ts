@@ -67,8 +67,8 @@ describe("PR-level reads over the tally", () => {
     const both = [verified, blocked];
 
     it("compresses to a ratio pill, and only an open bug reads as an alarm", () => {
-        expect(analysisFlowPillLabel("not_confirmed", tallyAnalysisFlows(both), 0)).toBe("1/2 verified");
-        expect(analysisFlowPillLabel("healthy", tallyAnalysisFlows([verified]), 0)).toBe("1/1 verified");
+        expect(analysisFlowPillLabel("not_confirmed", tallyAnalysisFlows(both), 0)).toBe("1/2 features verified");
+        expect(analysisFlowPillLabel("healthy", tallyAnalysisFlows([verified]), 0)).toBe("1/1 features verified");
         expect(analysisFlowPillLabel("bug_found", tallyAnalysisFlows(both), 2)).toBe("2 bugs");
     });
 

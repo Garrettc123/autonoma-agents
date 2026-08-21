@@ -508,9 +508,9 @@ const DERIVED_PILL: Record<AnalysisVerdictState, string> = {
 };
 
 /**
- * The PR-level pill: the one place a whole PR is compressed to about twelve characters. A bug is the only outcome
- * stated as an alarm; everything else is a RATIO, so a run that verified six of seven flows never reads the same as
- * one that verified none. A row with no itemization has no ratio to state and falls back to its verdict's word.
+ * The PR-level pill: the most compressed read of a whole PR. A bug is the only outcome stated as an alarm;
+ * everything else is a RATIO, so a run that verified six of seven flows never reads the same as one that verified
+ * none. A row with no itemization has no ratio to state and falls back to its verdict's word.
  */
 export function analysisFlowPillLabel(
     state: AnalysisVerdictState,
@@ -519,7 +519,15 @@ export function analysisFlowPillLabel(
 ): string {
     if (openBugCount > 0) return `${openBugCount} ${openBugCount === 1 ? "bug" : "bugs"}`;
     if (tally.total === 0) return DERIVED_PILL[state];
-    return `${tally.verified}/${tally.total} verified`;
+    return `${tally.verified}/${tally.total} features verified`;
+}
+
+/**
+ * This run's coverage-gap count as one phrase - the checks it could not confirm. Shared so the rail pill's reason and
+ * the checkpoint metrics line, which render the SAME number for the same snapshot row, can never word it two ways.
+ */
+export function coverageGapReason(count: number): string {
+    return `${count} couldn't confirm`;
 }
 
 /** Marks a flow established at an earlier commit and not re-run, so a cumulative list is not read as all-fresh. */

@@ -96,7 +96,7 @@ apiTestSuite({
 
             expect(row?.summary?.tone).toBe("neutral");
             expect(row?.summary?.label).toBe("2/3 verified");
-            expect(row?.summary?.reason).toBe("1 couldn't complete");
+            expect(row?.summary?.reason).toBe("1 couldn't confirm");
             expect(row?.summary?.analysis?.bugCount).toBe(0);
             expect(row?.health).toBe("unknown");
         });
@@ -127,7 +127,7 @@ apiTestSuite({
 
             expect(row?.summary?.tone).toBe("neutral");
             expect(row?.summary?.label).toBe("0/7 verified");
-            expect(row?.summary?.reason).toBe("7 couldn't complete");
+            expect(row?.summary?.reason).toBe("7 couldn't confirm");
             expect(row?.summary?.analysis).toEqual({
                 jobStatus: "completed",
                 bugCount: 0,

@@ -618,13 +618,13 @@ const notConfirmedReport: NonNullable<TrpcFixtures["branches"]> = {
 
     reportEvidence: [],
     run: {
-      state: "healthy",
-      coverage: { byCategory: [], total: 0 },
+      state: "not_confirmed",
+      coverage: { byCategory: [], total: 2 },
       bugCount: 0,
       passedCount: 5,
       testCount: 5,
     },
-    verdict: { state: "healthy", bugCount: 0, coverageGapCount: 0, investigatedCount: 5 },
+    verdict: { state: "not_confirmed", bugCount: 0, coverageGapCount: 2, investigatedCount: 5 },
     branchId: BRANCH_ID,
     // The PR overview renders the prose + open-issues list, not the per-snapshot findings, so this stays empty.
     findings: [],
@@ -641,7 +641,7 @@ const notConfirmedLatest: (typeof snapshotHistory)[number] = {
     ...snapshotHistory[0]!.summary!,
     tone: "neutral",
     label: "3/5 verified",
-    reason: "2 couldn't complete",
+    reason: "2 couldn't confirm",
     executionState: "not_started",
     analysis: { jobStatus: "completed", bugCount: 0, passedCount: 3, coverageCount: 2 },
   },
