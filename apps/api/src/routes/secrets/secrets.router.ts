@@ -3,6 +3,7 @@ import {
     DeleteSecretInputSchema,
     ListSecretAppsInputSchema,
     ListSecretsInputSchema,
+    SetSecretBuildTimeInputSchema,
     UpsertSecretsInputSchema,
 } from "@autonoma/types";
 import { protectedProcedure, writeProcedure, router } from "../../trpc";
@@ -25,6 +26,19 @@ export const secretsRouter = router({
         .mutation(({ ctx: { services, organizationId }, input }) =>
             services.secrets.upsert(input.applicationId, input.appName, input.items, organizationId),
         ),
+
+    setBuildTime: writeProcedure
+        .input(SetSecretBuildTimeInputSchema)
+        .mutation(async ({ ctx: { services, organizationId }, input }) => {
+            const changed = await services.secrets.setBuildTime(
+                input.applicationId,
+                input.appName,
+                input.key,
+                input.buildTime,
+                organizationId,
+            );
+            if (!changed) throw new NotFoundError(`Secret '${input.key}' not found`);
+        }),
 
     delete: writeProcedure
         .input(DeleteSecretInputSchema)

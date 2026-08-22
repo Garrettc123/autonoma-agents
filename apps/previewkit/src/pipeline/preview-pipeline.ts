@@ -1543,16 +1543,6 @@ export class PreviewPipeline {
     private async buildOneApp(app: PreviewConfig["apps"][number], ctx: AppBuildContext): Promise<AppBuildOutcome> {
         const start = Date.now();
         try {
-            if (app.build_secrets.length > 0 && !ctx.secretApps.has(app.name)) {
-                const registered = [...ctx.secretApps].sort();
-                const registeredList = registered.length > 0 ? registered.join(", ") : "(none)";
-                throw new Error(
-                    `App "${app.name}" declares build_secrets but no PreviewkitSecret row exists for it in this organization. ` +
-                        `Registered appNames across the org: ${registeredList}. ` +
-                        `Upsert a secret via PUT /v1/secrets/{applicationId}/${app.name} on the Application that owns this app's repo.`,
-                );
-            }
-
             const imageTag = buildPreviewImageReference({
                 registry: ctx.registry,
                 org: ctx.org,
@@ -1568,13 +1558,11 @@ export class PreviewPipeline {
             });
             const dir = ctx.appRepoDirs.get(app.name);
             if (dir == null) throw new Error(`No repo directory found for app "${app.name}"`);
-            const secretBuildArgs =
-                app.build_secrets.length > 0
-                    ? await this.buildSecrets.forKeys(
-                          { kind: "app", applicationId: ctx.applicationId, appName: app.name },
-                          app.build_secrets,
-                      )
-                    : {};
+            const secretBuildArgs = await this.buildSecrets.forBuild({
+                kind: "app",
+                applicationId: ctx.applicationId,
+                appName: app.name,
+            });
 
             // Build-time connections are topology values (e.g. a Vite frontend's
             // {{api.url}}) baked into the image; they resolve like runtime

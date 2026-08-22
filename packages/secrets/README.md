@@ -66,13 +66,13 @@ Under `postgres` a listing is served entirely from stored columns - no key is un
 
 ### The same flag covers the deploy runner
 
-Values are read in two places on the runner side: `build_secrets:` build args (`BuildSecretSource`), and the runtime K8s Secret a preview's pods mount (`RuntimeSecrets`).
+Values are read in two places on the runner side: the Docker build args (`BuildSecretSource`, which asks for the rows flagged `build_time`), and the runtime K8s Secret a preview's pods mount (`RuntimeSecrets`).
 
 **Neither falls back.** Both read Postgres and nothing else, so a registered bundle that cannot be served fails the deploy. That is the safe direction: a build that succeeds against no credentials produces an image that boots and then misbehaves, or ships, and an app rolled out against an unpopulated Secret comes up "ready" and 401s every signed call. `awsSecretArn` is now read by nothing.
 
 The runner does not take its CMK from its own config either. Its Job env comes from a shared secret carrying production's values, while `DATABASE_URL` is injected per-Job from the launching API - so a beta deploy runs against beta's database. The encryption key the CMK unwraps lives in *that* database, which makes the CMK meaningless apart from that `DATABASE_URL`: `PreviewkitJobLauncher` injects `PREVIEWKIT_SECRETS_CMK` from the API's own env alongside it.
 
-A build arg that resolves to nothing produces an image that boots and then misbehaves, far from the cause - so `BuildSecretSource` fails the build for any `build_secrets:` key the bundle does not have, and fails outright for a bundle it cannot open at all, rather than handing the build an empty map. `RuntimeSecrets` fails the deploy on the same principle: an app whose Secret was never written would roll out "ready" against missing credentials.
+A build arg that resolves to nothing produces an image that boots and then misbehaves, far from the cause. The `build_time` flag lives on the value, so that cannot happen for build args any more - a flagged row always has one. `BuildSecretSource` still fails outright for a bundle it cannot open at all, rather than handing a build an empty map, and `RuntimeSecrets` fails the deploy on the same principle: an app whose Secret was never written would roll out "ready" against missing credentials.
 
 ### The runtime K8s Secret
 

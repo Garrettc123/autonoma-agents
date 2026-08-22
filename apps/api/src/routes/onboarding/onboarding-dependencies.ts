@@ -36,6 +36,13 @@ export interface OnboardingPreviewkitSecretsService {
         items: SecretItem[],
         callerOrgId: string,
     ): Promise<PreviewkitSecretsUpsertResult | void>;
+    setBuildTime(
+        applicationId: string,
+        appName: string,
+        key: string,
+        buildTime: boolean,
+        callerOrgId: string,
+    ): Promise<boolean>;
     delete(applicationId: string, appName: string, key: string, callerOrgId: string): Promise<boolean>;
     getValue?(applicationId: string, appName: string, key: string, callerOrgId: string): Promise<string | undefined>;
 }

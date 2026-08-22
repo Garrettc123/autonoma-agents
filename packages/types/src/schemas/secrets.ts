@@ -36,6 +36,15 @@ export const SecretItemSchema = z.object({
         }
     }),
     value: z.string().min(1).max(65536),
+    /**
+     * Whether the build gets this value as a Docker build arg, on top of the runtime
+     * environment. Omitted leaves an existing key's setting alone rather than clearing
+     * it, so a caller sending only a new value cannot turn it off by accident; a key
+     * that does not exist yet defaults to build-time, because a build that cannot see
+     * a value it needs fails obscurely. Pass `false` for a value the image must not
+     * carry.
+     */
+    buildTime: z.boolean().optional(),
 });
 export type SecretItem = z.infer<typeof SecretItemSchema>;
 
@@ -57,6 +66,14 @@ export const UpsertSecretsInputSchema = z.object({
 });
 export type UpsertSecretsInput = z.infer<typeof UpsertSecretsInputSchema>;
 
+export const SetSecretBuildTimeInputSchema = z.object({
+    applicationId: z.string(),
+    appName: AppNameSchema,
+    key: SecretKeySchema,
+    buildTime: z.boolean(),
+});
+export type SetSecretBuildTimeInput = z.infer<typeof SetSecretBuildTimeInputSchema>;
+
 export const DeleteSecretInputSchema = z.object({
     applicationId: z.string(),
     appName: AppNameSchema,
@@ -68,6 +85,8 @@ export type SecretSummary = {
     key: string;
     maskedLength: number;
     updatedAt: Date;
+    /** Whether the build gets this value as a build arg, not just the running app. */
+    buildTime: boolean;
     /**
      * The first 12 hex chars of SHA-256 of the value - a non-reversible fingerprint
      * for checking whether a value MATCHES a candidate you already hold, without
@@ -85,6 +104,15 @@ export const PreviewkitConfigAppSecretsSchema = z.object({
     appName: AppNameSchema,
     upserts: z.array(SecretItemSchema).max(200).default([]),
     deletes: z.array(SecretKeySchema).max(200).default([]),
+    /**
+     * Keys whose build-time flag alone changed. Separate from `upserts` because the
+     * editor holds no value for an already-stored secret, so it cannot express the
+     * change as a write of the whole item.
+     */
+    buildTimeChanges: z
+        .array(z.object({ key: SecretKeySchema, buildTime: z.boolean() }))
+        .max(200)
+        .default([]),
 });
 export type PreviewkitConfigAppSecrets = z.infer<typeof PreviewkitConfigAppSecretsSchema>;
 

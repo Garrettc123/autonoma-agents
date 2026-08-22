@@ -47,6 +47,5 @@ describe("resolveConfig", () => {
         });
         expect(config.apps[0].name).toBe("web");
         expect(config.apps[0].connections).toEqual([]);
-        expect(config.apps[0].build_secrets).toEqual([]);
     });
 });

@@ -23,7 +23,6 @@ const apps: AppConfig[] = [
         port: 3000,
         connections: [],
         resources: { tier: "standard", cpu: "250m", memory: "512Mi" },
-        build_secrets: [],
     },
     {
         name: "api",
@@ -32,7 +31,6 @@ const apps: AppConfig[] = [
         port: 4000,
         connections: [],
         resources: { tier: "standard", cpu: "250m", memory: "512Mi" },
-        build_secrets: [],
     },
 ];
 

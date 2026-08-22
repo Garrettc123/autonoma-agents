@@ -62,10 +62,10 @@ Recommended flow when a PREVIEW fails to build or deploy (for a test or app fail
 2. If a service failed to BUILD: call get_build_logs (start with from="tail" to see the failure; use from="head" for the start of the build). Missing build inputs often show up as a missing env var.
 3. If a service BUILT but crashes or errors at RUNTIME: call get_app_logs (from="tail" for the crash, from="head" for startup).
 4. Call diagnose_deploy(repoFullName, prNumber) to get all the raw evidence in one call - status, each service's state, the latest build outcome, a rule-based failure classification, the config's env-key surface, and error-shaped logs - plus deterministic findings categorized as a missing env var, a setup problem, or a platform error. Reason over the signals yourself; a "platform error" (autonoma_error) is on Autonoma, so contact support rather than editing your repo.
-5. Call get_secret_status(repoFullName) to see the full env-var surface per app: topology connections (with their template values) and secret-backed vars (declared build secrets + registered runtime secrets), including which declared build secrets are missing. Secret VALUES are never returned - only presence and masked length.
+5. Call get_secret_status(repoFullName) to see the full env-var surface per app: topology connections (with their template values) and the secrets that are set, each flagged with whether the build gets it as well as the running app. Secret VALUES are never returned - only presence and masked length. It lists only what EXISTS: a variable nobody has set has no row, so it cannot report one as missing - diff the list against what your code reads.
 6. Apply the fix. Three kinds:
-   - A missing secret VALUE (an API key, token, password): call set_secret(repoFullName, prNumber, app, key, value). It stores the value and rebuilds or restarts the service automatically.
-   - How ONE existing service is built or wired (build path, Dockerfile, port, which keys are injected at build, topology connections): call edit_previewkit_config(repoFullName, prNumber, app, ...the fields to change). It saves the change and rebuilds the service.
+   - A missing secret VALUE (an API key, token, password): call set_secret(repoFullName, prNumber, app, key, value). It stores the value and rebuilds or restarts the service automatically. The value reaches both the build and the running app unless you pass buildTime: false.
+   - How ONE existing service is built or wired (build path, Dockerfile, port, topology connections): call edit_previewkit_config(repoFullName, prNumber, app, ...the fields to change). It saves the change and rebuilds the service.
    - The SHAPE of the preview (add or remove an app, add or remove a service like a database or a redis cache): call get_config(repoFullName) to read the full document, edit it, and send it back with apply_config(repoFullName, prNumber, document). It redeploys the environment.
    For anything in your source (code, a committed Dockerfile), edit this repo and push - Autonoma re-runs on the new commit.
 
@@ -500,11 +500,13 @@ export function registerDebugTools(server: McpServer, deps: DebugToolDeps): void
             description:
                 "The full env-var surface per app, so you can see every variable you may need to change: " +
                 "`connections` are topology-wired vars with their (non-secret) template values shown as-is; " +
-                "`secrets` are secret-backed vars (declared build secrets plus any registered runtime secrets) with " +
-                "presence, masked length, and a non-reversible `fingerprint` (first 12 hex of SHA-256 of the value) - " +
-                "never the value itself; hash a value you hold as sha256(value).hex.slice(0,12) and compare to check a " +
-                "match. `missingBuildSecrets` are declared build secrets with no value set (a concrete misconfig to " +
-                "fix). Names the app by repoFullName ('owner/repo') or applicationId.",
+                "`secrets` are the values that ARE set, with presence, masked length, `buildTime` (whether the build " +
+                "gets it as a build arg, not just the running app), and a non-reversible `fingerprint` (first 12 hex " +
+                "of SHA-256 of the value) - never the value itself; hash a value you hold as " +
+                "sha256(value).hex.slice(0,12) and compare to check a match.\n\n" +
+                "It CANNOT tell you a variable is missing. Only set values have rows, so a key the app needs and " +
+                "nobody has supplied is simply absent from the list rather than reported - compare against what the " +
+                "code actually reads. Names the app by repoFullName ('owner/repo') or applicationId.",
             inputSchema: targetInputFields,
             annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
         },
@@ -530,27 +532,31 @@ export function registerDebugTools(server: McpServer, deps: DebugToolDeps): void
                 "token, password, or any variable whose value should not live in the repo. Like the config, secrets " +
                 "are stored PER APPLICATION and per service, never per pull request: every environment gets this " +
                 "value, and `prNumber` names only which environment is rebuilt or restarted to pick it up. The " +
-                "value is stored encrypted and never returned. This is the fix for a missing env var. You do NOT say " +
-                "whether it's a build-time or runtime var: the tool reads your config and applies the minimal action " +
-                "itself - it rebuilds the service if the key is a declared build secret (the value is baked into the " +
-                "image at build), otherwise it restarts the service (a runtime secret). It never edits your config " +
-                "structure. To declare which keys are injected at build, add a connection, or change the " +
-                "Dockerfile/path/port, use edit_previewkit_config. Rule of thumb: a secret VALUE goes here; how the " +
-                "app is built or wired goes to edit_previewkit_config. The response returns a non-reversible " +
-                "`fingerprint` of the value you set (first 12 hex of SHA-256) so you can confirm it. The " +
-                "rebuild/restart is async - call wait_for_deploy(repoFullName, prNumber, app) afterward to block " +
-                "until it settles.",
+                "value is stored encrypted and never returned. This is the fix for a missing env var.\n\n" +
+                "`buildTime` controls whether the value is ALSO passed as a Docker build arg, on top of the runtime " +
+                "environment it is always in. A new key defaults to build-time, because a value the build needs but " +
+                "cannot see fails in a way that is hard to trace back to a flag - so you normally do not pass it at " +
+                "all. Pass `buildTime: false` for a value the IMAGE must not carry: a build-time value is written " +
+                "into the image, so anyone who can pull it can read it. Setting a build-time value rebuilds the " +
+                "service; a runtime-only one only restarts it. OMITTING it on a key that already exists keeps " +
+                "whatever it is set to, so rotating a value cannot accidentally change when it is used.\n\n" +
+                "It never edits your config structure. To add a connection or change the Dockerfile/path/port, use " +
+                "edit_previewkit_config. Rule of thumb: a secret VALUE goes here; how the app is built or wired goes " +
+                "to edit_previewkit_config. The response returns a non-reversible `fingerprint` of the value you set " +
+                "(first 12 hex of SHA-256) so you can confirm it. The rebuild/restart is async - call " +
+                "wait_for_deploy(repoFullName, prNumber, app) afterward to block until it settles.",
             inputSchema: {
                 ...targetPrInput,
                 app: requiredAppNameSchema(),
                 key: z.string().min(1).max(255),
                 value: z.string().min(1).max(65536).optional(),
+                buildTime: z.boolean().optional(),
             },
             annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
         },
         async (input) =>
             analytics.track("set_secret", async () => {
-                const { prNumber, app, key, value } = input;
+                const { prNumber, app, key, value, buildTime } = input;
                 logger.info("set_secret", {
                     extra: { target: describeTarget(input), prNumber, app, key, removing: value == null },
                 });
@@ -563,6 +569,7 @@ export function registerDebugTools(server: McpServer, deps: DebugToolDeps): void
                         appName: app,
                         key,
                         value,
+                        buildTime,
                         organizationId,
                     });
                     return jsonResult(result);
@@ -578,10 +585,10 @@ export function registerDebugTools(server: McpServer, deps: DebugToolDeps): void
             title: "Edit the preview config",
             description:
                 "Change the STRUCTURAL preview config for one service: its build `path`, `dockerfile`, `port`, " +
-                "the env-var keys injected at build time (`buildSecrets`), or its topology " +
-                '`connections` (non-secret env wired to other services - values are templates like "{{db.url}}"). ' +
-                "Only the fields you pass are changed; the rest are kept. It never sets a secret VALUE - use " +
-                "set_secret for an API key, token, or password.\n\n" +
+                "or its topology `connections` (non-secret env wired to other services - values are templates " +
+                'like "{{db.url}}"). ' +
+                "Only the fields you pass are changed; the rest are kept. It never sets a secret VALUE, nor whether " +
+                "a secret reaches the build - both belong to set_secret.\n\n" +
                 "THE CONFIG IS PER APPLICATION, NOT PER PULL REQUEST. The edit is saved to the application's one " +
                 "config document, which the base environment and every open pull request deploy from - so this " +
                 "changes main and every other PR too. Per-environment configuration is a known limitation and may " +
@@ -599,7 +606,6 @@ export function registerDebugTools(server: McpServer, deps: DebugToolDeps): void
                 path: z.string().min(1).max(1024).optional(),
                 dockerfile: z.string().min(1).max(1024).optional(),
                 port: z.number().int().positive().max(65535).optional(),
-                buildSecrets: z.array(z.string().min(1).max(255)).max(100).optional(),
                 connections: z
                     .array(
                         z.object({
@@ -616,7 +622,7 @@ export function registerDebugTools(server: McpServer, deps: DebugToolDeps): void
         },
         async (input) =>
             analytics.track("edit_previewkit_config", async () => {
-                const { prNumber, app, path, dockerfile, port, buildSecrets, connections, apply } = input;
+                const { prNumber, app, path, dockerfile, port, connections, apply } = input;
                 logger.info("edit_previewkit_config", {
                     extra: { target: describeTarget(input), prNumber, app, apply },
                 });
@@ -627,7 +633,7 @@ export function registerDebugTools(server: McpServer, deps: DebugToolDeps): void
                         repoFullName,
                         prNumber,
                         appName: app,
-                        patch: { path, dockerfile, port, buildSecrets, connections },
+                        patch: { path, dockerfile, port, connections },
                         apply: apply ?? true,
                         organizationId,
                     });

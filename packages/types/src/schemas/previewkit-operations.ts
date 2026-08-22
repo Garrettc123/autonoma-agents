@@ -39,6 +39,8 @@ export const previewkitOperationSchema = z.discriminatedUnion("op", [
         app: z.string().min(1),
         key: z.string().min(1),
         value: z.string(),
+        /** Omitted leaves an existing key's build-time setting as it is. */
+        buildTime: z.boolean().optional(),
     }),
     z.object({
         op: z.literal("deleteSecret"),

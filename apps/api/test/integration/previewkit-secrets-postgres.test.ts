@@ -182,6 +182,132 @@ apiTestSuite({
             );
         });
 
+        /**
+         * Build-time is where a new key lands, matching the editor: a value the build
+         * needs but cannot see fails obscurely, while the cost of the other mistake -
+         * the value sitting in the image - is stated at every authoring surface. Opting
+         * out takes an explicit false.
+         */
+        test("defaults a new value to build-time and honours an explicit false", async ({ harness }) => {
+            const values = await store(harness);
+            const applicationId = await application(harness);
+            const secrets = service(harness, values);
+
+            await secrets.upsert(
+                applicationId,
+                APP,
+                [
+                    { key: "SESSION_SECRET", value: "s3ss10n", buildTime: false },
+                    { key: "NPM_TOKEN", value: "npm_tok" },
+                ],
+                harness.organizationId,
+            );
+
+            const listed = await secrets.list(applicationId, APP, harness.organizationId);
+            expect(listed.map((secret) => [secret.key, secret.buildTime])).toEqual([
+                ["NPM_TOKEN", true],
+                ["SESSION_SECRET", false],
+            ]);
+        });
+
+        /**
+         * The skip-if-unchanged path compares the whole meaning of the row, not just the
+         * value - otherwise turning a stored secret into a build arg would look like a
+         * rewrite of bytes that had not moved, and be discarded.
+         */
+        test("writes a build-time flip even though the value is unchanged", async ({ harness }) => {
+            const values = await store(harness);
+            const applicationId = await application(harness);
+            const secrets = service(harness, values);
+            const item = { key: "NPM_TOKEN", value: "npm_tok" };
+            await secrets.upsert(applicationId, APP, [item], harness.organizationId);
+
+            const result = await secrets.upsert(
+                applicationId,
+                APP,
+                [{ ...item, buildTime: false }],
+                harness.organizationId,
+            );
+
+            // Reported as changed, because a caller redeploys on this and the image has
+            // to be rebuilt without the value.
+            expect(result).toEqual({ created: false, changed: true });
+            const [stored] = await secrets.list(applicationId, APP, harness.organizationId);
+            expect(stored?.buildTime).toBe(false);
+        });
+
+        test("leaves the flag alone when a write omits it", async ({ harness }) => {
+            const values = await store(harness);
+            const applicationId = await application(harness);
+            const secrets = service(harness, values);
+            await secrets.upsert(
+                applicationId,
+                APP,
+                [{ key: "NPM_TOKEN", value: "npm_tok", buildTime: false }],
+                harness.organizationId,
+            );
+
+            // Rotating a value must not quietly put the key back INTO the build either -
+            // the default applies only to a key that does not exist yet.
+            await secrets.upsert(
+                applicationId,
+                APP,
+                [{ key: "NPM_TOKEN", value: "npm_rotated" }],
+                harness.organizationId,
+            );
+
+            const [stored] = await secrets.list(applicationId, APP, harness.organizationId);
+            expect(stored?.buildTime).toBe(false);
+            expect(await values.get({ kind: "app", applicationId, appName: APP }, "NPM_TOKEN")).toBe("npm_rotated");
+        });
+
+        test("changes the flag on its own without touching the value", async ({ harness }) => {
+            const values = await store(harness);
+            const applicationId = await application(harness);
+            const secrets = service(harness, values);
+            await secrets.upsert(
+                applicationId,
+                APP,
+                [{ key: "NPM_TOKEN", value: "npm_tok", buildTime: true }],
+                harness.organizationId,
+            );
+
+            const changed = await secrets.setBuildTime(applicationId, APP, "NPM_TOKEN", false, harness.organizationId);
+
+            expect(changed).toBe(true);
+            const [stored] = await secrets.list(applicationId, APP, harness.organizationId);
+            expect(stored?.buildTime).toBe(false);
+            // The editor never holds the value, so this write must not disturb it.
+            expect(await values.get({ kind: "app", applicationId, appName: APP }, "NPM_TOKEN")).toBe("npm_tok");
+        });
+
+        test("reports nothing to change for a key that is not set", async ({ harness }) => {
+            const values = await store(harness);
+            const applicationId = await application(harness);
+            const secrets = service(harness, values);
+
+            expect(await secrets.setBuildTime(applicationId, APP, "ABSENT", true, harness.organizationId)).toBe(false);
+        });
+
+        test("hands the build only the values marked build-time", async ({ harness }) => {
+            const values = await store(harness);
+            const applicationId = await application(harness);
+            const secrets = service(harness, values);
+            await secrets.upsert(
+                applicationId,
+                APP,
+                [
+                    { key: "NPM_TOKEN", value: "npm_tok" },
+                    { key: "SESSION_SECRET", value: "s3ss10n", buildTime: false },
+                ],
+                harness.organizationId,
+            );
+
+            const forBuild = await values.getBuildTime({ kind: "app", applicationId, appName: APP });
+
+            expect(forBuild).toEqual({ NPM_TOKEN: "npm_tok" });
+        });
+
         test("drops an app from listApps once its last key is deleted", async ({ harness }) => {
             const values = await store(harness);
             const applicationId = await application(harness);

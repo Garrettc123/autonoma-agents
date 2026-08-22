@@ -1,6 +1,6 @@
 import { NotFoundError } from "@autonoma/errors";
 import { type Logger, logger as rootLogger } from "@autonoma/logger";
-import { secretFingerprint } from "@autonoma/secrets";
+import { resolveSecretBuildTime, secretFingerprint } from "@autonoma/secrets";
 import { type PreviewConfig, type PreviewRedeployAppMode, SecretItemSchema, SecretKeySchema } from "@autonoma/types";
 import type { PreviewkitConfigService } from "../routes/onboarding/previewkit-config-service";
 import type { PreviewkitSecretsService } from "./previewkit-secrets.service";
@@ -8,8 +8,8 @@ import type { PreviewkitTriggerService } from "./previewkit-trigger.service";
 
 /** The config read/write capability this service needs; narrowed so tests can inject a fake. */
 type ConfigStore = Pick<PreviewkitConfigService, "getConfig" | "save">;
-/** The secret write capability this service needs; narrowed so tests can inject a fake. */
-type SecretWriter = Pick<PreviewkitSecretsService, "upsert" | "delete">;
+/** The secret capabilities this service needs; narrowed so tests can inject a fake. */
+type SecretWriter = Pick<PreviewkitSecretsService, "upsert" | "delete" | "list">;
 /** The redeploy capability this service needs; narrowed so tests can inject a fake. */
 type Redeployer = Pick<PreviewkitTriggerService, "redeployApp" | "startRunForRedeploy">;
 
@@ -18,8 +18,6 @@ export interface AppConfigPatch {
     path?: string;
     dockerfile?: string;
     port?: number;
-    /** Env-var keys injected at build time (Docker build args). Replaces the app's `build_secrets` list. */
-    buildSecrets?: string[];
     /** Topology-wired env (non-secret template values). Replaces the app's `connections` list. */
     connections?: Array<{ key: string; value: string; buildTime?: boolean }>;
 }
@@ -34,7 +32,7 @@ export interface SetSecretResult {
      * the caller can confirm it matches what they intended. Absent when removing.
      */
     fingerprint?: string;
-    /** What was triggered to apply the change: "rebuild" (declared build secret) or "restart" (runtime). */
+    /** What was triggered to apply the change: "rebuild" (a build-time secret) or "restart" (runtime). */
     action: PreviewRedeployAppMode;
 }
 
@@ -44,7 +42,7 @@ export interface EditConfigResult {
     applied: boolean;
     /** The rebuild that was (or would be) triggered to apply the edit. */
     action: PreviewRedeployAppMode;
-    /** The app's resulting config (no secret values - `connections` hold templates, `build_secrets` hold keys). */
+    /** The app's resulting config (no secret values - `connections` hold templates). */
     app: PreviewConfig["apps"][number];
     note?: string;
 }
@@ -76,7 +74,7 @@ export interface ApplyConfigResult {
  * (path, Dockerfile, port, which keys are injected at build,
  * topology connections) goes through {@link editConfig} (saves the app's config).
  *
- * setSecret picks rebuild-vs-restart by whether the key is a declared build secret;
+ * setSecret picks rebuild-vs-restart by whether the key is marked build-time;
  * editConfig rebuilds the edited app after saving the config. A redeploy always
  * resolves the app's current saved config, so saving then rebuilding is all that
  * is needed for the edit to take effect.
@@ -94,9 +92,12 @@ export class PreviewkitWriteService {
 
     /**
      * Sets (or, when `value` is undefined, removes) one secret env var for one app
-     * and applies it: a rebuild when the key is a declared build secret (the value
-     * is baked in as a build arg), otherwise a restart (the runtime secret bridge
+     * and applies it: a rebuild when the key is marked build-time (the value is
+     * baked in as a build arg), otherwise a restart (the runtime secret bridge
      * re-syncs and the pods re-roll). Never returns or logs the value.
+     *
+     * `buildTime` omitted leaves an existing key's setting alone, so a caller
+     * rotating a value cannot silently take it out of the build.
      */
     async setSecret(params: {
         applicationId: string;
@@ -105,11 +106,16 @@ export class PreviewkitWriteService {
         appName: string;
         key: string;
         value?: string;
+        buildTime?: boolean;
         organizationId: string;
     }): Promise<SetSecretResult> {
-        const { applicationId, repoFullName, prNumber, appName, key, value, organizationId } = params;
+        const { applicationId, repoFullName, prNumber, appName, key, value, buildTime, organizationId } = params;
         const removing = value == null;
         this.logger.info("Setting preview secret", { applicationId, extra: { appName, key, removing } });
+
+        // Read BEFORE the write: a removal leaves no row to ask, and it is the
+        // outgoing value's flag that says whether the image has to be rebuilt.
+        const stored = await this.storedBuildTime(applicationId, appName, key, organizationId);
 
         let fingerprint: string | undefined;
         if (removing) {
@@ -117,19 +123,13 @@ export class PreviewkitWriteService {
             const existed = await this.secrets.delete(applicationId, appName, key, organizationId);
             if (!existed) throw new NotFoundError(`Secret "${key}" is not set for app "${appName}"`);
         } else {
-            const item = SecretItemSchema.parse({ key, value });
+            const item = SecretItemSchema.parse({ key, value, buildTime });
             await this.secrets.upsert(applicationId, appName, [item], organizationId);
             fingerprint = secretFingerprint(item.value);
         }
 
-        const action: PreviewRedeployAppMode = (await this.isDeclaredBuildSecret(
-            applicationId,
-            organizationId,
-            appName,
-            key,
-        ))
-            ? "rebuild"
-            : "restart";
+        const affectsBuild = removing ? stored === true : resolveSecretBuildTime(buildTime, stored);
+        const action: PreviewRedeployAppMode = affectsBuild ? "rebuild" : "restart";
         await this.trigger.redeployApp({ repoFullName, prNumber }, appName, action, { organizationId });
 
         this.logger.info("Preview secret applied", { applicationId, extra: { appName, key, removing, action } });
@@ -233,16 +233,15 @@ export class PreviewkitWriteService {
         return { saved: true, applied: true, apps, services };
     }
 
-    /** Whether `key` is declared in the app's `build_secrets` of the active config (decides rebuild vs restart). */
-    private async isDeclaredBuildSecret(
+    /** The stored build-time flag for one key, or undefined when the key is not set. */
+    private async storedBuildTime(
         applicationId: string,
-        organizationId: string,
         appName: string,
         key: string,
-    ): Promise<boolean> {
-        const current = await this.config.getConfig(applicationId, organizationId);
-        const app = current.document.apps.find((candidate) => candidate.name === appName);
-        return app?.build_secrets.includes(key) ?? false;
+        organizationId: string,
+    ): Promise<boolean | undefined> {
+        const present = await this.secrets.list(applicationId, appName, organizationId);
+        return present.find((secret) => secret.key === key)?.buildTime;
     }
 }
 
@@ -252,7 +251,6 @@ function applyAppPatch(app: PreviewConfig["apps"][number], patch: AppConfigPatch
     if (patch.path !== undefined) next.path = patch.path;
     if (patch.dockerfile !== undefined) next.dockerfile = patch.dockerfile;
     if (patch.port !== undefined) next.port = patch.port;
-    if (patch.buildSecrets !== undefined) next.build_secrets = patch.buildSecrets;
     if (patch.connections !== undefined) {
         next.connections = patch.connections.map((connection) => ({
             key: connection.key,

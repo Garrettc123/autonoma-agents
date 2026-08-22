@@ -86,4 +86,4 @@ connections:
       build_time: true
 ```
 
-This is the connection counterpart of [`build_secrets`](/preview-environments/secrets/#build-time-secrets-build_secrets): use `build_time` for topology values, `build_secrets` for sensitive ones.
+This is the connection counterpart of a [build-time secret](/preview-environments/secrets/#build-time-secrets): use `build_time` on a connection for topology values, and the secret's own build-time flag for sensitive ones.

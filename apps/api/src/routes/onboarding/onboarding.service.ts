@@ -116,9 +116,19 @@ export class OnboardingService extends Service {
         applicationId: string,
         organizationId: string,
         appName: string,
-        items: Array<{ key: string; value: string }>,
+        items: Array<{ key: string; value: string; buildTime?: boolean }>,
     ) {
         return this.manager.upsertPreviewkitSecrets(applicationId, organizationId, appName, items);
+    }
+
+    async setPreviewkitSecretBuildTime(
+        applicationId: string,
+        organizationId: string,
+        appName: string,
+        key: string,
+        buildTime: boolean,
+    ) {
+        return this.manager.setPreviewkitSecretBuildTime(applicationId, organizationId, appName, key, buildTime);
     }
 
     async deletePreviewkitSecret(applicationId: string, organizationId: string, appName: string, key: string) {

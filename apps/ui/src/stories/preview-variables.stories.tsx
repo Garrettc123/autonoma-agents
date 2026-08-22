@@ -14,7 +14,10 @@ import {
 
 // Secrets live outside the config document, so it carries only their keys - the
 // editor merges them in as write-only rows with an empty value.
-const STORED_SECRET_KEYS = ["STRIPE_SECRET_KEY", "RESEND_API_KEY"];
+const STORED_SECRETS = [
+  { key: "STRIPE_SECRET_KEY", buildTime: false },
+  { key: "RESEND_API_KEY", buildTime: true },
+];
 
 /** A saved config for the ordinary shape: one Next.js web app wired to a Postgres service. */
 const savedConfig = previewConfigSchema.parse({
@@ -42,10 +45,10 @@ const savedConfig = previewConfigSchema.parse({
 
 const baseDraft = draftFromConfig(savedConfig, [{ repo: "acme/storefront", primary: true }], "saved");
 
-/** The saved app plus the masked secret rows the editor merges in from the stored key list. */
+/** The saved app plus the masked secret rows the editor merges in from the store. */
 const webApp: AppDraft = {
   ...baseDraft.apps[0]!,
-  env: withSecretRows(baseDraft.apps[0]!.env, STORED_SECRET_KEYS),
+  env: withSecretRows(baseDraft.apps[0]!.env, STORED_SECRETS),
 };
 
 /**

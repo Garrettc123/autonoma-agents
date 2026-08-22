@@ -45,7 +45,7 @@ export interface GenerateDockerfileContext {
      * lines right after `WORKDIR`. "" disables injection.
      */
     npmRegistryMirror: string;
-    /** Merged build args (build_args + resolved build_secrets); emitted as `ENV` lines. */
+    /** Merged build args (build_args + the build-time secret values); emitted as `ENV` lines. */
     buildArgs: Record<string, string>;
     /** Container port the app listens on; emitted as `ENV PORT` + `EXPOSE`. */
     port: number;

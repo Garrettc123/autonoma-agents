@@ -28,7 +28,7 @@ import {
  *
  * Two rules hold the round trip together:
  * - Decompose PARSE OUTPUT only. Stored documents are already
- *   defaults-materialized (`path`, `build_secrets`, `resources`, ...), so the
+ *   defaults-materialized (`path`, `depends_on`, `resources`, ...), so the
  *   columns are non-nullable and composition never has to re-apply a default.
  * - A null column composes to an ABSENT key, never `null` - except where a null
  *   means the row is malformed, which is passed through so the reader's schema
@@ -71,7 +71,6 @@ export interface PreviewkitConfigAppRow {
     dockerfile: string | null;
     build: unknown;
     blueprint: unknown;
-    buildSecrets: string[];
     port: number;
     command: string | null;
     primary: boolean | null;
@@ -145,7 +144,6 @@ export interface PreviewkitConfigAppValues {
     dockerfile?: string;
     build?: PreviewConfig["apps"][number]["build"];
     blueprint?: PreviewConfig["apps"][number]["blueprint"];
-    buildSecrets: string[];
     port: number;
     command?: string;
     primary?: boolean;
@@ -266,7 +264,6 @@ function appFromRow(app: PreviewkitConfigAppRow): Record<string, unknown> {
         dockerfile: app.dockerfile ?? undefined,
         build: app.build ?? undefined,
         blueprint: app.blueprint ?? undefined,
-        build_secrets: app.buildSecrets,
         port: app.port,
         connections: byPosition(app.connections).map((connection) => ({
             key: connection.key,
@@ -344,7 +341,6 @@ function appValues(app: PreviewConfig["apps"][number], position: number): Previe
         dockerfile: app.dockerfile,
         build: app.build,
         blueprint: app.blueprint,
-        buildSecrets: app.build_secrets,
         port: app.port,
         command: app.command,
         primary: app.primary,

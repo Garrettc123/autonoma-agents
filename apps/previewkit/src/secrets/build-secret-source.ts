@@ -6,9 +6,7 @@ import { type Logger, logger as rootLogger } from "../logger";
  * The values a build reads, from Postgres.
  *
  * Keyed by bundle rather than by any external identifier: that is what the store
- * needs, and it is the only key that cannot resolve to the wrong owner. It also
- * owns the key-picking, so a `build_secrets:` key the bundle does not have fails
- * here rather than reaching buildctl as an empty build arg.
+ * needs, and it is the only key that cannot resolve to the wrong owner.
  *
  * There is no second store. A bundle Postgres cannot serve is an error, not a
  * reason to look elsewhere - handing a build an empty map bakes an image against
@@ -33,32 +31,24 @@ export class BuildSecretSource {
     }
 
     /**
-     * Just the requested keys, for the config's `build_secrets:`.
+     * The values marked build-time, as build args.
      *
-     * A requested key the bundle does not have fails the build rather than inlining
-     * an empty value, because a build arg that silently resolves to nothing produces
-     * an image that boots and then misbehaves.
+     * An empty map is a normal answer - most apps declare none - which is why this
+     * does not go through {@link open}: that treats an empty bundle as a failure,
+     * correctly, because it is asked for every value an app needs to RUN.
      */
-    async forKeys(bundle: SecretBundle, keys: readonly string[]): Promise<Record<string, string>> {
-        const values = await this.open(bundle);
-
-        const picked: Record<string, string> = {};
-        const missing: string[] = [];
-        for (const key of keys) {
-            const value = values[key];
-            if (value == null) {
-                missing.push(key);
-                continue;
-            }
-            picked[key] = value;
-        }
-
-        if (missing.length > 0) {
+    async forBuild(bundle: SecretBundle): Promise<Record<string, string>> {
+        if (this.values == null) {
             throw new Error(
-                `Secrets for ${describeSecretBundle(bundle)} are missing keys requested via build_secrets: ` +
-                    missing.join(", "),
+                `Cannot read build-time secrets for ${describeSecretBundle(bundle)}: this environment has no ` +
+                    `PREVIEWKIT_SECRETS_CMK configured, so no encryption key can be unwrapped.`,
             );
         }
+
+        const picked = await this.values.getBuildTime(bundle);
+        this.logger.info("Read build-time secrets from postgres", {
+            extra: { bundle: describeSecretBundle(bundle), keyCount: Object.keys(picked).length },
+        });
         return picked;
     }
 

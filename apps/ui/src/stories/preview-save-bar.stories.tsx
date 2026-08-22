@@ -40,10 +40,10 @@ const savedResponse = {
   repos: [{ repo: "acme/storefront", primary: true, githubRepositoryId: 101 }],
 };
 
-/** The app's existing secret bundle - keys only, the way the API hands it back. */
+/** The app's existing secrets - no values, the way the API hands them back. */
 const storedSecrets = [
-  { key: "STRIPE_SECRET_KEY", maskedLength: 8, updatedAt: FIXTURE_EPOCH, fingerprint: "aa11" },
-  { key: "RESEND_API_KEY", maskedLength: 8, updatedAt: FIXTURE_EPOCH, fingerprint: "bb22" },
+  { key: "STRIPE_SECRET_KEY", maskedLength: 8, updatedAt: FIXTURE_EPOCH, fingerprint: "aa11", buildTime: false },
+  { key: "RESEND_API_KEY", maskedLength: 8, updatedAt: FIXTURE_EPOCH, fingerprint: "bb22", buildTime: true },
 ];
 
 /** A live app: onboarding done, previews on PreviewKit and verified. */

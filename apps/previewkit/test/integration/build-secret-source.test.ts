@@ -11,10 +11,16 @@ integrationTestSuite<PreviewkitTestHarness, undefined>({
     createHarness: () => PreviewkitTestHarness.create(),
     seed: async () => undefined,
     cases: (test) => {
-        /** An Application, plus a sealed bundle under it when `sealed` names any keys. */
+        /**
+         * An Application, plus a sealed bundle under it when `sealed` names any keys.
+         * A value given as a tuple states its build-time flag; a bare string takes the
+         * store's default, which is build-time - so a test that cares about a
+         * runtime-only value has to say `[value, false]` rather than rely on the plain
+         * form.
+         */
         async function bundleWith(
             harness: PreviewkitTestHarness,
-            sealed: Record<string, string>,
+            sealed: Record<string, string | [string, boolean]>,
         ): Promise<SecretBundle> {
             const { organizationId } = await harness.createOrganization();
             const application = await harness.db.application.create({
@@ -43,7 +49,11 @@ integrationTestSuite<PreviewkitTestHarness, undefined>({
                 await mintSecretKey({ db: harness.db, provider, keyId: "1" });
                 await new SecretValues(harness.db, new SecretKeys(harness.db, provider)).put(
                     bundle,
-                    Object.entries(sealed).map(([key, value]) => ({ key, value })),
+                    Object.entries(sealed).map(([key, entry]) =>
+                        typeof entry === "string"
+                            ? { key, value: entry }
+                            : { key, value: entry[0], buildTime: entry[1] },
+                    ),
                 );
             }
             return bundle;
@@ -67,18 +77,18 @@ integrationTestSuite<PreviewkitTestHarness, undefined>({
             });
         });
 
-        test("picks only the requested build_secrets keys", async ({ harness }) => {
-            const bundle = await bundleWith(harness, { WANTED: "yes", OTHER: "no" });
+        test("passes only the build-time values as build args", async ({ harness }) => {
+            const bundle = await bundleWith(harness, { WANTED: ["yes", true], OTHER: ["no", false] });
 
-            expect(await source(harness).forKeys(bundle, ["WANTED"])).toEqual({ WANTED: "yes" });
+            expect(await source(harness).forBuild(bundle)).toEqual({ WANTED: "yes" });
         });
 
-        test("fails the build for a requested key the bundle does not have", async ({ harness }) => {
-            const bundle = await bundleWith(harness, { PRESENT: "yes" });
+        test("answers empty for a bundle whose values are all runtime-only", async ({ harness }) => {
+            // Unlike forBundle, this is the common case rather than a failure: most apps
+            // need nothing at build time, so there is nothing to distinguish it from.
+            const bundle = await bundleWith(harness, { RUNTIME_ONLY: ["no", false] });
 
-            // An empty build arg would bake an image that boots and then misbehaves, so
-            // this fails at the read instead of reaching buildctl.
-            await expect(source(harness).forKeys(bundle, ["PRESENT", "ABSENT"])).rejects.toThrow(/ABSENT/);
+            expect(await source(harness).forBuild(bundle)).toEqual({});
         });
 
         test("fails rather than answering empty for a bundle holding nothing", async ({ harness }) => {

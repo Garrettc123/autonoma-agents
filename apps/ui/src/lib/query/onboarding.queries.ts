@@ -583,6 +583,21 @@ export function useUpsertPreviewkitSecrets() {
     });
 }
 
+export function useSetPreviewkitSecretBuildTime() {
+    const queryClient = useQueryClient();
+    const onStepMismatch = useStepMismatchHandler();
+    return useAPIMutation({
+        ...trpc.onboarding.setPreviewkitSecretBuildTime.mutationOptions({
+            onSettled: () => {
+                void queryClient.invalidateQueries({ queryKey: trpc.onboarding.listPreviewkitSecrets.queryKey() });
+                void queryClient.invalidateQueries({ queryKey: trpc.onboarding.getPreviewReadiness.queryKey() });
+            },
+            onError: (error) => onStepMismatch(error),
+        }),
+        errorToast: { title: "Failed to change when the secret is used" },
+    });
+}
+
 export function useDeletePreviewkitSecret() {
     const queryClient = useQueryClient();
     const onStepMismatch = useStepMismatchHandler();

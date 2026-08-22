@@ -165,11 +165,11 @@ an unexpected crash exits non-zero, so the Job's `backoffLimit: 1` retries just 
   `sha` per repo onto `resolvedConfig`. A repo with no resolvable branch records its apps `skipped` (with the
   reason) and then FAILS the deploy before any image builds - previews are all-or-nothing, so an app that can
   never come up makes the preview unpublishable. Two independent secret read paths:
-    - **Build-time values** go through `secrets/build-secret-source.ts` (`build_secrets:`
-      build args). Postgres only - there is no AWS fallback here, so a
-      registered bundle Postgres cannot serve fails the deploy rather than building against nothing.
-      It owns the key-picking, so a missing `build_secrets:` key fails there too. Callers pass a
-      `SecretBundle` and nothing else.
+    - **Build-time values** go through `secrets/build-secret-source.ts` (`forBuild`, the Docker
+      build args). Postgres only - there is no AWS fallback here, so a bundle Postgres cannot
+      serve fails the deploy rather than building against nothing. Which keys those are is a
+      column on the secret row (`build_time`), not a list on the app, so there is no key-picking
+      and no way to name a key that has no value. Callers pass a `SecretBundle` and nothing else.
     - **The runtime K8s Secret pods mount** goes through `secrets/runtime-secrets.ts`, which loads
       the Application's rows, collapses rows folding to one Secret target
       (`dedupe-secret-targets.ts`), and hands them to `postgres-secret-materializer.ts`, which
@@ -372,12 +372,13 @@ app lines in a recent window.
   is no document column: the rows are the only stored form. Every app names its `repository`
   (`owner/repo` full name), multirepo dependency apps included. There is no dependency sidecar: a
   multirepo dependency's apps are rows of this one config, tagged by `repository`.
-- `PreviewkitSecret` - one row per secret: an env-var name and its sealed
-  value, keyed `(applicationId, appName, key)`. There is NO bundle
-  row - a "bundle" is just the set of rows sharing a scope. So a bundle exists exactly as long as it
-  holds a key: deleting the last one removes the app from the secrets UI's bundle picker, and
-  "registered but empty" is not a representable state. Code that wants the bundles rather than the
-  rows queries `distinct: ["appName"]`.
+- `PreviewkitSecret` - one row per secret: an env-var name, its sealed value, and whether the build
+  gets it as a build arg (`build_time`). Keyed `(app_id, key)` and cascading from the
+  `PreviewkitApp` row. There is NO bundle row - a "bundle" is just the set of rows sharing an app. So
+  a bundle exists exactly as long as it holds a key: deleting the last one removes the app from the
+  secrets UI's bundle picker, and "registered but empty" is not a representable state. The same
+  property applies to `build_time`: it is a column on a value, so a key the build needs but nobody
+  has supplied cannot be represented at all.
 
 ## Access proxy (`gatekeeper`, cluster mode)
 

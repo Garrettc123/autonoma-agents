@@ -490,7 +490,8 @@ export class OnboardingManager {
     ): Promise<void> {
         const withUpserts = secrets.filter((entry) => entry.upserts.length > 0);
         const withDeletes = secrets.filter((entry) => entry.deletes.length > 0);
-        if (withUpserts.length === 0 && withDeletes.length === 0) return;
+        const withFlagChanges = secrets.filter((entry) => entry.buildTimeChanges.length > 0);
+        if (withUpserts.length === 0 && withDeletes.length === 0 && withFlagChanges.length === 0) return;
 
         const parsed = previewConfigSchema.safeParse(document);
         if (!parsed.success) {
@@ -511,6 +512,23 @@ export class OnboardingManager {
                 count: entry.upserts.length,
             });
             await secretsService.upsert(applicationId, entry.appName, entry.upserts, organizationId);
+        }
+
+        for (const entry of withFlagChanges) {
+            this.logger.info("Changing config secret build-time flags", {
+                applicationId,
+                appName: entry.appName,
+                count: entry.buildTimeChanges.length,
+            });
+            for (const change of entry.buildTimeChanges) {
+                await secretsService.setBuildTime(
+                    applicationId,
+                    entry.appName,
+                    change.key,
+                    change.buildTime,
+                    organizationId,
+                );
+            }
         }
     }
 
@@ -575,6 +593,32 @@ export class OnboardingManager {
         });
         await this.ensureApplicationOwnsPreviewkitApp(applicationId, organizationId, appName);
         await this.requirePreviewkitSecretsService().upsert(applicationId, appName, items, organizationId);
+        return this.listPreviewkitSecrets(applicationId, organizationId, appName);
+    }
+
+    /** Changes only whether the build gets this value; the value itself is untouched. */
+    async setPreviewkitSecretBuildTime(
+        applicationId: string,
+        organizationId: string,
+        appName: string,
+        key: string,
+        buildTime: boolean,
+    ) {
+        this.logger.info("Setting onboarding PreviewKit secret build-time flag", {
+            applicationId,
+            organizationId,
+            appName,
+            key,
+            extra: { buildTime },
+        });
+        await this.ensureApplicationOwnsPreviewkitApp(applicationId, organizationId, appName);
+        await this.requirePreviewkitSecretsService().setBuildTime(
+            applicationId,
+            appName,
+            key,
+            buildTime,
+            organizationId,
+        );
         return this.listPreviewkitSecrets(applicationId, organizationId, appName);
     }
 

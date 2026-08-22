@@ -74,7 +74,6 @@ describe("previewConfigSchema", () => {
     it("applies default values", () => {
         const result = previewConfigSchema.parse(validConfig);
         expect(result.apps[0].connections).toEqual([]);
-        expect(result.apps[0].build_secrets).toEqual([]);
         expect(result.repositories).toEqual([]);
         expect(result.branch_convention).toBeUndefined();
         // On the untrusted schema, omitting resources yields the app-tier standard.

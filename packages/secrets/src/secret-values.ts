@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@autonoma/db";
 import { type Logger, logger as rootLogger } from "@autonoma/logger";
 import { describeSecretBundle, type SecretBundle, scopeFor } from "@autonoma/utils";
+import { resolveSecretBuildTime } from "./resolve-build-time";
 import { sealedSecretRow } from "./sealed-secret-row";
 import { secretFingerprint } from "./secret-fingerprint";
 import type { SecretKeys } from "./secret-keys";
@@ -8,6 +9,14 @@ import type { SecretKeys } from "./secret-keys";
 export interface SecretItem {
     key: string;
     value: string;
+    /**
+     * Whether the build gets this value as a build arg, on top of the runtime env.
+     *
+     * Absent means "leave it as it is", and build-time for a key that does not exist
+     * yet. A caller writing only a new value must not have to restate the flag, or
+     * every such write would quietly turn build-time-ness off.
+     */
+    buildTime?: boolean;
 }
 
 export interface SecretValueSummary {
@@ -15,12 +24,14 @@ export interface SecretValueSummary {
     fingerprint: string;
     maskedLength: number;
     updatedAt: Date;
+    buildTime: boolean;
 }
 
 /** What a stored key already holds, reduced to what decides whether a write would change it. */
 interface SealedState {
     fingerprint: string;
     encryptionKeyId: string;
+    buildTime: boolean;
 }
 
 export interface SecretPutOptions {
@@ -48,9 +59,27 @@ export interface SecretPutResult {
  * matter: the fingerprint says the value has not moved, and the key id says it is
  * sealed under the current primary rather than one a rotation has since retired.
  */
-function isAlreadySealed(current: SealedState | undefined, item: SecretItem, primaryKeyId: string): boolean {
+interface ResolvedItem {
+    key: string;
+    value: string;
+    buildTime: boolean;
+}
+
+/**
+ * Whether writing `item` would change what the row MEANS - a different value, or a
+ * different build-time-ness. Callers redeploy on this, so a re-seal under a rotated
+ * key deliberately does not count.
+ */
+function differsFromStored(current: SealedState | undefined, item: ResolvedItem): boolean {
+    if (current == null) return true;
+    if (current.buildTime !== item.buildTime) return true;
+    return current.fingerprint !== secretFingerprint(item.value);
+}
+
+function isAlreadySealed(current: SealedState | undefined, item: ResolvedItem, primaryKeyId: string): boolean {
     if (current == null) return false;
     if (current.encryptionKeyId !== primaryKeyId) return false;
+    if (current.buildTime !== item.buildTime) return false;
     return current.fingerprint === secretFingerprint(item.value);
 }
 
@@ -112,11 +141,16 @@ export class SecretValues {
         const [appId, cipher] = await Promise.all([this.requireAppId(bundle), this.keys.primary()]);
         const sealed = await this.sealedState(appId);
         const created = sealed.size === 0;
-        const changed = items.some((item) => sealed.get(item.key)?.fingerprint !== secretFingerprint(item.value));
-        const pending: readonly SecretItem[] =
+        const resolved: readonly ResolvedItem[] = items.map((item) => ({
+            key: item.key,
+            value: item.value,
+            buildTime: resolveSecretBuildTime(item.buildTime, sealed.get(item.key)?.buildTime),
+        }));
+        const changed = resolved.some((item) => differsFromStored(sealed.get(item.key), item));
+        const pending: readonly ResolvedItem[] =
             options.force === true
-                ? items
-                : items.filter((item) => !isAlreadySealed(sealed.get(item.key), item, cipher.keyId));
+                ? resolved
+                : resolved.filter((item) => !isAlreadySealed(sealed.get(item.key), item, cipher.keyId));
 
         if (pending.length === 0) {
             this.logger.info("Secret values already sealed as given; nothing written", {
@@ -127,6 +161,7 @@ export class SecretValues {
 
         const rows = pending.map((item) => ({
             key: item.key,
+            buildTime: item.buildTime,
             ...sealedSecretRow(cipher, appId, item.key, item.value),
         }));
 
@@ -200,11 +235,14 @@ export class SecretValues {
     private async sealedState(appId: string): Promise<Map<string, SealedState>> {
         const rows = await this.db.previewkitSecret.findMany({
             where: { appId },
-            select: { key: true, fingerprint: true, encryptionKeyId: true },
+            select: { key: true, fingerprint: true, encryptionKeyId: true, buildTime: true },
         });
 
         return new Map(
-            rows.map((row) => [row.key, { fingerprint: row.fingerprint, encryptionKeyId: row.encryptionKeyId }]),
+            rows.map((row) => [
+                row.key,
+                { fingerprint: row.fingerprint, encryptionKeyId: row.encryptionKeyId, buildTime: row.buildTime },
+            ]),
         );
     }
 
@@ -223,7 +261,7 @@ export class SecretValues {
 
         const rows = await this.db.previewkitSecret.findMany({
             where: { appId, createdAt: before != null ? { lt: before } : undefined },
-            select: { key: true, fingerprint: true, maskedLength: true, updatedAt: true },
+            select: { key: true, fingerprint: true, maskedLength: true, updatedAt: true, buildTime: true },
         });
 
         return rows.sort((a, b) => a.key.localeCompare(b.key));
@@ -260,6 +298,35 @@ export class SecretValues {
         return opened;
     }
 
+    /**
+     * Just the values the build gets as build args, in the clear.
+     *
+     * Empty is a legitimate answer, unlike {@link getAll}: an app with no build-time
+     * secrets is the common case, so there is nothing to distinguish from failure.
+     */
+    async getBuildTime(bundle: SecretBundle): Promise<Record<string, string>> {
+        const appId = await this.findAppId(bundle);
+        if (appId == null) return {};
+
+        const rows = await this.db.previewkitSecret.findMany({
+            where: { appId, buildTime: true },
+            select: { key: true, envelope: true },
+        });
+
+        if (rows.length === 0) return {};
+
+        this.logger.info("Opening the build-time secrets of a bundle", {
+            extra: { bundle: describeSecretBundle(bundle), count: rows.length },
+        });
+
+        const opened: Record<string, string> = {};
+        for (const row of rows) {
+            const cipher = await this.keys.forEnvelope(row.envelope);
+            opened[row.key] = cipher.decrypt(row.envelope, scopeFor(appId, row.key));
+        }
+        return opened;
+    }
+
     /** One value in the clear, or undefined when the bundle has no such key. */
     async get(bundle: SecretBundle, key: string): Promise<string | undefined> {
         const appId = await this.findAppId(bundle);
@@ -275,6 +342,29 @@ export class SecretValues {
         this.logger.info("Opening a secret value", { extra: { bundle: describeSecretBundle(bundle), key } });
         const cipher = await this.keys.forEnvelope(row.envelope);
         return cipher.decrypt(row.envelope, scopeFor(appId, key));
+    }
+
+    /**
+     * Flips one key's build-time flag without touching its value, reporting whether
+     * the key was there to flip.
+     *
+     * Separate from {@link put} because the two callers know different things: an
+     * editor showing a stored secret has its key and never its value, so it cannot
+     * express this as a write of the whole row.
+     */
+    async setBuildTime(bundle: SecretBundle, key: string, buildTime: boolean): Promise<boolean> {
+        this.logger.info("Setting a secret's build-time flag", {
+            extra: { bundle: describeSecretBundle(bundle), key, buildTime },
+        });
+
+        const appId = await this.findAppId(bundle);
+        if (appId == null) return false;
+
+        const updated = await this.db.previewkitSecret.updateMany({
+            where: { appId, key },
+            data: { buildTime },
+        });
+        return updated.count > 0;
     }
 
     /**

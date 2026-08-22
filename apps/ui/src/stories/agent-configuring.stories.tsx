@@ -24,7 +24,6 @@ const configDocument = previewConfigSchema.parse({
       dockerfile: "Dockerfile",
       port: 3000,
       primary: true,
-      build_secrets: ["STRIPE_SECRET_KEY"],
       connections: [{ key: "DATABASE_URL", value: "{{db.url}}" }],
     },
     {
@@ -32,7 +31,6 @@ const configDocument = previewConfigSchema.parse({
       repository: "acme/storefront",
       dockerfile: "api/Dockerfile",
       port: 4000,
-      build_secrets: [],
       connections: [
         { key: "DATABASE_URL", value: "{{db.url}}" },
         { key: "REDIS_URL", value: "{{redis.url}}" },

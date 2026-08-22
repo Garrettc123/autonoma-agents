@@ -14,7 +14,6 @@ const baseApp: AppConfig = {
     repository: "my-org/my-repo",
     path: "./apps/web",
     port: 3000,
-    build_secrets: [],
     connections: [],
     resources: { tier: "medium", cpu: "250m", memory: "1Gi" },
 };

@@ -460,7 +460,7 @@ describe("dedupeSecretRows", () => {
         // can land on a half-typed key it cannot match - and appends its own masked
         // row for the same stored secret.
         const typed = envRow("STRIPE_SECRET_K", "sk_live_new", true, "new", false);
-        const merged = withSecretRows([typed], ["STRIPE_SECRET_KEY"]);
+        const merged = withSecretRows([typed], [{ key: "STRIPE_SECRET_KEY", buildTime: false }]);
         expect(merged).toHaveLength(2);
 
         // The user finishes the key: both rows now hold STRIPE_SECRET_KEY.
@@ -471,9 +471,10 @@ describe("dedupeSecretRows", () => {
         expect(rows[0]).toMatchObject({ id: typed.id, key: "STRIPE_SECRET_KEY", value: "sk_live_new" });
         // The surviving row still represents the stored secret, so the save overwrites
         // it instead of deleting it.
-        expect(diffAppSecrets(rows, ["STRIPE_SECRET_KEY"])).toEqual({
-            upserts: [{ key: "STRIPE_SECRET_KEY", value: "sk_live_new" }],
+        expect(diffAppSecrets(rows, [{ key: "STRIPE_SECRET_KEY", buildTime: false }])).toEqual({
+            upserts: [{ key: "STRIPE_SECRET_KEY", value: "sk_live_new", buildTime: false }],
             deletes: [],
+            buildTimeChanges: [],
         });
     });
 
@@ -653,5 +654,48 @@ describe("renameOperations", () => {
 
     it("ignores a row id the loaded document does not know", () => {
         expect(renameOperations(draftApps([{ rowId: "pkapp_gone", name: "whatever" }]), loaded)).toEqual([]);
+    });
+});
+
+describe("diffAppSecrets build-time changes", () => {
+    const stored = [{ key: "NPM_TOKEN", buildTime: false }];
+
+    it("reports a stored secret the user only re-flagged", () => {
+        // A stored row carries no value, so there is nothing to upsert - without its own
+        // list the toggle would be dropped and the save would appear to succeed.
+        const row = envRow("NPM_TOKEN", "", true, "secret", true);
+
+        expect(diffAppSecrets([row], stored)).toEqual({
+            upserts: [],
+            deletes: [],
+            buildTimeChanges: [{ key: "NPM_TOKEN", buildTime: true }],
+        });
+    });
+
+    it("reports nothing when the flag still matches the store", () => {
+        const row = envRow("NPM_TOKEN", "", true, "secret", false);
+
+        expect(diffAppSecrets([row], stored)).toEqual({ upserts: [], deletes: [], buildTimeChanges: [] });
+    });
+
+    it("folds a flag change into the upsert when the value was re-entered too", () => {
+        const row = envRow("NPM_TOKEN", "npm_new", true, "new", true);
+
+        // The upsert carries the flag, so listing it twice would write it twice.
+        expect(diffAppSecrets([row], stored)).toEqual({
+            upserts: [{ key: "NPM_TOKEN", value: "npm_new", buildTime: true }],
+            deletes: [],
+            buildTimeChanges: [],
+        });
+    });
+
+    it("does not report a flag change for a key the store never had", () => {
+        const row = envRow("BRAND_NEW", "", true, "secret", true);
+
+        expect(diffAppSecrets([row], stored)).toEqual({
+            upserts: [],
+            deletes: ["NPM_TOKEN"],
+            buildTimeChanges: [],
+        });
     });
 });

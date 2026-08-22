@@ -207,15 +207,19 @@ export class PreviewkitOperationsService {
     private async setSecret(
         tx: Parameters<Parameters<PrismaClient["$transaction"]>[0]>[0],
         configId: string,
-        operation: { app: string; key: string; value: string },
+        operation: { app: string; key: string; value: string; buildTime?: boolean },
         cipher: Awaited<ReturnType<SecretKeys["primary"]>>,
     ): Promise<void> {
         const appId = await this.requireApp(tx, configId, operation.app);
         const row = sealedSecretRow(cipher, appId, operation.key, operation.value);
+        // An absent buildTime means "leave it as it is", which is exactly what an
+        // undefined field does in both halves of an upsert: the create falls back to
+        // the column default (build-time), and the update does not touch it. So a
+        // caller rotating a value cannot silently take the key out of the build.
         await tx.previewkitSecret.upsert({
             where: { appId_key: { appId, key: operation.key } },
-            create: { appId, key: operation.key, ...row },
-            update: row,
+            create: { appId, key: operation.key, buildTime: operation.buildTime, ...row },
+            update: { ...row, buildTime: operation.buildTime },
         });
     }
 

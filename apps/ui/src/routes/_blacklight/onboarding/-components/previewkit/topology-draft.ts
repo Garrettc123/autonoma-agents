@@ -95,7 +95,7 @@ export type EnvRowOrigin = "config" | "secret" | "new";
  *   - a connection (`sensitive: false`): a `{{target.property}}` binding to
  *     another app/service, resolved at deploy time (compiles to `connections`).
  * `buildTime` mirrors the value into the image build (a secret key becomes a
- * `build_secrets` entry; a connection gets `build_time: true`).
+ * the secret's own build-time flag; a connection gets `build_time: true`).
  */
 export interface EnvRowDraft {
     id: number;
@@ -574,14 +574,12 @@ function appDraftFromConfig(app: PreviewConfig["apps"][number], origin: AppDraft
     draft.sdkImplemented = app.sdk_implemented === true;
     draft.sdkPath = app.sdk_path ?? "";
     draft.dependsOn = app.depends_on ?? [];
-    // Connections become non-sensitive binding rows; build-time secret keys seed
-    // sensitive rows (value blank - the store never returns it), marked build-time.
-    // The remaining secrets are merged in from the stored key list.
+    // Connections become non-sensitive binding rows. Secrets are not in the document
+    // at all - withSecretRows merges them in from the store, each with its own flag.
     const connectionRows = app.connections.map((connection) =>
         envRow(connection.key, connection.value, false, "config", connection.build_time),
     );
-    const buildSecretRows = app.build_secrets.map((key) => envRow(key, "", true, "secret", true));
-    draft.env = sortEnvRows([...connectionRows, ...buildSecretRows]);
+    draft.env = sortEnvRows(connectionRows);
     return draft;
 }
 
@@ -985,22 +983,18 @@ function compileApp(app: AppDraft): Record<string, unknown> {
     if (app.sdkPath.trim() !== "") compiled.sdk_path = app.sdkPath.trim();
     if (app.dependsOn.length > 0) compiled.depends_on = app.dependsOn;
 
-    // Secrets (sensitive rows) live in the secret store; only their build-time subset is named
-    // here. Connections (non-sensitive binding rows) are the deploy-time wiring.
-    const buildSecrets: string[] = [];
+    // Secrets (sensitive rows) live entirely in the secret store, build-time flag
+    // included, so nothing about them is emitted here. Connections (non-sensitive
+    // binding rows) are the deploy-time wiring.
     const connections: Array<Record<string, unknown>> = [];
     for (const row of app.env) {
         const key = row.key.trim();
         if (key === "") continue;
-        if (row.sensitive) {
-            if (row.buildTime) buildSecrets.push(key);
-            continue;
-        }
+        if (row.sensitive) continue;
         // A non-sensitive row is a connection: its value is a template (possibly
         // composite, e.g. `mongodb://{{db.host}}:{{db.port}}/x`) resolved at deploy.
         connections.push({ key, value: row.value, build_time: row.buildTime });
     }
-    if (buildSecrets.length > 0) compiled.build_secrets = buildSecrets;
     compiled.connections = connections;
 
     return compiled;
@@ -1035,18 +1029,18 @@ export function sortEnvRows(rows: EnvRowDraft[]): EnvRowDraft[] {
 }
 
 /**
- * Seeds an app's env rows from its existing secret bundle: every secret key
- * becomes a masked, sensitive row (value blank - the store never returns it). Keys
- * already present as config env rows are skipped (the config env value wins for
- * display; the user can toggle it sensitive).
+ * Seeds an app's env rows from its existing secrets: each becomes a masked,
+ * sensitive row (value blank - the store never returns it) carrying the store's own
+ * build-time flag. Keys already present as config env rows are skipped (the config
+ * env value wins for display; the user can toggle it sensitive).
+ *
+ * This is the ONLY source of secret rows - the config document does not name them.
  */
-export function withSecretRows(envRows: EnvRowDraft[], secretKeys: string[]): EnvRowDraft[] {
+export function withSecretRows(envRows: EnvRowDraft[], secrets: StoredSecret[]): EnvRowDraft[] {
     const existing = new Set(envRows.map((row) => row.key.trim()));
-    // Build-time secrets are already seeded from the document (build_secrets); the
-    // rest arrive here from the stored key list as runtime-only secret rows.
-    const secretRows = secretKeys
-        .filter((key) => !existing.has(key))
-        .map((key) => envRow(key, "", true, "secret", false));
+    const secretRows = secrets
+        .filter((secret) => !existing.has(secret.key))
+        .map((secret) => envRow(secret.key, "", true, "secret", secret.buildTime));
     return sortEnvRows([...envRows, ...secretRows]);
 }
 
@@ -1184,28 +1178,56 @@ export function envRowsFromDotenv(
     return [...byKey.values()];
 }
 
+/** A secret as the store reports it: its key and whether the build gets it. Never a value. */
+export interface StoredSecret {
+    key: string;
+    buildTime: boolean;
+}
+
 export interface AppSecretsDiff {
-    upserts: Array<{ key: string; value: string }>;
+    upserts: Array<{ key: string; value: string; buildTime: boolean }>;
     deletes: string[];
+    /**
+     * Stored keys whose build-time flag alone moved. They need their own write: the
+     * editor is holding no value for them, so there is nothing to upsert.
+     */
+    buildTimeChanges: Array<{ key: string; buildTime: boolean }>;
 }
 
 /**
- * Diffs an app's current env rows against the secret keys it loaded with:
+ * Diffs an app's current env rows against the secrets it loaded with:
  *   - upserts: sensitive rows with a (re-)entered value.
  *   - deletes: loaded secret keys no longer represented by a sensitive row
  *     (removed, renamed, or toggled back to non-sensitive).
+ *   - buildTimeChanges: stored rows the user only re-flagged.
+ *
+ * A row with both a new value and a new flag is an upsert alone - the upsert carries
+ * the flag, so listing it in both would write it twice.
  */
-export function diffAppSecrets(envRows: EnvRowDraft[], loadedSecretKeys: string[]): AppSecretsDiff {
-    const upserts: Array<{ key: string; value: string }> = [];
+export function diffAppSecrets(envRows: EnvRowDraft[], loaded: StoredSecret[]): AppSecretsDiff {
+    const storedByKey = new Map(loaded.map((secret) => [secret.key, secret]));
+    const upserts: Array<{ key: string; value: string; buildTime: boolean }> = [];
+    const buildTimeChanges: Array<{ key: string; buildTime: boolean }> = [];
     const sensitiveKeys = new Set<string>();
+
     for (const row of envRows) {
         const key = row.key.trim();
         if (!row.sensitive || key === "") continue;
         sensitiveKeys.add(key);
-        if (row.value !== "") upserts.push({ key, value: row.value });
+
+        if (row.value !== "") {
+            upserts.push({ key, value: row.value, buildTime: row.buildTime });
+            continue;
+        }
+
+        const stored = storedByKey.get(key);
+        if (stored != null && stored.buildTime !== row.buildTime) {
+            buildTimeChanges.push({ key, buildTime: row.buildTime });
+        }
     }
-    const deletes = loadedSecretKeys.filter((key) => !sensitiveKeys.has(key));
-    return { upserts, deletes };
+
+    const deletes = loaded.map((secret) => secret.key).filter((key) => !sensitiveKeys.has(key));
+    return { upserts, deletes, buildTimeChanges };
 }
 
 /** Field keys the app card understands; everything else lands in `documentErrors`. */
@@ -1228,7 +1250,6 @@ export const APP_DRAFT_FIELDS = [
     "dependsOn",
     "env",
     "connections",
-    "buildSecrets",
 ] as const;
 
 export type AppDraftField = (typeof APP_DRAFT_FIELDS)[number];
@@ -1273,7 +1294,6 @@ const APP_FIELD_LOCATIONS: Record<AppDraftField, { label: string; tab: string }>
     dependsOn: { label: "Depends on", tab: "Overview" },
     env: { label: "Variables", tab: "Variables" },
     connections: { label: "Variables", tab: "Variables" },
-    buildSecrets: { label: "Variables", tab: "Variables" },
 };
 
 export interface FieldIssueSummary {
@@ -1380,7 +1400,6 @@ const APP_FIELD_BY_DOCUMENT_KEY: Record<string, AppDraftField> = {
     sdk_path: "sdkPath",
     depends_on: "dependsOn",
     connections: "connections",
-    build_secrets: "buildSecrets",
 };
 
 // Build-block schema errors carry a `build` path (`apps.i.build.entrypoint`); map

@@ -2,6 +2,7 @@ import {
     DeleteSecretInputSchema,
     ListSecretsInputSchema,
     PreviewkitConfigSecretsSchema,
+    SetSecretBuildTimeInputSchema,
     SecretItemSchema,
     UpsertSecretsInputSchema,
     authoringPreviewConfigSchema,
@@ -272,6 +273,18 @@ export const onboardingRouter = router({
                 ctx.organizationId,
                 input.appName,
                 input.items,
+            ),
+        ),
+
+    setPreviewkitSecretBuildTime: onboardingWriteProcedure
+        .input(SetSecretBuildTimeInputSchema)
+        .mutation(({ ctx, input }) =>
+            ctx.services.onboarding.setPreviewkitSecretBuildTime(
+                input.applicationId,
+                ctx.organizationId,
+                input.appName,
+                input.key,
+                input.buildTime,
             ),
         ),
 

@@ -19,7 +19,6 @@ const configDocument = previewConfigSchema.parse({
       dockerfile: "Dockerfile",
       port: 3000,
       primary: true,
-      build_secrets: ["STRIPE_SECRET_KEY"],
       connections: [{ key: "DATABASE_URL", value: "{{db.url}}" }],
     },
   ],

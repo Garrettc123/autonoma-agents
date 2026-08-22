@@ -61,6 +61,7 @@ import {
   serviceRecipeIsDatabase,
   uniqueServiceName,
   withSecretRows,
+  type StoredSecret,
   mapIssuesToDraft,
   pruneDanglingDependsOn,
   sdkHostAppId,
@@ -217,7 +218,7 @@ function PreviewkitConfigContent({
   const deploy = useTriggerPreviewkitMainDeploy();
   const queryClient = useQueryClient();
   const repoName = repositoryQuery.data?.fullName ?? "your linked repository";
-  const loadedSecretKeys = useRef<Map<string, string[]>>(new Map());
+  const loadedSecretKeys = useRef<Map<string, StoredSecret[]>>(new Map());
 
   const [draft, setDraftState] = useState<TopologyDraft>(() =>
     draftFromConfig(configQuery.data.document, configQuery.data.repos, configQuery.data.saved ? "saved" : "starter"),
@@ -266,25 +267,25 @@ function PreviewkitConfigContent({
             const list = await queryClient.fetchQuery(
               trpc.secrets.list.queryOptions({ applicationId: appId, appName }),
             );
-            return [appName, list.map((secret) => secret.key)] as const;
+            return [appName, list.map((secret) => ({ key: secret.key, buildTime: secret.buildTime }))] as const;
           } catch (err) {
             console.warn("Failed to load preview secrets for app", { appName, err });
-            return [appName, [] as string[]] as const;
+            return [appName, [] as StoredSecret[]] as const;
           }
         }),
       );
       if (cancelled) return;
       const storedKeys = new Map(entries);
       setDraft((current) => {
-        const representedKeys = new Map<string, string[]>();
+        const representedKeys = new Map<string, StoredSecret[]>();
         const apps = current.apps.map((app) => {
           const appName = app.name.trim();
-          const keys = storedKeys.get(appName) ?? [];
-          const env = withSecretRows(app.env, keys);
+          const stored = storedKeys.get(appName) ?? [];
+          const env = withSecretRows(app.env, stored);
           const sensitiveKeys = new Set(env.filter((row) => row.sensitive).map((row) => row.key.trim()));
           representedKeys.set(
             appName,
-            keys.filter((key) => sensitiveKeys.has(key)),
+            stored.filter((secret) => sensitiveKeys.has(secret.key)),
           );
           return { ...app, env };
         });
@@ -313,7 +314,7 @@ function PreviewkitConfigContent({
   const groupSaved = (): boolean => allSaved;
   const secretsDirty = draft.apps.some((app) => {
     const diff = diffAppSecrets(app.env, loadedSecretKeys.current.get(app.name.trim()) ?? []);
-    return diff.upserts.length > 0 || diff.deletes.length > 0;
+    return diff.upserts.length > 0 || diff.deletes.length > 0 || diff.buildTimeChanges.length > 0;
   });
   const configReadyForSecrets = allSaved && !secretsDirty && !hasBlockingIssues;
   const canDeploy = configReadyForSecrets;
@@ -499,14 +500,20 @@ function PreviewkitConfigContent({
 
     // Secret values (from the Variables step) persist alongside the config in one
     // call: sensitive rows with a (re-)entered value are upserted, loaded keys no
-    // longer represented are deleted. Only primary-repo apps have a secret store.
+    // longer represented are deleted, and a stored secret the user only re-flagged
+    // rides along as a build-time change. Only primary-repo apps have a secret store.
     const secrets = draft.apps
       .filter((app) => app.name.trim().length >= 2)
       .map((app) => {
         const diff = diffAppSecrets(app.env, loadedSecretKeys.current.get(app.name.trim()) ?? []);
-        return { appName: app.name.trim(), upserts: diff.upserts, deletes: diff.deletes };
+        return {
+          appName: app.name.trim(),
+          upserts: diff.upserts,
+          deletes: diff.deletes,
+          buildTimeChanges: diff.buildTimeChanges,
+        };
       })
-      .filter((entry) => entry.upserts.length > 0 || entry.deletes.length > 0);
+      .filter((entry) => entry.upserts.length > 0 || entry.deletes.length > 0 || entry.buildTimeChanges.length > 0);
 
     saveConfig.mutate(
       {
@@ -529,11 +536,13 @@ function PreviewkitConfigContent({
                 ),
               })),
             };
-            const keyMap = new Map<string, string[]>();
+            const keyMap = new Map<string, StoredSecret[]>();
             for (const app of next.apps) {
               keyMap.set(
                 app.name.trim(),
-                app.env.filter((row) => row.sensitive && row.key.trim() !== "").map((row) => row.key.trim()),
+                app.env
+                  .filter((row) => row.sensitive && row.key.trim() !== "")
+                  .map((row) => ({ key: row.key.trim(), buildTime: row.buildTime })),
               );
             }
             loadedSecretKeys.current = keyMap;

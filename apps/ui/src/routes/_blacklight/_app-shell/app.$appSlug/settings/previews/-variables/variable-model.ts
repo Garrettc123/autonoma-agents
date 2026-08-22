@@ -25,7 +25,7 @@ import {
  *     `{{name.property}}` tokens (e.g. `mongodb://{{db.host}}:{{db.port}}/x`),
  *     resolved at deploy time. Never sensitive, never in the secret store.
  * A variable can additionally be flagged build-time (mirrored into
- * `build_secrets` for a secret, `connections[].build_time` for a connection).
+ * the secret's own `build_time` column, `connections[].build_time` for a connection).
  */
 
 /** Something a connection can reference: a managed service or another app, and the tokens it exposes. */
@@ -176,8 +176,8 @@ export interface ApplyResult {
 /**
  * Applies the drawer form to the app draft: upserts the variable row. A secret
  * is a sensitive (separately stored) row; a connection is a non-sensitive templated
- * row. `buildTime` rides on the row and compiles to `build_secrets` (secret) or
- * `connections[].build_time` (connection).
+ * row. `buildTime` rides on the row and is written to the secret itself (secret) or
+ * compiled into `connections[].build_time` (connection).
  *
  * The edited row is passed to {@link dedupeSecretRows} as the keeper, because a
  * key typed here can land on a masked row the async stored-secret merge appended

@@ -694,7 +694,6 @@ function buildPreviewConfigSchema<TBuild extends z.ZodType>(build: TBuild, allow
             blueprint: blueprintSchema.optional(),
             // The AWS-secret keys to also inject at build time (Docker build args).
             // Runtime secret values live in AWS Secrets Manager, never in this document.
-            build_secrets: z.array(z.string()).default([]),
             port: z.number().int().positive(),
             // Non-secret variables wired to the topology, resolved at deploy time.
             // All user-typed values are secrets (AWS), so they never appear here.

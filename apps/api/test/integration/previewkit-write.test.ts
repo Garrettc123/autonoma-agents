@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { integrationTestSuite } from "@autonoma/integration-test";
-import type { PreviewConfig, PreviewRedeployAppMode, SecretItem } from "@autonoma/types";
+import type { PreviewConfig, PreviewRedeployAppMode, SecretItem, SecretSummary } from "@autonoma/types";
 import { expect } from "vitest";
 import type { PreviewEnvironmentKey } from "../../src/previewkit/previewkit-trigger.service";
 import { PreviewkitWriteService } from "../../src/previewkit/previewkit-write.service";
@@ -16,8 +16,12 @@ function expectedFingerprint(value: string): string {
     return createHash("sha256").update(value, "utf8").digest("hex").slice(0, 12);
 }
 
-/** Records secret writes; delete's return is configurable to simulate present/absent keys. */
-function fakeSecretWriter() {
+/**
+ * Records secret writes; `delete`'s return is configurable to simulate present/absent
+ * keys, and `list` reports what the store holds - the source of build-time-ness now,
+ * so it decides whether a write rebuilds or restarts.
+ */
+function fakeSecretWriter(stored: SecretSummary[] = []) {
     const upserts: { appName: string; items: SecretItem[] }[] = [];
     const deletes: { appName: string; key: string }[] = [];
     let deleteReturns = true;
@@ -27,6 +31,11 @@ function fakeSecretWriter() {
         setDeletePresent(present: boolean) {
             deleteReturns = present;
         },
+        list: async (
+            _applicationId: string,
+            _appName: string,
+            _callerOrgId: string | undefined,
+        ): Promise<SecretSummary[]> => stored,
         upsert: async (
             _applicationId: string,
             appName: string,
@@ -91,7 +100,6 @@ function seedDocument() {
                 path: ".",
                 port: 3000,
                 primary: true,
-                build_secrets: ["API_KEY"],
             },
         ],
         services: [],
@@ -107,7 +115,7 @@ integrationTestSuite({
         return { orgId, config };
     },
     cases: (test) => {
-        test("set_secret on a declared build secret rebuilds and returns the value's fingerprint", async ({
+        test("set_secret marked build-time rebuilds and returns the value's fingerprint", async ({
             harness,
             seedResult: { orgId, config },
         }) => {
@@ -125,6 +133,7 @@ integrationTestSuite({
                 appName: "web",
                 key: "API_KEY",
                 value: "s3cr3t-value",
+                buildTime: true,
                 organizationId: orgId,
             });
 
@@ -135,13 +144,15 @@ integrationTestSuite({
                 fingerprint: expectedFingerprint("s3cr3t-value"),
                 action: "rebuild",
             });
-            expect(secrets.upserts).toEqual([{ appName: "web", items: [{ key: "API_KEY", value: "s3cr3t-value" }] }]);
+            expect(secrets.upserts).toEqual([
+                { appName: "web", items: [{ key: "API_KEY", value: "s3cr3t-value", buildTime: true }] },
+            ]);
             expect(trigger.calls).toEqual([
                 { repoFullName: REPO_FULL_NAME, prNumber: PR_NUMBER, appName: "web", mode: "rebuild" },
             ]);
         });
 
-        test("set_secret on a non-build key restarts instead of rebuilding", async ({
+        test("set_secret marked runtime-only restarts instead of rebuilding", async ({
             harness,
             seedResult: { orgId, config },
         }) => {
@@ -159,11 +170,66 @@ integrationTestSuite({
                 appName: "web",
                 key: "SESSION_SECRET",
                 value: "runtime-only",
+                buildTime: false,
                 organizationId: orgId,
             });
 
             expect(result.action).toBe("restart");
             expect(trigger.calls[0]?.mode).toBe("restart");
+        });
+
+        test("set_secret rotating a stored build-time value still rebuilds", async ({
+            harness,
+            seedResult: { orgId, config },
+        }) => {
+            const appId = await harness.createApp(orgId);
+            await harness.linkPreviewRepo(appId, orgId, REPO_FULL_NAME);
+            await config.save(appId, orgId, seedDocument());
+            // Already build-time in the store, and the caller says nothing about it.
+            const secrets = fakeSecretWriter([
+                { key: "API_KEY", maskedLength: 8, buildTime: true, updatedAt: new Date() },
+            ]);
+            const trigger = fakeRedeployer();
+            const service = new PreviewkitWriteService(config, secrets, trigger);
+
+            const result = await service.setSecret({
+                applicationId: appId,
+                repoFullName: REPO_FULL_NAME,
+                prNumber: PR_NUMBER,
+                appName: "web",
+                key: "API_KEY",
+                value: "rotated",
+                organizationId: orgId,
+            });
+
+            expect(result.action).toBe("rebuild");
+        });
+
+        test("set_secret removing a stored build-time key rebuilds", async ({
+            harness,
+            seedResult: { orgId, config },
+        }) => {
+            const appId = await harness.createApp(orgId);
+            await harness.linkPreviewRepo(appId, orgId, REPO_FULL_NAME);
+            await config.save(appId, orgId, seedDocument());
+            const secrets = fakeSecretWriter([
+                { key: "API_KEY", maskedLength: 8, buildTime: true, updatedAt: new Date() },
+            ]);
+            const trigger = fakeRedeployer();
+            const service = new PreviewkitWriteService(config, secrets, trigger);
+
+            // The row is gone by the time the action is chosen, so the flag has to be
+            // read before the delete - the outgoing value is what was baked in.
+            const result = await service.setSecret({
+                applicationId: appId,
+                repoFullName: REPO_FULL_NAME,
+                prNumber: PR_NUMBER,
+                appName: "web",
+                key: "API_KEY",
+                organizationId: orgId,
+            });
+
+            expect(result).toMatchObject({ removed: true, action: "rebuild" });
         });
 
         test("set_secret removing an absent key throws (never a silent no-op)", async ({
@@ -214,7 +280,7 @@ integrationTestSuite({
             expect(result.applied).toBe(true);
             expect(result.app.port).toBe(4000);
             // The unpatched field is preserved.
-            expect(result.app.build_secrets).toEqual(["API_KEY"]);
+            expect(result.app.primary).toBe(true);
 
             // The saved config now carries the patched port (a redeploy resolves the
             // current saved config, so a plain rebuild is enough to apply the edit).

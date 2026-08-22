@@ -9,7 +9,6 @@ function app(name: string, depends_on?: string[]): AppConfig {
         path: ".",
         port: 3000,
         connections: [],
-        build_secrets: [],
         resources: { tier: "standard", cpu: "250m", memory: "512Mi" },
         depends_on,
     };

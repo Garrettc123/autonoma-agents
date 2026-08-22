@@ -18,7 +18,7 @@ Two things in that panel are worth knowing before you start. A saved secret can 
 
 Both routes write to the same encrypted store, so a value set in the UI is visible to the API and vice versa. The value lives encrypted in the platform's database - never in your config, never in your repo - and is only ever readable by your own organization. Updates take effect on the next preview deploy for that app.
 
-Because a secret lives outside the config, it also saves on its own. When the only thing you have changed is secrets, the save button reads **Save secrets** and writes just those - so a rotation goes through even when the rest of the config is mid-edit or has a problem of its own. Changing a variable's build-time toggle is the exception: that names the key in `build_secrets`, which is part of the config, so it saves with the config like any other setting.
+Because a secret lives outside the config, it also saves on its own. When the only thing you have changed is secrets, the save button reads **Save secrets** and writes just those - so a rotation goes through even when the rest of the config is mid-edit or has a problem of its own. The build-time toggle saves the same way: it is a property of the secret, not of the config.
 
 ## Secret, connection, or config value?
 
@@ -31,10 +31,10 @@ Not everything your app reads from `process.env` is a secret. Picking the right 
 | Sensitive - API keys, database URLs, signed tokens | **Secret** (UI Variables step or API) | Stored encrypted, never in the repo or config. |
 | The address of another app/service in the same preview (`{{db.host}}`, `{{api.url}}`) | **[Connection](/preview-environments/connections/)** - a templated value in the Variables step | The platform resolves the real in-cluster address at deploy time. Nothing to upload. |
 | Non-sensitive value that varies per environment (`PLAID_ENV=sandbox`) | **[Connection](/preview-environments/connections/)** with a literal value | Pinned alongside the rest of the config. Nothing to upload. |
-| A value baked into a client bundle at build time (`NEXT_PUBLIC_*`, `VITE_*`) | **Secret + `build_secrets`** | Must be present *during* the build, not just at runtime. See [Build-time secrets](#build-time-secrets-build_secrets). |
+| A value baked into a client bundle at build time (`NEXT_PUBLIC_*`, `VITE_*`) | **Secret, marked build-time** | Must be present *during* the build, not just at runtime. See [Build-time secrets](#build-time-secrets). |
 | PR / owner / namespace metadata (`{{pr}}`, `AUTONOMA_PREVIEWKIT_PR`) | Injected automatically | Reserved built-ins. See [Built-in environment variables](#built-in-environment-variables). |
 
-When in doubt, if the value is sensitive, make it a **Secret**. A secret added in the UI is build-time by default, so the client-bundle case works without you thinking about it - see [Build-time secrets](#build-time-secrets-build_secrets) for when to turn that off.
+When in doubt, if the value is sensitive, make it a **Secret**. A secret added in the UI is build-time by default, so the client-bundle case works without you thinking about it - see [Build-time secrets](#build-time-secrets) for when to turn that off.
 
 ## Managing secrets from the API
 
@@ -79,25 +79,26 @@ curl -X DELETE "https://api.autonoma.app/v1/previewkit/secrets/app_abc123/web/ST
 
 Calls without a valid Bearer token get a 401. Calls referencing an `applicationId` your key doesn't have access to are indistinguishable from "no secrets yet" - the API never reveals whether a foreign application exists.
 
-## Build-time secrets (`build_secrets`)
+## Build-time secrets
 
-`NEXT_PUBLIC_*` values for Next.js, `VITE_*` values for Vite, anything else baked into a client bundle at compile time - these need to be present during `next build` / `vite build`, not just at runtime. List them in an app's `build_secrets` and Autonoma will pass them to your builder:
+`NEXT_PUBLIC_*` values for Next.js, `VITE_*` values for Vite, anything else baked into a client bundle at compile time - these need to be present during `next build` / `vite build`, not just at runtime.
 
-```yaml
-apps:
-  - name: web
-    port: 3000
-    build_secrets:
-      - NEXT_PUBLIC_FIREBASE_API_KEY
-      - NEXT_PUBLIC_FIREBASE_PROJECT_ID
-      - NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+Build-time-ness belongs to the secret itself, so you set it where you set the value - and a new secret is build-time by default, in the UI (**Also inject at build time**, on) and over the API alike. The client-bundle case therefore works without you thinking about it.
+
+Turn it off for a value the image must not carry:
+
+```bash
+# MCP
+set_secret(repoFullName, prNumber, app, key, value, buildTime: false)
 ```
 
-Each name must already be a key you've uploaded (via the UI or the API). The build fails fast with a clear error if a listed key isn't there.
+Omitting `buildTime` on a key that already exists leaves its setting alone, so rotating a value never quietly changes when it is used.
 
-In the config UI you don't list these by hand: a variable you add has **Also inject at build time** on, so the build can see it, and the editor writes the key into `build_secrets` for you. Turn the toggle off for a value the build must not see - a build-time value is written into the image, so anyone who can pull that image can read it. Preview images are private to your organization and thrown away with the preview, which is why the default leans towards builds that work; a value you would not want in an image belongs off the toggle (or in the runtime mount only).
+A build-time value is written into the image, so anyone who can pull that image can read it. Preview images are private to your organization and thrown away with the preview, which is why the default leans towards builds that work - but a value you would not want sitting in an image belongs off the toggle.
 
-Server-only secrets (those your running pod reads via `process.env`) do not *need* to be in `build_secrets` - the runtime mount already covers them.
+Server-only secrets (those your running pod reads via `process.env`) do not *need* to be build-time - every secret is in the runtime mount regardless.
+
+Because the flag lives on the value, a key cannot be marked build-time before it has one. Set the value and the flag together and the build has what it needs; leave the value unset and the build simply does not receive that variable.
 
 ## Config-level overrides
 

@@ -2,6 +2,7 @@ import { AppNameSchema, authoringPreviewConfigSchema, connectionTargets } from "
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useDeletePreviewkitSecret,
+  useSetPreviewkitSecretBuildTime,
   usePreviewkitConfig,
   useApplyPreviewkitOperations,
   useSavePreviewkitConfig,
@@ -43,6 +44,7 @@ import {
   serviceRecipeSupportsUrlToken,
   snapshotDocument,
   withSecretRows,
+  type StoredSecret,
 } from "../../../../onboarding/-components/previewkit/topology-draft";
 
 export interface RepoGroup {
@@ -121,6 +123,7 @@ export function PreviewDraftProvider({ appId, children }: { appId: string; child
   const saveConfig = useSavePreviewkitConfig();
   const applyOperations = useApplyPreviewkitOperations();
   const upsertSecrets = useUpsertPreviewkitSecrets();
+  const setSecretBuildTime = useSetPreviewkitSecretBuildTime();
   const deleteSecret = useDeletePreviewkitSecret();
   const queryClient = useQueryClient();
 
@@ -129,12 +132,13 @@ export function PreviewDraftProvider({ appId, children }: { appId: string; child
   );
   const [savedSnapshot, setSavedSnapshot] = useState<string>(() => snapshotDocument(documentFromDraft(draft).document));
 
-  // Secret keys each app loaded with, so a save can diff upserts/deletes. Keyed by
-  // app name alone across every repo of the topology: names are unique across the
-  // merged topology (the save rejects a collision) and a secret bundle is stored per
-  // (application, app name), so a dependency-repo app needs no separate namespace.
-  // Values are never fetched (the store is write-only) - only key names, shown masked.
-  const loadedSecretKeys = useRef<Map<string, string[]>>(new Map());
+  // What each app loaded with - key plus build-time flag - so a save can diff
+  // upserts, deletes and flag-only changes. Keyed by app name alone across every repo
+  // of the topology: names are unique across the merged topology (the save rejects a
+  // collision) and a secret is stored per (app row, key), so a dependency-repo app
+  // needs no separate namespace. Values are never fetched (the store never returns
+  // one) - only key names, shown masked.
+  const loadedSecretKeys = useRef<Map<string, StoredSecret[]>>(new Map());
   // Snapshot of the draft to revert to on Cancel; refreshed on load and on save.
   const baselineDraft = useRef<TopologyDraft | undefined>(undefined);
 
@@ -154,22 +158,22 @@ export function PreviewDraftProvider({ appId, children }: { appId: string; child
             const list = await queryClient.fetchQuery(
               trpc.secrets.list.queryOptions({ applicationId: appId, appName }),
             );
-            return [appName, list.map((secret) => secret.key)] as const;
+            return [appName, list.map((secret) => ({ key: secret.key, buildTime: secret.buildTime }))] as const;
           } catch (err) {
             console.warn("Failed to load preview secrets for app", { appName, err });
-            return [appName, [] as string[]] as const;
+            return [appName, [] as StoredSecret[]] as const;
           }
         }),
       );
       if (cancelled) return;
       const storedKeys = new Map(entries);
       setDraft((current) => {
-        const representedKeys = new Map<string, string[]>();
+        const representedKeys = new Map<string, StoredSecret[]>();
         const apps = current.apps.map((app) => {
-          // Merge in existing secret keys (if any) and keep the merged list sorted.
+          // Merge in existing secrets (if any) and keep the merged list sorted.
           const appName = app.name.trim();
-          const keys = storedKeys.get(appName) ?? [];
-          const env = withSecretRows(app.env, keys);
+          const stored = storedKeys.get(appName) ?? [];
+          const env = withSecretRows(app.env, stored);
           // Track only the stored keys that ended up represented by a sensitive
           // row. A stored secret shadowed by a plaintext config row is skipped
           // by the merge - counting it would report a phantom "delete" (dirty
@@ -177,7 +181,7 @@ export function PreviewDraftProvider({ appId, children }: { appId: string; child
           const sensitiveKeys = new Set(env.filter((row) => row.sensitive).map((row) => row.key.trim()));
           representedKeys.set(
             appName,
-            keys.filter((key) => sensitiveKeys.has(key)),
+            stored.filter((secret) => sensitiveKeys.has(secret.key)),
           );
           return { ...app, env };
         });
@@ -211,7 +215,11 @@ export function PreviewDraftProvider({ appId, children }: { appId: string; child
   // left Save enabled for that whole round trip - and a second click would rename
   // an app that had already been renamed, then write the document twice.
   const isSaving =
-    applyOperations.isPending || saveConfig.isPending || upsertSecrets.isPending || deleteSecret.isPending;
+    applyOperations.isPending ||
+    saveConfig.isPending ||
+    upsertSecrets.isPending ||
+    setSecretBuildTime.isPending ||
+    deleteSecret.isPending;
   const canSave = isDirty && !isSaving && (secretsOnly || !hasBlockingIssues);
 
   const repoGroups: RepoGroup[] = [
@@ -365,11 +373,7 @@ export function PreviewDraftProvider({ appId, children }: { appId: string; child
             baselineDraft.current = structuredClone(draft);
             // The config save carried the secrets too, so every change in it landed.
             for (const change of secretChanges) {
-              adoptSecretWrites(
-                change.appName,
-                change.upserts.map((item) => item.key),
-                change.deletes,
-              );
+              adoptSecretWrites(change.appName, [...change.upserts, ...change.buildTimeChanges], change.deletes);
             }
             toastManager.add({ type: "success", title: "Preview config saved" });
           },
@@ -423,11 +427,18 @@ export function PreviewDraftProvider({ appId, children }: { appId: string; child
   async function writeAppSecrets(change: AppSecretChanges) {
     if (change.upserts.length > 0) {
       await upsertSecrets.mutateAsync({ applicationId: appId, appName: change.appName, items: change.upserts });
-      adoptSecretWrites(
-        change.appName,
-        change.upserts.map((item) => item.key),
-        [],
-      );
+      adoptSecretWrites(change.appName, change.upserts, []);
+    }
+    // Flag-only changes need their own call: the editor is holding no value for an
+    // already-stored secret, so there is nothing to upsert.
+    for (const flagChange of change.buildTimeChanges) {
+      await setSecretBuildTime.mutateAsync({
+        applicationId: appId,
+        appName: change.appName,
+        key: flagChange.key,
+        buildTime: flagChange.buildTime,
+      });
+      adoptSecretWrites(change.appName, [flagChange], []);
     }
     for (const key of change.deletes) {
       await deleteSecret.mutateAsync({ applicationId: appId, appName: change.appName, key });
@@ -436,14 +447,15 @@ export function PreviewDraftProvider({ appId, children }: { appId: string; child
   }
 
   /**
-   * Records what the store now holds for one app: `stored` keys are the ones just
-   * written (their typed value is cleared and the row becomes a masked, stored
-   * secret) and `removed` keys are gone from the bundle. Both move the baseline
-   * the dirty check diffs against, so an adopted write stops counting as pending
-   * and Cancel reverts to this state rather than to page load.
+   * Records what the store now holds for one app: `stored` are the keys just
+   * written, with the flag they were written with (their typed value is cleared and
+   * the row becomes a masked, stored secret); `removed` keys are gone from the
+   * bundle. Both move the baseline the dirty check diffs against, so an adopted
+   * write stops counting as pending and Cancel reverts to this state rather than to
+   * page load.
    */
-  function adoptSecretWrites(appName: string, stored: string[], removed: string[]) {
-    const storedKeys = new Set(stored);
+  function adoptSecretWrites(appName: string, stored: StoredSecret[], removed: string[]) {
+    const storedKeys = new Set(stored.map((secret) => secret.key));
     const removedKeys = new Set(removed);
     setDraft((current) => {
       const next: TopologyDraft = {
@@ -458,10 +470,12 @@ export function PreviewDraftProvider({ appId, children }: { appId: string; child
           };
         }),
       };
-      const loaded = new Set(loadedSecretKeys.current.get(appName) ?? []);
-      for (const key of storedKeys) loaded.add(key);
+      const loaded = new Map(
+        (loadedSecretKeys.current.get(appName) ?? []).map((secret) => [secret.key, secret] as const),
+      );
+      for (const secret of stored) loaded.set(secret.key, secret);
       for (const key of removedKeys) loaded.delete(key);
-      loadedSecretKeys.current = new Map(loadedSecretKeys.current).set(appName, [...loaded]);
+      loadedSecretKeys.current = new Map(loadedSecretKeys.current).set(appName, [...loaded.values()]);
       baselineDraft.current = structuredClone(next);
       return next;
     });
@@ -508,8 +522,9 @@ export function PreviewDraftProvider({ appId, children }: { appId: string; child
 
 interface AppSecretChanges {
   appName: string;
-  upserts: Array<{ key: string; value: string }>;
+  upserts: Array<{ key: string; value: string; buildTime: boolean }>;
   deletes: string[];
+  buildTimeChanges: Array<{ key: string; buildTime: boolean }>;
 }
 
 /**
@@ -522,15 +537,20 @@ interface AppSecretChanges {
  * secret it has nowhere to store. Such an app has no bundle to load from
  * either, so nothing was ever shown for it.
  */
-function pendingSecretChanges(draft: TopologyDraft, loadedKeys: Map<string, string[]>): AppSecretChanges[] {
+function pendingSecretChanges(draft: TopologyDraft, loadedKeys: Map<string, StoredSecret[]>): AppSecretChanges[] {
   return draft.apps
     .filter((app) => AppNameSchema.safeParse(app.name.trim()).success)
     .map((app) => {
       const appName = app.name.trim();
       const diff = diffAppSecrets(app.env, loadedKeys.get(appName) ?? []);
-      return { appName, upserts: diff.upserts, deletes: diff.deletes };
+      return {
+        appName,
+        upserts: diff.upserts,
+        deletes: diff.deletes,
+        buildTimeChanges: diff.buildTimeChanges,
+      };
     })
-    .filter((change) => change.upserts.length > 0 || change.deletes.length > 0);
+    .filter((change) => change.upserts.length > 0 || change.deletes.length > 0 || change.buildTimeChanges.length > 0);
 }
 
 /** Rewrites hook rows targeting `oldName` to follow the app's rename to `newName`. */

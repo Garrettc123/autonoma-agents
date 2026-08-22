@@ -240,6 +240,7 @@ integrationTestSuite({
             const secretsService = {
                 list: vi.fn(async () => []),
                 upsert: vi.fn(async () => undefined),
+                setBuildTime: vi.fn(async () => true),
                 delete: vi.fn(async () => true),
             };
             const manager = new OnboardingManager(harness.db, fakeScenarioManager, fakeEncryption, {
@@ -253,7 +254,12 @@ integrationTestSuite({
             // this same Application - the save judges the name against the whole
             // document, not just the primary repo's apps.
             await manager.savePreviewkitConfig(appId, orgId, multiRepoDocument(), [
-                { appName: "api-app", upserts: [{ key: "RAILS_MASTER_KEY", value: "s3cret" }], deletes: [] },
+                {
+                    appName: "api-app",
+                    upserts: [{ key: "RAILS_MASTER_KEY", value: "s3cret" }],
+                    deletes: [],
+                    buildTimeChanges: [],
+                },
             ]);
 
             expect(secretsService.upsert).toHaveBeenCalledWith(
@@ -267,7 +273,7 @@ integrationTestSuite({
             secretsService.upsert.mockClear();
             await expect(
                 manager.savePreviewkitConfig(appId, orgId, multiRepoDocument(), [
-                    { appName: "ghost", upserts: [{ key: "TOKEN", value: "x" }], deletes: [] },
+                    { appName: "ghost", upserts: [{ key: "TOKEN", value: "x" }], deletes: [], buildTimeChanges: [] },
                 ]),
             ).rejects.toThrow("PreviewKit app 'ghost' is not defined in the config");
             expect(secretsService.upsert).not.toHaveBeenCalled();

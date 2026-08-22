@@ -20,7 +20,6 @@ import { useState } from "react";
 
 // The value shown for a secret key - the actual value never reaches this UI (it lives
 // only in the user's browser and the encrypted secret store), so we show the key and a note.
-const SECRET_PLACEHOLDER = "set in the Autonoma UI";
 
 const DRAWER_FOOTER_NOTE = "Configured by your coding agent via MCP. Take over to edit any of this in the setup UI.";
 
@@ -230,20 +229,17 @@ function buildCards(document: ReturnType<typeof usePreviewkitConfig>["data"]["do
 function buildVariablesCard(
   apps: NonNullable<ReturnType<typeof usePreviewkitConfig>["data"]["document"]>["apps"],
 ): ConfigCard | undefined {
-  const secrets: DetailRow[] = [];
+  // Secrets are deliberately absent: they are rows of their own now, not part of the
+  // config document this card summarizes, so there is nothing here to read them from.
   const connections: DetailRow[] = [];
   for (const app of apps) {
-    for (const key of app.build_secrets) secrets.push({ label: key, value: SECRET_PLACEHOLDER });
     for (const connection of app.connections) connections.push({ label: connection.key, value: connection.value });
   }
-  if (secrets.length === 0 && connections.length === 0) return undefined;
+  if (connections.length === 0) return undefined;
 
-  const sections: DetailSection[] = [];
-  if (secrets.length > 0) sections.push({ heading: "secrets", rows: secrets });
-  if (connections.length > 0) sections.push({ heading: "connections", rows: connections });
+  const sections: DetailSection[] = [{ heading: "connections", rows: connections }];
 
   const summaryParts: string[] = [];
-  if (secrets.length > 0) summaryParts.push(`${secrets.length} secret${secrets.length === 1 ? "" : "s"}`);
   if (connections.length > 0) {
     summaryParts.push(`${connections.length} connection${connections.length === 1 ? "" : "s"}`);
   }

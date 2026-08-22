@@ -22,7 +22,7 @@ export interface ResolveConfigInput {
  *
  * The schema is the compatibility layer: it strips fields retired across config
  * shapes (the legacy inline `env` / `build_args`) and defaults their replacements
- * (`connections` / `build_secrets`), so any stored document parses without a
+ * (`connections` / `depends_on`), so any stored document parses without a
  * separate version-upgrade step.
  *
  * Throws `ZodError` on an invalid document (callers format it).

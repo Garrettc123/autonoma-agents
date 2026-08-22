@@ -20,6 +20,7 @@ export {
     useValidatePreviewkitConfig,
     usePreviewkitSecrets,
     usePreviewkitSecretsOptional,
+    useSetPreviewkitSecretBuildTime,
     useUpsertPreviewkitSecrets,
     useDeletePreviewkitSecret,
     useTriggerPreviewkitMainDeploy,

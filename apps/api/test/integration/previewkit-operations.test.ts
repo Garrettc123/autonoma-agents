@@ -154,6 +154,59 @@ apiTestSuite({
             expect(await values.get({ kind: "app", applicationId, appName: "web" }, "TOKEN")).toBe("t0ken");
         });
 
+        /**
+         * This path creates the row with an undefined flag, so it lands on the COLUMN
+         * default rather than the one the store's resolver applies. The two have to
+         * agree, and only a test through here says so.
+         */
+        test("a setSecret with no flag creates a build-time secret", async ({ harness }) => {
+            const { applicationId, service } = await setup(harness);
+
+            await service.apply(applicationId, harness.organizationId, [
+                replace([{ name: "web" }]),
+                { op: "setSecret", app: "web", key: "NPM_TOKEN", value: "t0ken" },
+            ]);
+
+            const stored = await harness.db.previewkitSecret.findFirstOrThrow({
+                where: { app: { config: { applicationId } }, key: "NPM_TOKEN" },
+                select: { buildTime: true },
+            });
+            expect(stored.buildTime).toBe(true);
+        });
+
+        test("a setSecret carries the build-time flag, and omitting it keeps the stored one", async ({ harness }) => {
+            const { applicationId, service, values } = await setup(harness);
+
+            await service.apply(applicationId, harness.organizationId, [
+                replace([{ name: "web" }]),
+                { op: "setSecret", app: "web", key: "NPM_TOKEN", value: "t0ken", buildTime: false },
+            ]);
+
+            const app = await harness.db.previewkitApp.findFirstOrThrow({
+                where: { config: { applicationId }, name: "web" },
+                select: { id: true },
+            });
+            const afterCreate = await harness.db.previewkitSecret.findFirstOrThrow({
+                where: { appId: app.id, key: "NPM_TOKEN" },
+                select: { buildTime: true },
+            });
+            expect(afterCreate.buildTime).toBe(false);
+
+            // Rotating the value says nothing about the flag, so the flag must not move.
+            // Testing it on the NON-default value is the point: if the resolver fell back
+            // to the default instead of the stored row, this would silently flip to true.
+            await service.apply(applicationId, harness.organizationId, [
+                { op: "setSecret", app: "web", key: "NPM_TOKEN", value: "rotated" },
+            ]);
+
+            const afterRotate = await harness.db.previewkitSecret.findFirstOrThrow({
+                where: { appId: app.id, key: "NPM_TOKEN" },
+                select: { buildTime: true },
+            });
+            expect(afterRotate.buildTime).toBe(false);
+            expect(await values.get({ kind: "app", applicationId, appName: "web" }, "NPM_TOKEN")).toBe("rotated");
+        });
+
         test("deleteSecret removes just that key", async ({ harness }) => {
             const { applicationId, service, values } = await setup(harness);
 

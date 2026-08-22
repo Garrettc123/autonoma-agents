@@ -35,7 +35,6 @@ function store(values: PreviewkitConfigRowValues): PreviewkitConfigRows {
             dockerfile: app.dockerfile ?? null,
             build: app.build ?? null,
             blueprint: app.blueprint ?? null,
-            buildSecrets: app.buildSecrets,
             port: app.port,
             command: app.command ?? null,
             primary: app.primary ?? null,
@@ -112,7 +111,6 @@ const SCHEMA_FIELDS = {
         "dockerfile",
         "build",
         "blueprint",
-        "build_secrets",
         "port",
         "connections",
         "command",
@@ -149,7 +147,6 @@ describe("preview config rows round trip", () => {
         const config = expectRoundTrip(MINIMAL);
 
         expect(config.apps[0]?.path).toBe(".");
-        expect(config.apps[0]?.build_secrets).toEqual([]);
         expect(config.services).toEqual([]);
         expect(config.hooks).toEqual({ pre_deploy: [], post_deploy: [] });
     });
@@ -171,7 +168,6 @@ describe("preview config rows round trip", () => {
                     sdk_implemented: true,
                     command: "node server.js",
                     build_context: "root",
-                    build_secrets: ["STRIPE_KEY", "SENTRY_DSN"],
                     depends_on: ["api"],
                     connections: [
                         { key: "API_URL", value: "{{api.url}}" },

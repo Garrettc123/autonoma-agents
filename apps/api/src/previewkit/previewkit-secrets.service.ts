@@ -138,6 +138,25 @@ export class PreviewkitSecretsService {
         return this.store().get(this.bundleFor(app.id, appName), key);
     }
 
+    /**
+     * Changes only whether the build gets this value, leaving the value alone.
+     * Returns whether the key was there to change.
+     */
+    async setBuildTime(
+        applicationId: string,
+        appName: string,
+        key: string,
+        buildTime: boolean,
+        callerOrgId: string,
+    ): Promise<boolean> {
+        this.logger.info("Setting secret build-time flag", { applicationId, appName, key, extra: { buildTime } });
+
+        const app = await this.findApplication(applicationId, callerOrgId);
+        if (app == null) return false;
+
+        return this.store().setBuildTime(this.bundleFor(app.id, appName), key, buildTime);
+    }
+
     /** Returns whether the key was there to remove. */
     async delete(applicationId: string, appName: string, key: string, callerOrgId: string): Promise<boolean> {
         this.logger.info("Deleting secret", { applicationId, appName, key });
