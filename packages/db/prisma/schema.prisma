@@ -2407,13 +2407,12 @@ model PreviewkitApp {
   name         String
   repository   String
   path         String
-  buildContext String?  @map("build_context")
+  buildContext String? @map("build_context")
   dockerfile   String?
   /// ![PreviewkitStoredBuild]
   build        Json?
   /// ![PreviewkitBlueprint]
   blueprint    Json?
-  buildSecrets String[] @default([]) @map("build_secrets")
   port         Int
   command      String?
 

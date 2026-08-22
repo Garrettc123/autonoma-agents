@@ -1,0 +1,13 @@
+-- Removes the list of key names that used to say which secrets a build needed.
+-- Each secret carries its own `build_time` flag now, so nothing reads this.
+--
+-- APPLY AFTER DEPLOYING, and note this is the OPPOSITE ORDER to the migration that
+-- added `previewkit_secret.build_time` - that one had to land before its deploy, this
+-- one has to land after. Both sit around the same pair of releases.
+--
+-- Why after: the release that stopped USING this column still DECLARES it on the
+-- Prisma model, and `previewkitConfigRowsInclude` reads app rows without a `select`,
+-- so Prisma emits every scalar column by name. Dropping it while that release is
+-- serving turns every preview-config read into an error about a column that is not
+-- there - which is every deploy, every secret-status call, and the config editor.
+ALTER TABLE "previewkit_app" DROP COLUMN "build_secrets";
