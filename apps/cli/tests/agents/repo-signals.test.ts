@@ -17,11 +17,20 @@ import { collectRepoSignals } from "../../src/agents/01-kb-generator/repo-signal
 const DAY_MS = 86_400_000;
 /**
  * Building the fixture history means one git subprocess per step, and CI runs
- * ~22 packages' vitest suites on a 4-vCPU runner where process work measures
- * tens of times slower than locally. The default 10s hook budget does not cover
- * a cold run there, so these hooks get a deliberately generous one.
+ * ~22 packages' vitest suites together on one 8-vCPU runner, where process work
+ * measures tens of times slower than locally. The default 10s hook budget does
+ * not cover a cold run there, so these hooks get a deliberately generous one.
  */
 const FIXTURE_SETUP_TIMEOUT_MS = 60_000;
+/**
+ * The window the agent sees, and the slots inside it reserved for the app under
+ * test - `TOP_FILES` and `ceil(TOP_FILES * FRONTEND_WINDOW_SHARE)` in
+ * repo-signals.ts. Literals rather than imports: the monorepo test below pins
+ * the split at a known size, and an expectation computed from the
+ * implementation's own constants would follow them wherever they moved.
+ */
+const WINDOW_SIZE = 40;
+const FRONTEND_RESERVE = 34;
 
 let repo: string;
 
@@ -131,6 +140,11 @@ describe("collectRepoSignals", () => {
  * app can out-rank and evict the frontend under test. When called with the app's
  * own subdirectory as its root, the window must reserve most of its slots for that
  * app while still keeping the highest-signal code from the rest of the repo.
+ *
+ * Every sibling file that competes for a slot here is MORE corrected than every
+ * frontend file, so a plain repo-wide ranking seats the siblings first and leaves
+ * the frontend well short of its reserve. That gap is what lets the assertions
+ * below tell the reserve's presence from its absence.
  */
 describe("collectRepoSignals on a monorepo (frontend under test is a subdirectory)", () => {
     let mono: string;
@@ -167,21 +181,28 @@ describe("collectRepoSignals on a monorepo (frontend under test is a subdirector
         monoRun(["config", "user.name", "T"]);
         monoRun(["config", "commit.gpgsign", "false"]);
 
-        // Bulk sibling code: 8 files changed once each, long ago, none re-touched.
-        // These are what the window's non-reserved slots fall through to.
+        // Sibling code with nothing to say: 8 files changed once, long ago, never
+        // re-touched. Sibling slots do exist, but ranking must not spend them here.
         monoCommit(
             Array.from({ length: 8 }, (_, i) => `services/api/src/handler-${i}.py`),
             300,
         );
 
-        // The sibling's hot spot: three changes on three consecutive days, so two
-        // re-touches. One commit per change, because that count IS what lifts it
-        // above the rest of the sibling code and earns it a slot.
-        for (const daysAgo of [50, 49, 48]) monoCommit(["services/api/src/hot.py"], daysAgo);
+        // The sibling that does the crowding: 19 files changed on four consecutive
+        // days -> 3 re-touches each, more than any frontend file below. Nineteen
+        // over-fills the non-reserved slots several times over, so an unreserved
+        // window would be mostly sibling code.
+        const hot = "services/api/src/hot.py";
+        const corrected = [hot, ...Array.from({ length: 18 }, (_, i) => `services/api/src/busy-${i}.py`)];
+        for (const daysAgo of [50, 49, 48, 47]) monoCommit(corrected, daysAgo);
+        // One further change to hot.py alone, so it out-ranks its 18 neighbours and
+        // is deterministically the sibling file the leftover slots must pick first.
+        monoCommit([hot], 46);
 
-        // The frontend under test: 40 modestly-corrected files, each changed twice
-        // two days apart -> one re-touch each. A genuine product surface, but
-        // individually less busy than the sibling's hot file.
+        // The frontend under test: 40 files each changed twice, two days apart ->
+        // one re-touch each. Genuine product surfaces, and the least-corrected code
+        // in the repo, which is the position the reserve exists to protect. More
+        // files than the reserve holds, so the reserve is a real cut, not a total.
         const frontend = Array.from(
             { length: 40 },
             (_, i) => `apps/web/components/feature-${String(i).padStart(2, "0")}.tsx`,
@@ -197,16 +218,23 @@ describe("collectRepoSignals on a monorepo (frontend under test is a subdirector
     it("reserves most of the window for the app under test but keeps top sibling signal", async () => {
         const signals = await collectRepoSignals(join(mono, "apps/web"));
         expect(signals).toBeDefined();
-        const paths = signals!.files;
-        expect(paths.length).toBe(40);
+        const files = signals!.files;
+        expect(files.length).toBe(WINDOW_SIZE);
 
-        const frontend = paths.filter((f) => f.path.startsWith("apps/web/"));
-        const sibling = paths.filter((f) => f.path.startsWith("services/"));
+        const frontend = files.filter((f) => f.path.startsWith("apps/web/"));
+        const sibling = files.filter((f) => f.path.startsWith("services/"));
 
-        // The frontend must dominate the window (reserved share), not be crowded out...
-        expect(frontend.length).toBeGreaterThanOrEqual(34);
-        // ...yet the busiest sibling code still earns a place (backend-feeds-UI signal).
-        expect(sibling.length).toBeGreaterThan(0);
-        expect(sibling.some((f) => f.path === "services/api/src/hot.py")).toBe(true);
+        // The split is exact on purpose. On retouch alone the 19 corrected sibling
+        // files out-rank all 40 frontend files, so a window without the reserve
+        // seats 19 siblings and cuts the frontend to 21; anything looser than
+        // equality here passes either way.
+        expect(frontend.length).toBe(FRONTEND_RESERVE);
+        expect(sibling.length).toBe(WINDOW_SIZE - FRONTEND_RESERVE);
+
+        // The leftover slots are ranked, not arbitrary: the sibling's hottest file
+        // leads them (backend-feeds-UI signal), and its never-corrected files get
+        // nothing.
+        expect(sibling[0]!.path).toBe("services/api/src/hot.py");
+        expect(sibling.some((f) => f.path.startsWith("services/api/src/handler-"))).toBe(false);
     });
 });
