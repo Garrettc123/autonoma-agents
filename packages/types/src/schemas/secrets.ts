@@ -21,21 +21,38 @@ export const AppNameSchema = z
     .max(63)
     .regex(APP_NAME_REGEX, "App name must be lowercase alphanumeric with hyphens (Kubernetes label-compatible)");
 
+/**
+ * A key a USER may set: a valid env-var name that is neither a Previewkit built-in
+ * nor an Autonoma-managed secret.
+ *
+ * Exported so every write path asks the same question. Previewkit injects the
+ * built-ins and owns the managed secrets, so letting one be overwritten does not
+ * fail loudly - it 401s every signed SDK call afterwards, far from the write.
+ */
+export const SettableSecretKeySchema = SecretKeySchema.superRefine((key, ctx) => {
+    if (isReservedPreviewkitEnvKey(key)) {
+        ctx.addIssue({
+            code: "custom",
+            message: `${key} is a reserved built-in variable and cannot be set.`,
+        });
+    } else if (isManagedPreviewkitEnvKey(key)) {
+        ctx.addIssue({
+            code: "custom",
+            message: `${key} is a secret managed by Autonoma and cannot be set.`,
+        });
+    }
+});
+
+/**
+ * A secret value. Empty is rejected: a stored empty string injects as `KEY=`, which
+ * satisfies a "is it set?" check while carrying nothing, so it fails further from the
+ * cause than an absent key would.
+ */
+export const SecretValueSchema = z.string().min(1).max(65536);
+
 export const SecretItemSchema = z.object({
-    key: SecretKeySchema.superRefine((key, ctx) => {
-        if (isReservedPreviewkitEnvKey(key)) {
-            ctx.addIssue({
-                code: "custom",
-                message: `${key} is a reserved built-in variable and cannot be set.`,
-            });
-        } else if (isManagedPreviewkitEnvKey(key)) {
-            ctx.addIssue({
-                code: "custom",
-                message: `${key} is a secret managed by Autonoma and cannot be set.`,
-            });
-        }
-    }),
-    value: z.string().min(1).max(65536),
+    key: SettableSecretKeySchema,
+    value: SecretValueSchema,
     /**
      * Whether the build gets this value as a Docker build arg, on top of the runtime
      * environment. Omitted leaves an existing key's setting alone rather than clearing

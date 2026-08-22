@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SecretKeySchema, SettableSecretKeySchema, SecretValueSchema } from "./secrets";
 
 /**
  * An ordered list of edits to an Application's preview config, applied in one
@@ -37,15 +38,24 @@ export const previewkitOperationSchema = z.discriminatedUnion("op", [
         op: z.literal("setSecret"),
         /** The app's name as the document leaves it - resolved after the renames. */
         app: z.string().min(1),
-        key: z.string().min(1),
-        value: z.string(),
+        /**
+         * The same key and value rules the single-secret surfaces apply. Shared rather
+         * than restated: this write reaches the same table, so a looser rule here is a
+         * way in for a key or value the other paths reject.
+         */
+        key: SettableSecretKeySchema,
+        value: SecretValueSchema,
         /** Omitted leaves an existing key's build-time setting as it is. */
         buildTime: z.boolean().optional(),
     }),
     z.object({
         op: z.literal("deleteSecret"),
         app: z.string().min(1),
-        key: z.string().min(1),
+        /**
+         * Format only, matching `DeleteSecretInputSchema` - a built-in or managed key
+         * that somehow got stored has to be removable.
+         */
+        key: SecretKeySchema,
     }),
 ]);
 
