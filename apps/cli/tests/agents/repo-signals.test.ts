@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -15,8 +15,26 @@ import { collectRepoSignals } from "../../src/agents/01-kb-generator/repo-signal
  */
 
 const DAY_MS = 86_400_000;
+/**
+ * Building the fixture history means one git subprocess per step, and CI runs
+ * ~22 packages' vitest suites on a 4-vCPU runner where process work measures
+ * tens of times slower than locally. The default 10s hook budget does not cover
+ * a cold run there, so these hooks get a deliberately generous one.
+ */
+const FIXTURE_SETUP_TIMEOUT_MS = 60_000;
 
 let repo: string;
+
+/**
+ * A fixture repo directory, with its path fully resolved. macOS `tmpdir()` sits
+ * behind a symlink (`/var` -> `/private/var`) and `git rev-parse --show-toplevel`
+ * reports the resolved path: left unresolved, an app subdirectory never shares a
+ * prefix with its own repo root, so the monorepo window split below is silently
+ * skipped and the window falls back to a plain repo-wide ranking.
+ */
+function makeRepoDir(prefix: string): string {
+    return realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+}
 
 function run(args: string[], env?: NodeJS.ProcessEnv): void {
     execFileSync("git", args, { cwd: repo, env: { ...process.env, ...env }, stdio: "ignore" });
@@ -38,7 +56,7 @@ function touchOn(path: string, daysAgoList: number[]): void {
 }
 
 beforeAll(() => {
-    repo = mkdtempSync(join(tmpdir(), "repo-signals-"));
+    repo = makeRepoDir("repo-signals-");
     run(["init", "-q"]);
     run(["config", "user.email", "test@example.com"]);
     run(["config", "user.name", "Test"]);
@@ -65,7 +83,7 @@ beforeAll(() => {
     touchOn(".github/workflows/ci.yml", [75, 74, 73]);
     touchOn("apps/web/components/checkout.test.ts", [36, 35, 34]);
     touchOn("dist/bundle.js", [20, 19, 18]);
-});
+}, FIXTURE_SETUP_TIMEOUT_MS);
 
 afterAll(() => {
     if (repo != null) rmSync(repo, { recursive: true, force: true });
@@ -120,37 +138,57 @@ describe("collectRepoSignals on a monorepo (frontend under test is a subdirector
     function monoRun(args: string[], env?: NodeJS.ProcessEnv): void {
         execFileSync("git", args, { cwd: mono, env: { ...process.env, ...env }, stdio: "ignore" });
     }
-    function monoCommit(path: string, daysAgo: number): void {
-        const abs = join(mono, path);
-        mkdirSync(dirname(abs), { recursive: true });
-        writeFileSync(abs, `content ${daysAgo}\n`);
+    /**
+     * Commit every given path in one commit, dated `daysAgo` before now. What the
+     * ranking reads is per-file (its own change count, and how tightly its own
+     * changes cluster), so files that share a date can share a commit: the
+     * signals are identical and the fixture costs one subprocess pair instead of
+     * one per file. Only a file whose OWN repeated changes are the point needs a
+     * commit each.
+     */
+    function monoCommit(paths: string[], daysAgo: number): void {
+        for (const path of paths) {
+            const abs = join(mono, path);
+            mkdirSync(dirname(abs), { recursive: true });
+            writeFileSync(abs, `content ${daysAgo}\n`);
+        }
         const iso = new Date(Date.now() - daysAgo * DAY_MS).toISOString();
-        monoRun(["add", "--", path]);
-        monoRun(["commit", "-m", `touch ${path}`, "--no-verify"], { GIT_AUTHOR_DATE: iso, GIT_COMMITTER_DATE: iso });
+        monoRun(["add", "--", ...paths]);
+        monoRun(["commit", "-m", `touch ${paths.length} file(s)`, "--no-verify"], {
+            GIT_AUTHOR_DATE: iso,
+            GIT_COMMITTER_DATE: iso,
+        });
     }
 
     beforeAll(() => {
-        mono = mkdtempSync(join(tmpdir(), "repo-signals-mono-"));
-        const repo = mono;
-        execFileSync("git", ["init", "-q"], { cwd: repo });
-        execFileSync("git", ["config", "user.email", "t@e.com"], { cwd: repo });
-        execFileSync("git", ["config", "user.name", "T"], { cwd: repo });
-        execFileSync("git", ["config", "commit.gpgsign", "false"], { cwd: repo });
+        mono = makeRepoDir("repo-signals-mono-");
+        monoRun(["init", "-q"]);
+        monoRun(["config", "user.email", "t@e.com"]);
+        monoRun(["config", "user.name", "T"]);
+        monoRun(["config", "commit.gpgsign", "false"]);
 
-        // A sibling backend service, busier than anything in the frontend: on the
-        // whole-repo ranking it would sit at the very top and take many slots.
-        for (let i = 0; i < 8; i++) monoCommit(`services/api/src/handler-${i}.py`, 300 - i);
-        monoCommit("services/api/src/hot.py", 50);
-        monoCommit("services/api/src/hot.py", 49);
-        monoCommit("services/api/src/hot.py", 48);
+        // Bulk sibling code: 8 files changed once each, long ago, none re-touched.
+        // These are what the window's non-reserved slots fall through to.
+        monoCommit(
+            Array.from({ length: 8 }, (_, i) => `services/api/src/handler-${i}.py`),
+            300,
+        );
 
-        // The frontend under test: 40 modestly-corrected files. Each is a genuine
-        // product surface but individually less busy than the sibling's hot files.
-        for (let i = 0; i < 40; i++) {
-            monoCommit(`apps/web/components/feature-${String(i).padStart(2, "0")}.tsx`, 60 - (i % 20));
-            monoCommit(`apps/web/components/feature-${String(i).padStart(2, "0")}.tsx`, 58 - (i % 20));
-        }
-    });
+        // The sibling's hot spot: three changes on three consecutive days, so two
+        // re-touches. One commit per change, because that count IS what lifts it
+        // above the rest of the sibling code and earns it a slot.
+        for (const daysAgo of [50, 49, 48]) monoCommit(["services/api/src/hot.py"], daysAgo);
+
+        // The frontend under test: 40 modestly-corrected files, each changed twice
+        // two days apart -> one re-touch each. A genuine product surface, but
+        // individually less busy than the sibling's hot file.
+        const frontend = Array.from(
+            { length: 40 },
+            (_, i) => `apps/web/components/feature-${String(i).padStart(2, "0")}.tsx`,
+        );
+        monoCommit(frontend, 60);
+        monoCommit(frontend, 58);
+    }, FIXTURE_SETUP_TIMEOUT_MS);
 
     afterAll(() => {
         if (mono != null) rmSync(mono, { recursive: true, force: true });
