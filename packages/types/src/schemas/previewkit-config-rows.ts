@@ -95,9 +95,6 @@ export interface PreviewkitConfigServiceRow {
     version: string | null;
     options: unknown;
     resourcesTier: ServiceResourceTier;
-    s3: boolean | null;
-    sqs: boolean | null;
-    sns: boolean | null;
     setupTasks: PreviewkitConfigSetupTaskRow[];
 }
 
@@ -168,6 +165,12 @@ export interface PreviewkitConfigServiceValues {
     version?: string;
     options: Record<string, unknown>;
     resourcesTier: ServiceResourceTier;
+    // Deliberate denormalization, for one release: write-only mirrors of
+    // options.s3/sqs/sns. Service rows are DELETE-THEN-CREATE on save, so without
+    // these a save under this release nulls the columns the previous release still
+    // reads its flags from, and a rollback deploys the aws service with nothing
+    // enabled. Composition never reads them; the follow-up that drops the columns
+    // removes them.
     s3?: boolean;
     sqs?: boolean;
     sns?: boolean;
@@ -291,9 +294,6 @@ function serviceFromRow(service: PreviewkitConfigServiceRow): Record<string, unk
             location: task.location,
         })),
         resources: serviceResourcesFromRow(service),
-        s3: service.s3 ?? undefined,
-        sqs: service.sqs ?? undefined,
-        sns: service.sns ?? undefined,
     };
 }
 
@@ -365,9 +365,9 @@ function serviceValues(service: PreviewConfig["services"][number], position: num
         version: service.version,
         options: service.options,
         resourcesTier: serviceResourceTierOrDefault(service.resources.tier),
-        s3: service.s3,
-        sqs: service.sqs,
-        sns: service.sns,
+        s3: legacyAwsFlagMirror(service.options, "s3"),
+        sqs: legacyAwsFlagMirror(service.options, "sqs"),
+        sns: legacyAwsFlagMirror(service.options, "sns"),
         setupTasks: service.setup_tasks.map((task, taskPosition) => ({
             position: taskPosition,
             command: task.command,
@@ -375,6 +375,12 @@ function serviceValues(service: PreviewConfig["services"][number], position: num
             location: task.location,
         })),
     };
+}
+
+/** An options flag as the mirror columns can carry it: a boolean, or nothing. */
+function legacyAwsFlagMirror(options: Record<string, unknown>, flag: "s3" | "sqs" | "sns"): boolean | undefined {
+    const value = options[flag];
+    return typeof value === "boolean" ? value : undefined;
 }
 
 function hookValues(steps: PreviewConfig["hooks"]["pre_deploy"], group: HookGroupKey): PreviewkitConfigHookValues[] {

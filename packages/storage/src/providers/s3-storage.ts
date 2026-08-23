@@ -16,7 +16,7 @@ export interface S3StorageConfig {
      */
     accessKeyId?: string;
     secretAccessKey?: string;
-    /** Custom endpoint URL, e.g. for LocalStack or MinIO. Enables path-style addressing. */
+    /** Custom endpoint URL, e.g. for MiniStack or MinIO. Enables path-style addressing. */
     endpoint?: string;
 }
 

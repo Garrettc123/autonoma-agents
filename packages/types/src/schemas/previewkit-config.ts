@@ -20,6 +20,7 @@ import {
     snapToResourceTier,
 } from "./previewkit-resource-tiers";
 import { PREVIEWKIT_RUNTIME_IDS, type PreviewkitRuntime } from "./previewkit-runtimes";
+import { isRecord } from "./scenarios";
 import { SecretKeySchema } from "./secrets";
 
 export interface ContainerResources {
@@ -113,6 +114,35 @@ const resourcesInput = z
  * the memory it is allowed. CPU stays a request with no limit, deliberately - a
  * cap there throttles the startup burst rather than protecting anything.
  */
+/** The retired top-level aws service-enable flags, folded into `options` on parse. */
+const LEGACY_AWS_FLAGS = ["s3", "sqs", "sns"] as const;
+
+/**
+ * Moves the retired top-level aws flags into `options`, where the aws recipe's other
+ * knobs live and where written documents now carry them. Dropping them instead would
+ * make an old aws service (or resolvedConfig snapshot) deploy as "no services
+ * enabled" and fail.
+ *
+ * Runs before validation, so the input is whatever the caller sent: only boolean
+ * flags fold (anything else was invalid under the old contract too), and an entry
+ * already present in `options` wins, so a document that says both is read the way
+ * the recipe will actually see it.
+ */
+function foldLegacyAwsServiceFlags(input: unknown): unknown {
+    if (!isRecord(input)) return input;
+    if (!LEGACY_AWS_FLAGS.some((flag) => typeof input[flag] === "boolean")) return input;
+
+    const service = { ...input };
+    const options: Record<string, unknown> = isRecord(service.options) ? { ...service.options } : {};
+    for (const flag of LEGACY_AWS_FLAGS) {
+        const value = service[flag];
+        delete service[flag];
+        if (typeof value === "boolean" && options[flag] == null) options[flag] = value;
+    }
+    service.options = options;
+    return service;
+}
+
 function buildResourcesSchema(role: PreviewResourceRole, allowCustomResources: boolean) {
     return resourcesInput.transform((input) => {
         if (!allowCustomResources || input == null) return standardResources(role);
@@ -732,21 +762,24 @@ function buildPreviewConfigSchema<TBuild extends z.ZodType>(build: TBuild, allow
             }
         });
 
-    const serviceSchema = z.object({
-        name: z.string().regex(k8sNameRegex, "Must be a valid Kubernetes name"),
-        recipe: z.string(),
-        version: z.string().optional(),
-        // Recipe-functional knobs (e.g. postgres user/database, or a docker-image
-        // service's image/ports/env) live in `options`, validated per-recipe.
-        options: z.record(z.string(), z.unknown()).default({}),
-        // Guided setup for database-recipe services (schema, seed, migrations),
-        // run with the repo checked out. Empty for non-database services.
-        setup_tasks: z.array(databaseSetupTaskSchema).default([]),
-        resources: buildResourcesSchema("service", allowCustomResources),
-        s3: z.boolean().optional(),
-        sqs: z.boolean().optional(),
-        sns: z.boolean().optional(),
-    });
+    // Preprocessed rather than transformed so the schema's OUTPUT stays a plain
+    // object: reflection (and therefore the row codec's coverage guard) sees the
+    // real contract, which no longer has the legacy flags.
+    const serviceSchema = z.preprocess(
+        foldLegacyAwsServiceFlags,
+        z.object({
+            name: z.string().regex(k8sNameRegex, "Must be a valid Kubernetes name"),
+            recipe: z.string(),
+            version: z.string().optional(),
+            // Recipe-functional knobs (e.g. postgres user/database, or a docker-image
+            // service's image/ports/env) live in `options`, validated per-recipe.
+            options: z.record(z.string(), z.unknown()).default({}),
+            // Guided setup for database-recipe services (schema, seed, migrations),
+            // run with the repo checked out. Empty for non-database services.
+            setup_tasks: z.array(databaseSetupTaskSchema).default([]),
+            resources: buildResourcesSchema("service", allowCustomResources),
+        }),
+    );
 
     return z
         .object({

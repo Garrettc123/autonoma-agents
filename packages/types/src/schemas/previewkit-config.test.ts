@@ -790,3 +790,50 @@ describe("sdk_path", () => {
         expect(declaredSdkPath([])).toBeUndefined();
     });
 });
+
+describe("legacy aws service flags fold into options", () => {
+    function parseService(service: Record<string, unknown>) {
+        const result = previewConfigSchema.safeParse({
+            version: 2,
+            apps: [{ name: "web", repository: "acme/web", port: 3000 }],
+            services: [{ name: "aws", recipe: "aws", ...service }],
+        });
+        if (!result.success) return result;
+        return { success: true as const, service: result.data.services[0]! };
+    }
+
+    it("moves a stored document's top-level flags into options", () => {
+        // The one shape production held before the columns were folded away. Dropping
+        // the keys instead would deploy the service as "nothing enabled" and fail.
+        const result = parseService({ s3: true, sqs: true, sns: true, options: { queues: ["q1"] } });
+
+        expect(result.success).toBe(true);
+        if (result.success) {
+            expect(result.service.options).toEqual({ queues: ["q1"], s3: true, sqs: true, sns: true });
+            expect("s3" in result.service).toBe(false);
+        }
+    });
+
+    it("lets an explicit options entry win over the legacy field", () => {
+        const result = parseService({ s3: true, options: { s3: false } });
+
+        expect(result.success).toBe(true);
+        if (result.success) expect(result.service.options.s3).toBe(false);
+    });
+
+    it("parses a document already in the written form untouched", () => {
+        const result = parseService({ options: { s3: true } });
+
+        expect(result.success).toBe(true);
+        if (result.success) expect(result.service.options).toEqual({ s3: true });
+    });
+
+    it("drops a non-boolean legacy flag instead of folding it", () => {
+        // The old contract rejected these; folding them would smuggle an invalid
+        // value past the recipe's own options validation.
+        const result = parseService({ s3: "yes" });
+
+        expect(result.success).toBe(true);
+        if (result.success) expect(result.service.options).toEqual({});
+    });
+});

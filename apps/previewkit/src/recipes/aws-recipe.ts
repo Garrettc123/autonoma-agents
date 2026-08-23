@@ -19,6 +19,11 @@ const s3NotificationSchema = z.object({
 });
 
 const optionsSchema = z.object({
+    // Which MiniStack services this instance runs. At least one must be on;
+    // typedGenerate refuses an all-off config rather than starting an empty stack.
+    s3: z.boolean().default(false),
+    sqs: z.boolean().default(false),
+    sns: z.boolean().default(false),
     queues: z.array(z.string()).default([]),
     buckets: z.array(z.string()).default([]),
     topics: z.array(z.string()).default([]),
@@ -38,7 +43,7 @@ export class AwsRecipe extends BaseRecipe<AwsOptions> {
 
     typedGenerate(config: ServiceConfig<AwsOptions>, namespace: string): RecipeResources {
         const options = config.options;
-        const enabledServices = buildServicesList(config);
+        const enabledServices = buildServicesList(config.name, options);
         const version = config.version ?? DEFAULT_VERSION;
         const image = `ministackorg/ministack:${version}`;
         const labels = {
@@ -48,8 +53,11 @@ export class AwsRecipe extends BaseRecipe<AwsOptions> {
 
         const env: k8s.V1EnvVar[] = [
             { name: "SERVICES", value: enabledServices.join(",") },
-            // Makes LocalStack advertise itself under the K8s service DNS name
-            // so presigned URLs and SQS queue URLs resolve correctly within the cluster.
+            // Makes the emulator advertise itself under the K8s service DNS name so
+            // presigned URLs and SQS queue URLs resolve correctly within the cluster.
+            // MiniStack keeps LocalStack's interface - this env var name, the
+            // /_localstack/health probe and the init-script mount path below are the
+            // image's contract, not a leftover naming.
             { name: "LOCALSTACK_HOST", value: `${config.name}:${PORT}` },
             { name: "DEBUG", value: "0" },
         ];
@@ -191,14 +199,15 @@ function buildInitScript(options: AwsOptions): string {
     return lines.join("\n");
 }
 
-function buildServicesList(config: ServiceConfig): string[] {
+function buildServicesList(name: string, options: AwsOptions): string[] {
     const services: string[] = [];
-    if (config.s3) services.push("s3");
-    if (config.sqs) services.push("sqs");
-    if (config.sns) services.push("sns");
+    if (options.s3) services.push("s3");
+    if (options.sqs) services.push("sqs");
+    if (options.sns) services.push("sns");
     if (services.length === 0) {
         throw new Error(
-            `AWS recipe "${config.name}" requires at least one service. Set s3: true, sqs: true, and/or sns: true.`,
+            `AWS recipe "${name}" requires at least one service. ` +
+                `Set options.s3: true, options.sqs: true, and/or options.sns: true.`,
         );
     }
     return services;

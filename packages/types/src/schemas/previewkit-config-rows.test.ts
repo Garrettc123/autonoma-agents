@@ -51,9 +51,6 @@ function store(values: PreviewkitConfigRowValues): PreviewkitConfigRows {
             version: service.version ?? null,
             options: service.options,
             resourcesTier: service.resourcesTier,
-            s3: service.s3 ?? null,
-            sqs: service.sqs ?? null,
-            sns: service.sns ?? null,
             setupTasks: service.setupTasks,
         })),
         hooks: values.hooks,
@@ -120,7 +117,7 @@ const SCHEMA_FIELDS = {
         "resources",
         "depends_on",
     ],
-    service: ["name", "recipe", "version", "options", "setup_tasks", "resources", "s3", "sqs", "sns"],
+    service: ["name", "recipe", "version", "options", "setup_tasks", "resources"],
 };
 
 const objectNode = z.object({ properties: z.record(z.string(), z.unknown()) });
@@ -188,7 +185,6 @@ describe("preview config rows round trip", () => {
                     recipe: "postgres",
                     version: "16",
                     options: { database: "preview", user: "preview" },
-                    s3: true,
                     setup_tasks: [
                         {
                             command: "psql -f db/schema.sql",
@@ -363,5 +359,46 @@ describe("documentFromPreviewkitConfigRows", () => {
         const broken: PreviewkitConfigRows = { ...rows, branchConventionType: "regex" };
 
         expect(trustedPreviewConfigSchema.safeParse(documentFromPreviewkitConfigRows(broken)).success).toBe(false);
+    });
+});
+
+describe("legacy aws flag mirror columns", () => {
+    function decomposeService(service: Record<string, unknown>) {
+        const config = trustedPreviewConfigSchema.parse({
+            version: 2,
+            apps: [{ name: "web", repository: "acme/web", port: 3000 }],
+            services: [{ name: "aws", recipe: "aws", ...service }],
+        });
+        return previewkitConfigRowValues(config).services[0]!;
+    }
+
+    /**
+     * Service rows are delete-then-create on save, so these write-only mirrors are
+     * what keeps the columns the PREVIOUS release reads populated across a save. If
+     * this stops emitting them, the first save under the new release nulls the
+     * columns and a rollback deploys the aws service with nothing enabled.
+     */
+    it("mirrors the options flags into the transition columns", () => {
+        const values = decomposeService({ options: { s3: true, sqs: false } });
+
+        expect(values.s3).toBe(true);
+        expect(values.sqs).toBe(false);
+        expect(values.sns).toBeUndefined();
+    });
+
+    it("mirrors a legacy top-level document the same way, through the fold", () => {
+        const values = decomposeService({ s3: true, sns: true });
+
+        expect(values.s3).toBe(true);
+        expect(values.sns).toBe(true);
+        expect(values.options).toEqual({ s3: true, sns: true });
+    });
+
+    it("mirrors nothing for a service that never had the flags", () => {
+        const values = decomposeService({ options: { database: "d" } });
+
+        expect(values.s3).toBeUndefined();
+        expect(values.sqs).toBeUndefined();
+        expect(values.sns).toBeUndefined();
     });
 });

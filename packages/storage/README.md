@@ -45,7 +45,7 @@ const storage = new S3Storage({
     region: "us-east-1",
     accessKeyId: "...", // optional - omit both to use the SDK's default credential chain
     secretAccessKey: "...",
-    endpoint: "http://localhost:4566", // optional - for LocalStack/MinIO
+    endpoint: "http://localhost:4566", // optional - for MiniStack/MinIO
 });
 
 const url = await storage.upload("artifacts/video.mp4", videoBuffer, "video/mp4");
@@ -57,7 +57,7 @@ await storage.delete(url);
 Key details:
 - Keys can be plain paths (`artifacts/video.mp4`) or S3 URIs (`s3://bucket/key`) - the `s3://` prefix is stripped automatically.
 - `upload` returns an `s3://bucket/key` URI. Pass an optional `contentType` (third arg) to set the stored MIME type; it defaults to `application/octet-stream`. Set it for media (e.g. `video/webm`) so browsers can play and seek the object.
-- Setting `endpoint` enables path-style addressing (required for LocalStack/MinIO).
+- Setting `endpoint` enables path-style addressing (required for MiniStack/MinIO).
 - Throws `ObjectNotFoundError` when downloading a key that does not exist.
 
 ### LocalStorageProvider

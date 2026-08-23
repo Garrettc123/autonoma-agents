@@ -23,6 +23,8 @@ export async function setup(): Promise<void> {
 
     const [shared, msContainer, redisContainer] = await Promise.all([
         startSharedPostgres({ migrate: applyMigrations }),
+        // The Testcontainers class is LocalStack's, but the image is MiniStack -
+        // it keeps LocalStack's wire interface, so the same container module drives it.
         new LocalstackContainer(MINISTACK_IMAGE)
             .withEnvironment({ SERVICES: "s3" })
             .withStartupTimeout(CONTAINER_STARTUP_TIMEOUT_MS)
