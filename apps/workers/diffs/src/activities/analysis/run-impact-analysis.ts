@@ -57,10 +57,12 @@ export async function runImpactAnalysis(input: RunImpactAnalysisInput): Promise<
 
 /** Fetched into the clone so the agent can diff the recorded movement (a rebase, a force push), not just base..head. */
 async function claimedEventShas(snapshotId: string): Promise<string[]> {
-    const events = await new AnalysisEventResolver(getAnalysisEventStore()).resolveForSnapshot(snapshotId);
-    const snapshot = await db.branchSnapshot.findUniqueOrThrow({
-        where: { id: snapshotId },
-        select: { headSha: true, baseSha: true },
-    });
+    const [events, snapshot] = await Promise.all([
+        new AnalysisEventResolver(getAnalysisEventStore()).resolveForSnapshot(snapshotId),
+        db.branchSnapshot.findUniqueOrThrow({
+            where: { id: snapshotId },
+            select: { headSha: true, baseSha: true },
+        }),
+    ]);
     return recordedEventShas(events, [snapshot.headSha, snapshot.baseSha]);
 }

@@ -733,6 +733,60 @@ apiTestSuite({
             expect(events).toHaveLength(0);
         });
 
+        // The scenario: a push deferred out of credits, then the branch reverted to the analyzed head.
+        test("a pending event un-suppresses the already-analyzed skip", async ({
+            harness,
+            seedResult: { app, service },
+        }) => {
+            harness.githubApp.defaultClient.addPullRequest("org/my-repo", {
+                number: 61,
+                title: "Test PR #61",
+                headRef: "feature/branch-61",
+                baseSha: "initial-sha",
+                commits: ["head-sha-61"],
+            });
+            const branchId = (
+                await harness.db.branch.create({
+                    data: {
+                        name: "feature/branch-61",
+                        applicationId: app.id,
+                        organizationId: harness.organizationId,
+                        prInfo: { create: { applicationId: app.id, prNumber: 61 } },
+                    },
+                    select: { id: true },
+                })
+            ).id;
+            const activeSnapshot = await harness.db.branchSnapshot.create({
+                data: { branchId, status: "active", source: TriggerSource.WEBHOOK, headSha: "head-sha-61" },
+                select: { id: true },
+            });
+            await harness.db.branch.update({
+                where: { id: branchId },
+                data: { activeSnapshotId: activeSnapshot.id },
+            });
+            await harness.db.analysisEvent.create({
+                data: {
+                    branchId,
+                    organizationId: harness.organizationId,
+                    type: "commits_pushed",
+                    source: "webhook",
+                    payload: { headSha: "head-sha-61" },
+                },
+            });
+            const triggersBefore = harness.startAnalysisRun.mock.calls.length;
+
+            const result = await service.triggerPrDiffs({
+                source: "webhook",
+                organizationId: harness.organizationId,
+                repoId: 1001,
+                prNumber: 61,
+                url: "https://preview.example.com",
+            });
+
+            expect(result.skipped).toBeUndefined();
+            expect(harness.startAnalysisRun.mock.calls.length - triggersBefore).toBe(1);
+        });
+
         // With the gate enforced, only a PR merging INTO the app's trunk is in scope. A PR that targets another
         // branch is refused before a Branch is created - and the gate is absolute, so an explicit `/start analysis`
         // (requested: true) is refused too.
@@ -930,6 +984,9 @@ apiTestSuite({
         }) => {
             harness.githubApp.defaultClient.pushCommit("org/my-repo", "main", "unchanged-main-sha");
             await setActiveSnapshotHeadSha(harness.db, app.mainBranchId!, "unchanged-main-sha");
+            // Earlier tests' triggers left pending events on the shared main branch (their runs are mocked and
+            // never claim), which would un-suppress the skip; empty the inbox to assert the true-duplicate path.
+            await harness.db.analysisEvent.deleteMany({ where: { branchId: app.mainBranchId! } });
             const before = await harness.db.branchSnapshot.count({ where: { branchId: app.mainBranchId! } });
 
             const result = await service.triggerMainDiffs({

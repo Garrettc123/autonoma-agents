@@ -1,4 +1,4 @@
-import { SUPERSEDED_RUN_REASON } from "@autonoma/analysis";
+import { AnalysisRunGate, SUPERSEDED_RUN_REASON } from "@autonoma/analysis";
 import { ApplicationArchitecture, TriggerSource, db } from "@autonoma/db";
 import { logger as rootLogger } from "@autonoma/logger";
 import { BranchAlreadyOpenError, type OpenSnapshot, SourceMovedError, TestSuiteStore } from "@autonoma/test-suite";
@@ -41,16 +41,15 @@ export async function openAnalysisRun(input: OpenAnalysisRunInput): Promise<Open
     }
 
     const store = new TestSuiteStore(db);
-    const resolved = await store.resolveSource({ branchId, headSha, fallbackBaseSha: input.baseSha });
-
-    // A re-delivered trigger for an already-analyzed head has nothing new to diff. A previewkit run still builds for
-    // it - the customer asked for a fresh preview of a commit we have already judged - so this reports the skip
-    // rather than suppressing the run outright.
-    if (resolved.alreadyAnalyzed) {
-        logger.info("Run skipped: head already analyzed", { branch: { branchId } });
-        // This head was already analyzed, so its pending events belong to the snapshot that did it: hand them to the
-        // active snapshot rather than leave them pending to re-poke a run that would skip again.
-        await getAnalysisEventStore().markHandledByActiveSnapshot(branchId);
+    // A previewkit run still builds for a skipped head - the customer asked for a fresh preview of a commit we
+    // have already judged - so this reports the skip rather than suppressing the run outright.
+    const { resolved, skip } = await new AnalysisRunGate(db).shouldSkipAlreadyAnalyzed({
+        branchId,
+        headSha,
+        fallbackBaseSha: input.baseSha,
+    });
+    if (skip) {
+        logger.info("Run skipped: head already analyzed and the inbox is empty", { branch: { branchId } });
         return { skipped: true, reason: "already_analyzed" };
     }
     if (resolved.source == null || resolved.baseSha == null) throw new NoAnalysisBaseError(branchId);

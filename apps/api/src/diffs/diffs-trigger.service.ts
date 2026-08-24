@@ -1,9 +1,8 @@
-import type { AnalysisEventStore } from "@autonoma/analysis";
+import { type AnalysisEventStore, AnalysisRunGate } from "@autonoma/analysis";
 import { type BillingService, clearBranchTriggerBlock, recordBranchTriggerBlocked } from "@autonoma/billing";
 import type { PrismaClient } from "@autonoma/db";
 import { BadRequestError, InsufficientAnalysisCreditsError, InternalError, NotFoundError } from "@autonoma/errors";
 import { recordBranchDeployment } from "@autonoma/scenario";
-import { TestSuiteStore } from "@autonoma/test-suite";
 import { type AnalysisEventSource, hasGoneLive } from "@autonoma/types";
 import type { AnalysisRunWorkflowInput } from "@autonoma/workflow";
 import { analysisPokeGate } from "../analysis/analysis-poke-gate";
@@ -222,15 +221,16 @@ export class DiffsTriggerService extends Service {
 
         this.logger.info("Resolved branch and shas", { branchId: branch.id, headSha, baseSha });
 
-        // A re-delivered webhook for an already-analyzed head has nothing new to diff. `createSnapshot` still
-        // supersedes a pending snapshot if the head genuinely moved while one was in flight.
-        const { alreadyAnalyzed } = await new TestSuiteStore(this.db).resolveSource({
+        // A re-delivered webhook for an already-analyzed head has nothing new to diff; a pending event
+        // un-suppresses the skip. `createSnapshot` still supersedes a pending snapshot if the head genuinely
+        // moved while one was in flight.
+        const gate = await new AnalysisRunGate(this.db).shouldSkipAlreadyAnalyzed({
             branchId: branch.id,
             headSha,
             fallbackBaseSha: baseSha,
         });
-        if (alreadyAnalyzed) {
-            this.logger.info("Skipping PR diffs: head already analyzed, no new commits", {
+        if (gate.skip) {
+            this.logger.info("Skipping PR diffs: head already analyzed and the inbox is empty", {
                 branchId: branch.id,
                 prNumber,
                 headSha,
@@ -339,15 +339,16 @@ export class DiffsTriggerService extends Service {
         );
 
         // Main has no pull request to fall back on, so its baseline snapshot is the only possible base.
-        const { baseSha, alreadyAnalyzed } = await new TestSuiteStore(this.db).resolveSource({ branchId, headSha });
+        const gate = await new AnalysisRunGate(this.db).shouldSkipAlreadyAnalyzed({ branchId, headSha });
+        const baseSha = gate.resolved.baseSha;
         if (baseSha == null) throw new NoActiveSnapshotHeadShaError(branchId);
 
         this.logger.info("Resolved main branch and shas", { branchId, headSha, baseSha });
 
-        // A re-delivered webhook for unchanged main carries the active snapshot's head. A real commit moves
-        // headSha, so this only collapses true duplicates.
-        if (alreadyAnalyzed) {
-            this.logger.info("Skipping main diffs: head matches active snapshot, no new commits", {
+        // A re-delivered webhook for unchanged main carries the active snapshot's head; a pending event
+        // un-suppresses the skip. A real commit moves headSha, so this only collapses true duplicates.
+        if (gate.skip) {
+            this.logger.info("Skipping main diffs: head matches active snapshot and the inbox is empty", {
                 branchId,
                 headSha,
             });

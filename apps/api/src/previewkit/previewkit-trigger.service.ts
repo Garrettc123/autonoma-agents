@@ -1,4 +1,4 @@
-import type { AnalysisEventStore } from "@autonoma/analysis";
+import { type AnalysisEventStore, AnalysisRunGate } from "@autonoma/analysis";
 import { type BillingService, clearBranchTriggerBlock, recordBranchTriggerBlocked } from "@autonoma/billing";
 import type {
     OnboardingPreviewEnvironmentMode,
@@ -187,9 +187,26 @@ export class PreviewkitTriggerService extends Service {
             baseSha: request.baseSha,
         };
 
-        // Persist the event BEFORE the credit gate, so an out-of-credits deploy is deferred (a top-up re-pokes it)
-        // rather than lost - the same enqueue-before-throw shape the diffs trigger uses.
-        await enqueueAnalysisEvent(this.events, launch);
+        // An already-analyzed head must not enqueue: its own event would make the inbox non-empty and defeat the
+        // downstream already-analyzed skip, turning every re-delivered webhook into a full re-analysis. The run
+        // still starts - a previewkit run builds for a skipped head - it just carries no new event, so
+        // `openAnalysisRun` reports the skip instead of re-analyzing.
+        const gate = await new AnalysisRunGate(this.db).shouldSkipAlreadyAnalyzed({
+            branchId: launch.branchId,
+            headSha: launch.headSha,
+            fallbackBaseSha: launch.baseSha,
+        });
+        if (gate.skip) {
+            this.logger.info("Head already analyzed and the inbox is empty; starting a build-only run", {
+                repo: request.repoFullName,
+                pr: request.prNumber,
+                extra: { headSha: request.headSha },
+            });
+        } else {
+            // Persist the event BEFORE the credit gate, so an out-of-credits deploy is deferred (a top-up re-pokes
+            // it) rather than lost - the same enqueue-before-throw shape the diffs trigger uses.
+            await enqueueAnalysisEvent(this.events, launch);
+        }
         await this.assertDeployCreditsAvailable(
             request.organizationId,
             request.repoFullName,

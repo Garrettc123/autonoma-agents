@@ -16,6 +16,7 @@
     "dependencies": {
         "@autonoma/db": "workspace:*",
         "@autonoma/logger": "workspace:*",
+        "@autonoma/test-suite": "workspace:*",
         "@autonoma/types": "workspace:*"
     },
     "devDependencies": {

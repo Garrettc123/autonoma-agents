@@ -1,6 +1,6 @@
 import { AnalysisEventStore } from "@autonoma/analysis";
 import type { PreviewDeployGateResult } from "@autonoma/billing";
-import { ApplicationArchitecture, type PreviewkitStatus } from "@autonoma/db";
+import { ApplicationArchitecture, type PreviewkitStatus, TriggerSource } from "@autonoma/db";
 import { ConflictError, InsufficientPreviewCreditsError, NotFoundError } from "@autonoma/errors";
 import { expect, vi } from "vitest";
 import { env } from "../../src/env";
@@ -272,6 +272,40 @@ apiTestSuite({
             expect(events[0]!.source).toBe("webhook");
             expect(events[0]!.claimedBySnapshotId).toBeNull();
             expect(events[0]!.payload).toMatchObject({ headSha: "head-7", baseSha: "main-sha-2" });
+        });
+
+        // A re-delivered same-head webhook must not enqueue: its own event would defeat the already-analyzed skip
+        // downstream and re-analyze the head on every redelivery. The run still starts - it owns the preview
+        // refresh - but carries no new event, so `openAnalysisRun` reports the skip.
+        test("startRunFromPullRequestWebhook enqueues nothing for an already-analyzed head", async ({
+            harness,
+            seedResult: { app, service },
+        }) => {
+            harness.startAnalysisRun.mockClear();
+            await service.startRunFromPullRequestWebhook("opened", harness.organizationId, pullRequestPayload(11));
+            const branch = await harness.db.branch.findFirstOrThrow({
+                where: { applicationId: app.id, prInfo: { prNumber: 11 } },
+                select: { id: true },
+            });
+            // Settle the first delivery as the branch's analyzed state: its snapshot is active at head-11 and has
+            // claimed the first event, leaving the inbox empty.
+            const analyzed = await harness.db.branchSnapshot.create({
+                data: { branchId: branch.id, status: "active", source: TriggerSource.WEBHOOK, headSha: "head-11" },
+            });
+            await harness.db.branch.update({ where: { id: branch.id }, data: { activeSnapshotId: analyzed.id } });
+            await harness.db.analysisEvent.updateMany({
+                where: { branchId: branch.id },
+                data: { claimedBySnapshotId: analyzed.id },
+            });
+
+            await service.startRunFromPullRequestWebhook("synchronize", harness.organizationId, pullRequestPayload(11));
+
+            // The redelivered head still gets its run (build + reported skip), but no second event.
+            expect(harness.startAnalysisRun).toHaveBeenCalledTimes(2);
+            const pending = await harness.db.analysisEvent.findMany({
+                where: { branchId: branch.id, claimedBySnapshotId: null },
+            });
+            expect(pending).toHaveLength(0);
         });
 
         // Under activation the automatic preview run is suppressed - no build, no analysis run - but the push is a

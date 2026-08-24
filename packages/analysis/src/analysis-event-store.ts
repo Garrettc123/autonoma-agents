@@ -22,10 +22,11 @@ const RECLAIMABLE_CLAIM_STATUSES: SnapshotStatus[] = Object.values(SnapshotStatu
 );
 
 /**
- * PR states that mean the branch is done and will never run again, so a pending event on it is dead weight a
- * re-poke must skip - otherwise every credit top-up re-pokes a closed PR forever. A `draft` PR is deliberately NOT
- * here: it is temporary, and its events stay eligible for when it reopens. A branch with no PR row at all (main) is
- * always eligible, and an absent `prState` fails open, so only these two terminal states exclude a branch.
+ * PR states that mean the branch is done and will never run again, so a pending event on it is dead weight every
+ * reader must skip - otherwise a credit top-up re-pokes a closed PR forever, and a stale event holds the
+ * already-analyzed skip open forever. A `draft` PR is deliberately NOT here: it is temporary, and its events stay
+ * eligible for when it reopens. A branch with no PR row at all (main) is always eligible, and an absent `prState`
+ * fails open, so only these two terminal states exclude a branch.
  */
 const TERMINAL_PR_STATES: PullRequestCacheState[] = [PullRequestCacheState.closed, PullRequestCacheState.merged];
 
@@ -116,10 +117,14 @@ export class AnalysisEventStore {
         return created;
     }
 
-    /** Whether the branch has any pending event - the sweeper/poke predicate, without loading a row. */
+    /**
+     * Whether the branch has any pending event on a still-live PR - the standing-reason-to-run predicate behind
+     * the already-analyzed skip. Terminal-PR events are invisible here for the same reason the re-poke skips them:
+     * a branch that can never run again must not hold the skip open.
+     */
     public async hasPending(branchId: string): Promise<boolean> {
         const row = await this.db.analysisEvent.findFirst({
-            where: this.pendingWhere(branchId),
+            where: { AND: [this.pendingWhere(branchId), { branch: this.liveBranchWhere() }] },
             select: { id: true },
         });
         return row != null;
@@ -137,9 +142,7 @@ export class AnalysisEventStore {
                 organizationId,
                 type: analysisEventTypeSchema.enum.commits_pushed,
                 OR: this.pendingClause(),
-                // Main (no PR row) and open/draft PRs stay; only a closed or merged PR is skipped. An absent
-                // `prState` fails open - a just-pushed branch can have a cold cache, and the run re-checks liveness.
-                branch: { NOT: { prInfo: { prState: { in: TERMINAL_PR_STATES } } } },
+                branch: this.liveBranchWhere(),
             },
             // DISTINCT ON (branch_id): the newest pending event per branch, so the result is bounded by the branch
             // count rather than the ever-growing event history. `branchId` leads the orderBy so Postgres pushes the
@@ -184,17 +187,6 @@ export class AnalysisEventStore {
         return count;
     }
 
-    /**
-     * Attribute the branch's pending events to its existing active snapshot - the already-analyzed path, where a
-     * trigger's head is already the analyzed head so no new snapshot opens. Marking the events handled by the
-     * active snapshot (a live status) stops them lingering pending and re-poking forever. No-op when the branch
-     * has no active snapshot. Returns how many events were attributed.
-     */
-    public async markHandledByActiveSnapshot(branchId: string, tx?: Prisma.TransactionClient): Promise<number> {
-        if (tx != null) return this.attributeToActiveSnapshot(tx, branchId);
-        return this.db.$transaction((client) => this.attributeToActiveSnapshot(client, branchId));
-    }
-
     /** The events a snapshot's run claimed, oldest first - what that run analyzed. Empty for an unknown snapshot. */
     public async listForSnapshot(snapshotId: string): Promise<AnalysisEventRecord[]> {
         this.logger.info("Listing analysis events for snapshot", { snapshot: { snapshotId } });
@@ -205,26 +197,6 @@ export class AnalysisEventStore {
         return rows.map((row) => this.toRecord(row));
     }
 
-    private async attributeToActiveSnapshot(tx: Prisma.TransactionClient, branchId: string): Promise<number> {
-        const branch = await tx.branch.findUnique({ where: { id: branchId }, select: { activeSnapshotId: true } });
-        if (branch?.activeSnapshotId == null) {
-            this.logger.warn("No active snapshot to attribute pending events to; leaving them pending", {
-                branch: { branchId },
-            });
-            return 0;
-        }
-        const { count } = await tx.analysisEvent.updateMany({
-            where: this.pendingWhere(branchId),
-            data: { claimedBySnapshotId: branch.activeSnapshotId },
-        });
-        this.logger.info("Pending analysis events attributed to active snapshot", {
-            branch: { branchId },
-            snapshot: { snapshotId: branch.activeSnapshotId },
-            extra: { count },
-        });
-        return count;
-    }
-
     /**
      * The one place "is this event pending" is expressed: unclaimed, or claimed by a same-branch snapshot whose run
      * was thrown away (a reclaimable status). Every read and the claim update share it, so the derived handled-ness
@@ -232,6 +204,22 @@ export class AnalysisEventStore {
      */
     private pendingWhere(branchId: string): Prisma.AnalysisEventWhereInput {
         return { branchId, OR: this.pendingClause() };
+    }
+
+    /**
+     * Scopes an event query to branches that can still run. Main (no PR row) and open PRs stay; only a closed or
+     * merged PR is excluded. The NULL `prState` arm is load-bearing, not decoration: a just-pushed branch has a cold
+     * cache, and SQL's NULL-hostile `NOT IN` would silently treat it as dead - it must fail open instead (the run
+     * re-checks liveness anyway).
+     */
+    private liveBranchWhere(): Prisma.BranchWhereInput {
+        return {
+            OR: [
+                { prInfo: { is: null } },
+                { prInfo: { prState: null } },
+                { prInfo: { prState: { notIn: TERMINAL_PR_STATES } } },
+            ],
+        };
     }
 
     /** The pending disjunction on its own - unclaimed, or claimed by a thrown-away run - to compose under any scope. */

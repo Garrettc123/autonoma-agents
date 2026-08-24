@@ -54,9 +54,16 @@ const events = new AnalysisEventStore(db);
 await events.enqueue({ branchId, organizationId, source: "webhook", event: { type: "commits_pushed", payload: { headSha } } });
 await events.hasPending(branchId);                          // is there a reason to run - the poke/sweeper predicate
 await events.claimPending(tx, branchId, snapshotId);        // steals from superseded/cancelled/failed claims
-await events.markHandledByActiveSnapshot(branchId);         // the already-analyzed path (no new snapshot opens)
 await events.listForSnapshot(snapshotId);                   // what this run analyzed
 await events.listPendingBranchHeads(organizationId);        // newest pending head per branch, for the top-up sweeper
+
+// The read-side interpreter over the inbox - what consumers (the impact agent, later the Reporter) see:
+const resolved = await new AnalysisEventResolver(events).resolveForSnapshot(snapshotId);
+recordedEventShas(resolved, [headSha, baseSha]);            // the recorded heads a checkout should fetch best-effort
+
+// The one deriving site for the already-analyzed skip (API triggers + the run's open step): skip only when the
+// head is already analyzed AND the inbox is empty - a pending event un-suppresses it.
+const { resolved: source, skip } = await new AnalysisRunGate(db).shouldSkipAlreadyAnalyzed({ branchId, headSha });
 ```
 
 ## Invariants the module holds

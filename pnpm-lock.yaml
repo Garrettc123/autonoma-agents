@@ -1226,6 +1226,9 @@ importers:
       '@autonoma/logger':
         specifier: workspace:*
         version: link:../logger
+      '@autonoma/test-suite':
+        specifier: workspace:*
+        version: link:../test-suite
       '@autonoma/types':
         specifier: workspace:*
         version: link:../types

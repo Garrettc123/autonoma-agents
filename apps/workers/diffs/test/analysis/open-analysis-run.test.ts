@@ -208,7 +208,7 @@ integrationTestSuite({
             expect(freshSnapshot.status).toBe("processing");
         });
 
-        test("skips a head that is already analyzed", async ({ harness }) => {
+        test("skips a head that is already analyzed when the inbox is empty", async ({ harness }) => {
             const branchId = await harness.seedBranch();
             await harness.seedMainSuite(branchId, HEAD_SHA);
 
@@ -232,17 +232,20 @@ integrationTestSuite({
             expect(await harness.events.hasPending(branchId)).toBe(false);
         });
 
-        test("hands an already-analyzed head's pending events to the active snapshot", async ({ harness }) => {
+        test("a pending event un-suppresses the already-analyzed skip and the run claims it", async ({ harness }) => {
             const branchId = await harness.seedBranch();
-            const { mainSnapshotId } = await harness.seedMainSuite(branchId, HEAD_SHA);
+            await harness.seedMainSuite(branchId, HEAD_SHA);
             const eventId = await harness.enqueueCommit(branchId, HEAD_SHA);
 
             const result = await openAnalysisRun({ branchId, headSha: HEAD_SHA, baseSha: BASE_SHA });
 
-            expect(result).toEqual({ skipped: true, reason: "already_analyzed" });
-            // No new snapshot opened, but the event must not linger pending and re-poke a run that would skip again.
+            if (result.skipped) throw new Error("expected the run to open");
+            const snapshot = await harness.db.branchSnapshot.findUniqueOrThrow({ where: { id: result.snapshotId } });
+            // The branch's own active snapshot speaks for its history, so the base is the analyzed head itself.
+            expect(snapshot.baseSha).toBe(HEAD_SHA);
+            expect(snapshot.headSha).toBe(HEAD_SHA);
+            expect(await harness.claimedBy(eventId)).toBe(result.snapshotId);
             expect(await harness.events.hasPending(branchId)).toBe(false);
-            expect(await harness.claimedBy(eventId)).toBe(mainSnapshotId);
         });
 
         // Terminate-and-restart runs no cleanup on the displaced run, so its claim is left on a snapshot the

@@ -7,6 +7,7 @@ export {
 } from "./analysis-event-store";
 export { AnalysisEventResolver, type ResolvedAnalysisEvent } from "./analysis-event-resolver";
 export { recordedEventShas } from "./recorded-event-shas";
+export { AnalysisRunGate, type AnalysisRunGateResult } from "./analysis-run-gate";
 export {
     Analysis,
     type RecordClassificationInput,
