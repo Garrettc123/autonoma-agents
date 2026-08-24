@@ -5,7 +5,7 @@ import { BillingCustomerService } from "./billing-customer.service";
 import { BillingPricingService } from "./billing-pricing.service";
 import { BillingPromoService } from "./billing-promo.service";
 import { CreditsService } from "./credits.service";
-import type { BillingService, DeductGenerationContext, StripeBillingService } from "./types";
+import type { BillingService, BillingServiceHooks, DeductGenerationContext, StripeBillingService } from "./types";
 import { VercelOverageService } from "./vercel-overage.service";
 
 export class EnabledBillingService implements BillingService, StripeBillingService {
@@ -15,17 +15,18 @@ export class EnabledBillingService implements BillingService, StripeBillingServi
     private readonly billingPromoService: BillingPromoService;
     private readonly vercelOverageService: VercelOverageService;
 
-    constructor(db: PrismaClient) {
+    constructor(db: PrismaClient, hooks?: BillingServiceHooks) {
         this.billingPricingService = new BillingPricingService(db);
         const autoTopUpService = new AutoTopUpService(db);
         this.billingCustomerService = new BillingCustomerService(db);
-        this.billingPromoService = new BillingPromoService(db);
+        this.billingPromoService = new BillingPromoService(db, hooks?.onCreditsGranted);
         this.vercelOverageService = new VercelOverageService(db);
         this.creditsService = new CreditsService(
             db,
             autoTopUpService,
             this.billingPricingService,
             this.vercelOverageService,
+            hooks?.onCreditsGranted,
         );
     }
 

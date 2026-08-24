@@ -4,6 +4,7 @@ import type { VercelBillingPlan } from "@autonoma/db";
 import { ThirdPartyError } from "@autonoma/errors";
 import { logger as rootLogger } from "@autonoma/logger";
 import { z } from "zod";
+import { repokeAnalysisOnCreditsGranted } from "../analysis/credit-topup-repoker";
 import { getVercelEncryptionHelper } from "../context";
 
 const logger = rootLogger.child({ name: "VercelBilling" });
@@ -110,7 +111,7 @@ export async function createBillingPeriod(
             installationId,
             planName: plan.name,
         });
-        await createBillingService(db).grantSubscriptionCredits(
+        await createBillingService(db, { onCreditsGranted: repokeAnalysisOnCreditsGranted }).grantSubscriptionCredits(
             freeInstallation.organizationId,
             `free_plan_${period.id}`,
         );

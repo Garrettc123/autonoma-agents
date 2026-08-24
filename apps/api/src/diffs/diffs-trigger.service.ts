@@ -6,7 +6,9 @@ import { recordBranchDeployment } from "@autonoma/scenario";
 import { TestSuiteStore } from "@autonoma/test-suite";
 import { type AnalysisEventSource, hasGoneLive } from "@autonoma/types";
 import type { AnalysisRunWorkflowInput } from "@autonoma/workflow";
-import { enqueueAndStartAnalysisRun } from "../analysis/enqueue-and-start-analysis-run";
+import { analysisPokeGate } from "../analysis/analysis-poke-gate";
+import { enqueueAnalysisEvent, enqueueAndStartAnalysisRun } from "../analysis/enqueue-and-start-analysis-run";
+import { isActivationGated } from "../analysis/is-activation-gated";
 import { isBaseTrunkGateEnforced } from "../github/base-trunk-gate";
 import { sameGitRef } from "../github/git-ref";
 import type { GitHubInstallationService } from "../github/github-installation.service";
@@ -96,26 +98,19 @@ export class DiffsTriggerService extends Service {
     }
 
     /**
-     * Declines a new PR analysis run once the org is at/below its credit floor - an already-running
-     * run is never cancelled by this, only new starts. Comments on the PR (the shared, dedup'd
-     * "out of credits" notice - also used by the previewkit-deploy gate) before throwing. Resolving the
-     * repo and commenting are best-effort: a GitHub failure must still surface as the credits error,
-     * never as a GitHub error. Main-branch diffs have no PR to comment on or gate against, so this is
-     * only called from `triggerPrDiffs`.
+     * The out-of-credits refusal: comment on the PR (the shared, dedup'd notice, also used by the previewkit-deploy
+     * gate) then throw. An already-running run is never cancelled by this, only new starts. Resolving the repo and
+     * commenting are best-effort: a GitHub failure must still surface as the credits error, never a GitHub error.
+     * Main-branch diffs have no PR to comment on or gate against, so this is only reached from `triggerPrDiffs`. The
+     * event is already persisted by the time this runs, so a later top-up can re-poke the deferred run.
      */
-    private async assertAnalysisCreditsAvailable(
+    private async refuseOutOfCredits(
         organizationId: string,
         repoId: number,
         prNumber: number,
         headSha: string,
         branchId: string,
-    ): Promise<void> {
-        const gate = await this.billingService.checkAnalysisCreditsGate(organizationId);
-        if (gate.allowed) {
-            await clearBranchTriggerBlock(this.db, branchId);
-            return;
-        }
-
+    ): Promise<never> {
         this.logger.info("Blocking PR analysis: organization is out of credits", { organizationId, repoId, prNumber });
 
         await recordBranchTriggerBlocked(this.db, branchId, "insufficient_credits");
@@ -243,29 +238,17 @@ export class DiffsTriggerService extends Service {
             return { branchId: branch.id, skipped: true, reason: "already_analyzed" };
         }
 
-        // Ready-for-review fires here rather than from the `pull_request.ready_for_review` webhook: a
-        // customer-deployed preview does not exist yet at webhook time, and this runs once it is live.
-        let isAutoRunOnReady = false;
-        if (!requested && (await this.isActivationGated(organizationId))) {
-            isAutoRunOnReady = await this.autoRunsOnReady(branch.id);
-            if (!isAutoRunOnReady) {
-                this.logger.info("Activation: suppressing automatic run; a run starts only on an explicit request", {
-                    branchId: branch.id,
-                    extra: { organizationId, headSha },
-                });
-                return { branchId: branch.id, skipped: true };
-            }
-            this.logger.info("Activation: repo opted into auto-run-on-ready; proceeding with the automatic run", {
-                branchId: branch.id,
-                extra: { organizationId, headSha },
-            });
-        }
+        // Ready-for-review is read here rather than from the `pull_request.ready_for_review` webhook: a
+        // customer-deployed preview does not exist yet at webhook time, and this runs once it is live. It is only
+        // meaningful under activation - a non-activation org auto-runs regardless - so it is not read otherwise.
+        const activationGated = !requested && (await isActivationGated(this.db, organizationId));
+        const isAutoRunOnReady = activationGated && (await this.autoRunsOnReady(branch.id));
 
         // Dedupe of activation triggers racing on the same head: attach to the run an earlier trigger opened
         // instead of superseding it. This covers explicit-vs-explicit (a label added while a `/start analysis`
         // comment is mid-run) AND auto-vs-explicit (a preview-ready auto-run firing just after `/start analysis`
         // opened one).
-        if (requested || isAutoRunOnReady) {
+        if (requested === true || isAutoRunOnReady) {
             const inFlight = await this.findInFlightRunForHead(branch.id, headSha);
             if (inFlight != null) {
                 this.logger.info("Attaching to the in-flight run for this head; not starting a duplicate", {
@@ -277,18 +260,42 @@ export class DiffsTriggerService extends Service {
             }
         }
 
-        await this.assertAnalysisCreditsAvailable(organizationId, repoId, prNumber, headSha, branch.id);
+        // A real analyzable event from here on: persist it whether or not we can act on it now, so a deferred push
+        // is never lost. Only the poke (starting the run) is gated.
+        const launch = { branchId: branch.id, organizationId, source, headSha, baseSha };
 
-        await this.startRun({
+        // Ahead of the gate: a customer-hosted deployment is recorded even when its analysis is deferred.
+        await this.recordDeploymentIfKnown({
             branchId: branch.id,
             organizationId,
-            source,
             headSha,
-            baseSha,
             url,
             webhookUrl,
             webhookHeaders,
         });
+
+        const decision = await analysisPokeGate(
+            { db: this.db, billingService: this.billingService },
+            { organizationId, requested: requested === true, autoRunOnReady: isAutoRunOnReady },
+        );
+
+        if (!decision.poke) {
+            await enqueueAnalysisEvent(this.events, launch);
+            // `refuseOutOfCredits` throws, so the activation log below is genuinely activation-only - the explicit
+            // return makes that legible without the reader having to know the method returns `never`.
+            if (decision.reason === "out_of_credits") {
+                return await this.refuseOutOfCredits(organizationId, repoId, prNumber, headSha, branch.id);
+            }
+            this.logger.info("Activation: suppressing the automatic run; a run starts only on an explicit request", {
+                branchId: branch.id,
+                extra: { organizationId, headSha },
+            });
+            return { branchId: branch.id, skipped: true };
+        }
+
+        // The poke cleared the credits gate, so a stale "insufficient credits" block must not linger on the branch.
+        await clearBranchTriggerBlock(this.db, branch.id);
+        await this.startRun({ branchId: branch.id, organizationId, source, headSha, baseSha });
 
         this.logger.info("PR diffs analysis triggered successfully", {
             branchId: branch.id,
@@ -347,27 +354,17 @@ export class DiffsTriggerService extends Service {
             return { branchId, skipped: true };
         }
 
+        await this.recordDeploymentIfKnown({ branchId, organizationId, headSha, url, webhookUrl, webhookHeaders });
+
         // Deliberately not activation-gated: activation only suppresses automatic PR analysis. A migrated org's
         // baseline snapshot must keep updating on main pushes, or every later PR diff computes against a stale base.
-        await this.startRun({
-            branchId,
-            organizationId,
-            source,
-            headSha,
-            url,
-            webhookUrl,
-            webhookHeaders,
-        });
+        await this.startRun({ branchId, organizationId, source, headSha });
 
         this.logger.info("Main branch diffs analysis triggered successfully", { branchId, headSha, baseSha });
 
         return { branchId };
     }
 
-    /**
-     * A URL is recorded only for a preview that ALREADY exists: one Autonoma hosts would point the branch at the
-     * previous deploy. Sequential on purpose - both mutate the branch row, so concurrency only contends on its lock.
-     */
     private async startRun(params: {
         branchId: string;
         organizationId: string;
@@ -375,27 +372,38 @@ export class DiffsTriggerService extends Service {
         headSha: string;
         /** The PR base, for a branch with no active snapshot yet. Main always has one, so it passes none. */
         baseSha?: string;
-        url?: string;
-        webhookUrl?: string;
-        webhookHeaders?: Record<string, string>;
     }): Promise<void> {
-        const { branchId, organizationId, source, headSha, baseSha, url, webhookUrl, webhookHeaders } = params;
-
-        if (url != null) {
-            await recordBranchDeployment({
-                db: this.db,
-                branchId,
-                organizationId,
-                headSha,
-                url,
-                webhookUrl,
-                webhookHeaders,
-            });
-        }
+        const { branchId, organizationId, source, headSha, baseSha } = params;
         await enqueueAndStartAnalysisRun(
             { events: this.events, startAnalysisRun: this.startAnalysisRun },
             { branchId, organizationId, source, headSha, baseSha },
         );
+    }
+
+    /**
+     * Record the deployment the trigger carries, when it carries one. A customer-hosted push arrives WITH its live
+     * URL; a previewkit push has none until its build goes live (the run records that one itself). Called BEFORE the
+     * poke gate, so a push deferred out of credits or by activation still lands the coordinate a later re-poke
+     * resolves its head from - the recording is not analysis, so it is not gated by the run.
+     */
+    private async recordDeploymentIfKnown(params: {
+        branchId: string;
+        organizationId: string;
+        headSha: string;
+        url?: string;
+        webhookUrl?: string;
+        webhookHeaders?: Record<string, string>;
+    }): Promise<void> {
+        if (params.url == null) return;
+        await recordBranchDeployment({
+            db: this.db,
+            branchId: params.branchId,
+            organizationId: params.organizationId,
+            headSha: params.headSha,
+            url: params.url,
+            webhookUrl: params.webhookUrl,
+            webhookHeaders: params.webhookHeaders,
+        });
     }
 
     /**
@@ -446,14 +454,5 @@ export class DiffsTriggerService extends Service {
             select: { step: true },
         });
         return hasGoneLive(state?.step);
-    }
-
-    /** Whether this org is migrated to activation, in which case an automatic run is suppressed. */
-    private async isActivationGated(organizationId: string): Promise<boolean> {
-        const settings = await this.db.organizationSettings.findUnique({
-            where: { organizationId },
-            select: { activationEnabled: true },
-        });
-        return settings?.activationEnabled === true;
     }
 }

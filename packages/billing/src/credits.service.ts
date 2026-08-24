@@ -18,9 +18,11 @@ import type {
     TopupRefundResultRow,
 } from "./billing.types";
 import { deductCreditsFloored } from "./credits-deduction";
+import { fireCreditsGrantedHook } from "./fire-credits-granted-hook";
 import { Service } from "./service";
 import type {
     AnalysisCreditsGateResult,
+    CreditsGrantedHook,
     DeductGenerationContext,
     LlmProxyGateResult,
     PreviewDeployGateResult,
@@ -36,8 +38,14 @@ export class CreditsService extends Service {
         private readonly autoTopUpService: AutoTopUpService,
         private readonly pricingService: BillingPricingService,
         private readonly vercelOverageService: VercelOverageService,
+        private readonly onCreditsGranted?: CreditsGrantedHook,
     ) {
         super();
+    }
+
+    /** Fire the credits-granted hook off the grant path - best-effort, so a re-poke failure never fails the grant. */
+    private fireCreditsGranted(organizationId: string): Promise<void> {
+        return fireCreditsGrantedHook(this.onCreditsGranted, organizationId, this.logger);
     }
 
     async checkCreditsGate(organizationId: string, runCount: number, architecture: ApplicationArchitecture) {
@@ -753,7 +761,7 @@ export class CreditsService extends Service {
         const pricing = await this.pricingService.getOrCreatePricing(organizationId);
         const creditAmount = pricing.creditsPerSubscription;
 
-        await this.db
+        const granted = await this.db
             .$transaction(async (tx) => {
                 const rawTx = this.asRawTx(tx);
                 const [customer] = await rawTx.$queryRaw<Array<SubscriptionGrantCustomerRow>>`
@@ -765,7 +773,7 @@ export class CreditsService extends Service {
 
                 if (customer == null) {
                     this.logger.warn("No billing customer found for subscription grant", { organizationId });
-                    return;
+                    return false;
                 }
 
                 const topupBalance = Math.max(0, customer.credit_balance - customer.subscription_credit_balance);
@@ -832,21 +840,24 @@ export class CreditsService extends Service {
                     replacedSubscriptionBalance: customer.subscription_credit_balance,
                     customerEmail,
                 });
+                return true;
             })
             .catch((error: unknown) => {
                 if (isUniqueConstraintError(error)) {
                     this.logger.info("Subscription credits already granted, skipping", { invoiceId });
-                    return;
+                    return false;
                 }
                 throw error;
             });
+
+        if (granted) await this.fireCreditsGranted(organizationId);
     }
 
     async grantTopupCredits(organizationId: string, stripePaymentIntentId: string, customerEmail?: string) {
         const pricing = await this.pricingService.getOrCreatePricing(organizationId);
         const amount = pricing.creditsPerTopup;
 
-        await this.db
+        const granted = await this.db
             .$transaction(async (tx) => {
                 const customer = await tx.billingCustomer.findUnique({
                     where: { organizationId },
@@ -854,7 +865,7 @@ export class CreditsService extends Service {
 
                 if (customer == null) {
                     this.logger.warn("No billing customer found for top-up grant", { organizationId });
-                    return;
+                    return false;
                 }
 
                 const updatedCustomer = await tx.billingCustomer.update({
@@ -895,14 +906,17 @@ export class CreditsService extends Service {
                     newBalance,
                     customerEmail,
                 });
+                return true;
             })
             .catch((error: unknown) => {
                 if (isUniqueConstraintError(error)) {
                     this.logger.info("Top-up credits already granted, skipping", { stripePaymentIntentId });
-                    return;
+                    return false;
                 }
                 throw error;
             });
+
+        if (granted) await this.fireCreditsGranted(organizationId);
     }
 
     async revokeTopupCredits(

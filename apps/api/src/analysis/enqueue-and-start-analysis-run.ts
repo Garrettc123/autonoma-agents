@@ -16,13 +16,13 @@ interface AnalysisRunStarter<T> {
     startAnalysisRun: (input: AnalysisRunWorkflowInput) => Promise<T>;
 }
 
-/** Writes the event before starting the run, so a started run always has a matching pending event. */
-export async function enqueueAndStartAnalysisRun<T>(
-    { events, startAnalysisRun }: AnalysisRunStarter<T>,
-    launch: AnalysisRunLaunch,
-): Promise<T> {
-    const logger = rootLogger.child({ name: "enqueueAndStartAnalysisRun" });
-    logger.info("Enqueuing analysis event before starting run", {
+/**
+ * Persist the event without waking the workflow - the deferred path for a real push the org cannot act on right now
+ * (out of credits, or activation-gated). A later top-up or explicit request claims it.
+ */
+export async function enqueueAnalysisEvent(events: AnalysisEventStore, launch: AnalysisRunLaunch): Promise<void> {
+    const logger = rootLogger.child({ name: "enqueueAnalysisEvent" });
+    logger.info("Enqueuing analysis event without poking", {
         branch: { branchId: launch.branchId },
         extra: { source: launch.source, headSha: launch.headSha },
     });
@@ -32,5 +32,13 @@ export async function enqueueAndStartAnalysisRun<T>(
         source: launch.source,
         event: { type: "commits_pushed", payload: { headSha: launch.headSha, baseSha: launch.baseSha } },
     });
+}
+
+/** Writes the event before starting the run, so a started run always has a matching pending event. */
+export async function enqueueAndStartAnalysisRun<T>(
+    { events, startAnalysisRun }: AnalysisRunStarter<T>,
+    launch: AnalysisRunLaunch,
+): Promise<T> {
+    await enqueueAnalysisEvent(events, launch);
     return startAnalysisRun({ branchId: launch.branchId, headSha: launch.headSha, baseSha: launch.baseSha });
 }

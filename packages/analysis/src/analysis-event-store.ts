@@ -1,10 +1,11 @@
-import { type Prisma, type PrismaClient, SnapshotStatus } from "@autonoma/db";
+import { type Prisma, type PrismaClient, PullRequestCacheState, SnapshotStatus } from "@autonoma/db";
 import { type Logger, logger as rootLogger } from "@autonoma/logger";
 import {
     type AnalysisEventBody,
     analysisEventBodySchema,
     type AnalysisEventSource,
     analysisEventSourceSchema,
+    analysisEventTypeSchema,
 } from "@autonoma/types";
 
 /**
@@ -19,6 +20,21 @@ const LIVE_CLAIM_STATUSES: ReadonlySet<SnapshotStatus> = new Set([SnapshotStatus
 const RECLAIMABLE_CLAIM_STATUSES: SnapshotStatus[] = Object.values(SnapshotStatus).filter(
     (status) => !LIVE_CLAIM_STATUSES.has(status),
 );
+
+/**
+ * PR states that mean the branch is done and will never run again, so a pending event on it is dead weight a
+ * re-poke must skip - otherwise every credit top-up re-pokes a closed PR forever. A `draft` PR is deliberately NOT
+ * here: it is temporary, and its events stay eligible for when it reopens. A branch with no PR row at all (main) is
+ * always eligible, and an absent `prState` fails open, so only these two terminal states exclude a branch.
+ */
+const TERMINAL_PR_STATES: PullRequestCacheState[] = [PullRequestCacheState.closed, PullRequestCacheState.merged];
+
+/** The head a credit top-up should re-poke a branch on: the newest pending commit event's. */
+export interface PendingBranchHead {
+    branchId: string;
+    headSha: string;
+    baseSha?: string;
+}
 
 export interface EnqueueAnalysisEventInput {
     branchId: string;
@@ -110,6 +126,43 @@ export class AnalysisEventStore {
     }
 
     /**
+     * The newest pending commit head for each of the org's branches that has one AND whose PR is still live - what a
+     * credit top-up re-pokes. A branch with no pending commit event is absent, so a caller pokes only branches that
+     * have deferred work; a branch whose PR has closed/merged is excluded, so a dead PR is not re-poked forever.
+     */
+    public async listPendingBranchHeads(organizationId: string): Promise<PendingBranchHead[]> {
+        this.logger.info("Listing pending branch heads for organization", { organization: { organizationId } });
+        const rows = await this.db.analysisEvent.findMany({
+            where: {
+                organizationId,
+                type: analysisEventTypeSchema.enum.commits_pushed,
+                OR: this.pendingClause(),
+                // Main (no PR row) and open/draft PRs stay; only a closed or merged PR is skipped. An absent
+                // `prState` fails open - a just-pushed branch can have a cold cache, and the run re-checks liveness.
+                branch: { NOT: { prInfo: { prState: { in: TERMINAL_PR_STATES } } } },
+            },
+            // DISTINCT ON (branch_id): the newest pending event per branch, so the result is bounded by the branch
+            // count rather than the ever-growing event history. `branchId` leads the orderBy so Postgres pushes the
+            // dedup into the query; `id` breaks a same-millisecond `createdAt` tie deterministically (cuids are
+            // time-ordered - the larger id is the later insert).
+            orderBy: [{ branchId: "asc" }, { createdAt: "desc" }, { id: "desc" }],
+            distinct: ["branchId"],
+        });
+
+        const heads: PendingBranchHead[] = [];
+        for (const row of rows) {
+            const record = this.toRecord(row);
+            if (record.type !== "commits_pushed") continue;
+            heads.push({ branchId: record.branchId, headSha: record.payload.headSha, baseSha: record.payload.baseSha });
+        }
+        this.logger.info("Pending branch heads listed", {
+            organization: { organizationId },
+            extra: { branchCount: heads.length },
+        });
+        return heads;
+    }
+
+    /**
      * Claim every pending event on the branch for the opening snapshot, in the caller's transaction - the atomic
      * companion to `openSnapshot`, wired through its `onOpened` hook. Returns how many events were claimed.
      *
@@ -178,13 +231,15 @@ export class AnalysisEventStore {
      * can never disagree between them.
      */
     private pendingWhere(branchId: string): Prisma.AnalysisEventWhereInput {
-        return {
-            branchId,
-            OR: [
-                { claimedBySnapshotId: null },
-                { claimedBySnapshot: { is: { status: { in: RECLAIMABLE_CLAIM_STATUSES } } } },
-            ],
-        };
+        return { branchId, OR: this.pendingClause() };
+    }
+
+    /** The pending disjunction on its own - unclaimed, or claimed by a thrown-away run - to compose under any scope. */
+    private pendingClause(): Prisma.AnalysisEventWhereInput[] {
+        return [
+            { claimedBySnapshotId: null },
+            { claimedBySnapshot: { is: { status: { in: RECLAIMABLE_CLAIM_STATUSES } } } },
+        ];
     }
 
     private toRecord(row: AnalysisEventRow): AnalysisEventRecord {

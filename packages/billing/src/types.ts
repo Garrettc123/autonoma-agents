@@ -73,6 +73,18 @@ export type PreviewDeployGateResult = { allowed: true } | { allowed: false; reas
 /** Why a new PR analysis run was declined - currently only one reason: the org's balance is at or below its credit floor. */
 export type AnalysisCreditsGateResult = { allowed: true } | { allowed: false; reason: "out_of_credits" };
 
+/**
+ * Called after credits are actually granted to an org (a top-up purchase or a subscription renewal), so a caller can
+ * react - e.g. re-poke analysis runs the org deferred while out of credits. Best-effort: its failure must not fail
+ * the grant, and it does not fire on an idempotent replay of an already-applied grant.
+ */
+export type CreditsGrantedHook = (organizationId: string) => Promise<void>;
+
+/** Optional hooks a billing service fires on state changes a consumer wants to observe. */
+export interface BillingServiceHooks {
+    onCreditsGranted?: CreditsGrantedHook;
+}
+
 export type BillingSessionResult = {
     url: string | null;
 };

@@ -14,6 +14,7 @@ import type {
     WorkflowRef,
 } from "@autonoma/workflow";
 import type Redis from "ioredis";
+import { repokeAnalysisOnCreditsGranted } from "../analysis/credit-topup-repoker";
 import { ApplicationSetupService } from "../application-setup/application-setup.service";
 import type { Auth } from "../auth";
 import { DemoEntrySourceStore } from "../demo/demo-entry-source.store";
@@ -147,7 +148,7 @@ export function buildServices({
     triggerPreviewRedeployApp,
     emailSender,
 }: ServicesParams): Services {
-    const billingService = createBillingService(conn);
+    const billingService = createBillingService(conn, { onCreditsGranted: repokeAnalysisOnCreditsGranted });
     const secretValues = buildSecretValues(conn);
     const previewkitOperationsService = new PreviewkitOperationsService(conn, buildSecretKeys(conn));
     const previewkitSecretsService = new PreviewkitSecretsService(conn, secretValues);

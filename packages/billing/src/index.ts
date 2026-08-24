@@ -3,6 +3,8 @@ export type { BillingServices } from "./billing.service";
 export type { BillingService, StripeBillingService } from "./types";
 export type {
     AnalysisCreditsGateResult,
+    BillingServiceHooks,
+    CreditsGrantedHook,
     DeductGenerationContext,
     LlmProxyGateReason,
     LlmProxyGateResult,

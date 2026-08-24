@@ -1,11 +1,19 @@
 import { AnalysisEventStore } from "@autonoma/analysis";
+import type { AnalysisCreditsGateResult } from "@autonoma/billing";
 import type { PrismaClient } from "@autonoma/db";
 import { ApplicationArchitecture, TriggerSource } from "@autonoma/db";
 import { BadRequestError, InsufficientAnalysisCreditsError, NotFoundError } from "@autonoma/errors";
-import { expect } from "vitest";
+import { expect, vi } from "vitest";
 import { DiffsTriggerService } from "../../src/diffs/diffs-trigger.service";
 import { apiTestSuite } from "../api-test";
 import type { APITestHarness } from "../harness";
+
+const outOfCreditsGate = {
+    checkAnalysisCreditsGate: async (): Promise<AnalysisCreditsGateResult> => ({
+        allowed: false,
+        reason: "out_of_credits",
+    }),
+};
 
 /** Open the run a workflow would have opened for this head, so the attach path has something to attach to. */
 async function openRunFor(db: PrismaClient, branchId: string, headSha: string): Promise<string> {
@@ -359,6 +367,100 @@ apiTestSuite({
             );
         });
 
+        // The push is a real event, so activation defers it as a pending row rather than dropping it: the run the
+        // explicit request eventually starts claims it and its event list truthfully records every push it covered.
+        test("an activation-suppressed push records the deployment, persists a pending event, and starts no run", async ({
+            harness,
+            seedResult: { service },
+        }) => {
+            harness.githubApp.defaultClient.addPullRequest("org/my-repo", {
+                number: 82,
+                title: "Test PR #82",
+                headRef: "feature/branch-82",
+                baseSha: "initial-sha",
+                commits: ["head-sha-82"],
+            });
+            await harness.db.organizationSettings.upsert({
+                where: { organizationId: harness.organizationId },
+                create: { organizationId: harness.organizationId, activationEnabled: true },
+                update: { activationEnabled: true },
+            });
+            const triggersBefore = harness.startAnalysisRun.mock.calls.length;
+
+            const result = await service.triggerPrDiffs({
+                source: "webhook",
+                organizationId: harness.organizationId,
+                repoId: 1001,
+                prNumber: 82,
+                url: "https://preview.example.com",
+            });
+
+            await harness.db.organizationSettings.update({
+                where: { organizationId: harness.organizationId },
+                data: { activationEnabled: false },
+            });
+
+            expect(result.skipped).toBe(true);
+            expect(harness.startAnalysisRun.mock.calls.length - triggersBefore).toBe(0);
+            const events = await harness.db.analysisEvent.findMany({ where: { branchId: result.branchId } });
+            expect(events).toHaveLength(1);
+            expect(events[0]!.claimedBySnapshotId).toBeNull();
+            expect(events[0]!.payload).toMatchObject({ headSha: "head-sha-82" });
+
+            // Recorded even though analysis is deferred: a later re-poke resolves the head from this coordinate.
+            const branch = await harness.db.branch.findUniqueOrThrow({
+                where: { id: result.branchId },
+                select: { deployment: { select: { headSha: true } } },
+            });
+            expect(branch.deployment?.headSha).toBe("head-sha-82");
+        });
+
+        // Out of credits stops meaning "the trigger never happened": the event persists so a top-up can re-poke it,
+        // while the comment-and-refuse behavior is unchanged (still throws, still starts no run).
+        test("an out-of-credits push records the deployment, persists a pending event, refuses, and starts no run", async ({
+            harness,
+            seedResult: { app },
+        }) => {
+            harness.githubApp.defaultClient.addPullRequest("org/my-repo", {
+                number: 83,
+                title: "Test PR #83",
+                headRef: "feature/branch-83",
+                baseSha: "initial-sha",
+                commits: ["head-sha-83"],
+            });
+            const startAnalysisRun = vi.fn().mockResolvedValue(undefined);
+            const outOfCreditsTrigger = new DiffsTriggerService(
+                harness.db,
+                harness.services.github,
+                outOfCreditsGate,
+                startAnalysisRun,
+                new AnalysisEventStore(harness.db),
+            );
+
+            await expect(
+                outOfCreditsTrigger.triggerPrDiffs({
+                    source: "webhook",
+                    organizationId: harness.organizationId,
+                    repoId: 1001,
+                    prNumber: 83,
+                    url: "https://preview.example.com",
+                }),
+            ).rejects.toThrow(InsufficientAnalysisCreditsError);
+
+            expect(startAnalysisRun).not.toHaveBeenCalled();
+            const branch = await harness.db.branch.findFirstOrThrow({
+                where: { applicationId: app.id, prInfo: { prNumber: 83 } },
+                select: { id: true, deployment: { select: { headSha: true } } },
+            });
+            const events = await harness.db.analysisEvent.findMany({ where: { branchId: branch.id } });
+            expect(events).toHaveLength(1);
+            expect(events[0]!.claimedBySnapshotId).toBeNull();
+            expect(events[0]!.payload).toMatchObject({ headSha: "head-sha-83" });
+
+            // The refusal does not cost the coordinate: the customer's deployment is recorded before the gate.
+            expect(branch.deployment?.headSha).toBe("head-sha-83");
+        });
+
         // Dedupe of activation triggers racing on the same head: a second explicit request attaches to the run the
         // first opened rather than superseding it, so `/start analysis` twice does not cost two runs.
         test("attaches to the in-flight run for the same head instead of starting a duplicate", async ({
@@ -626,6 +728,9 @@ apiTestSuite({
             // No new snapshot beyond the pre-existing active one, and no run asked for.
             const snapshots = await harness.db.branchSnapshot.findMany({ where: { branchId } });
             expect(snapshots).toHaveLength(1);
+            // An already-analyzed head is not a real event, so it leaves nothing pending in the inbox.
+            const events = await harness.db.analysisEvent.findMany({ where: { branchId } });
+            expect(events).toHaveLength(0);
         });
 
         // With the gate enforced, only a PR merging INTO the app's trunk is in scope. A PR that targets another

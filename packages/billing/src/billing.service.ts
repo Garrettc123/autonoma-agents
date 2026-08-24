@@ -2,7 +2,7 @@ import type { PrismaClient } from "@autonoma/db";
 import { DisabledBillingService } from "./billing-disabled.service";
 import { EnabledBillingService } from "./billing-enabled.service";
 import { env } from "./env";
-import type { BillingService, StripeBillingService } from "./types";
+import type { BillingService, BillingServiceHooks, StripeBillingService } from "./types";
 
 export type { BillingService, StripeBillingService } from "./types";
 export type BillingServices = {
@@ -10,9 +10,9 @@ export type BillingServices = {
     stripeBillingService: StripeBillingService | null;
 };
 
-export function createBillingServices(db: PrismaClient): BillingServices {
+export function createBillingServices(db: PrismaClient, hooks?: BillingServiceHooks): BillingServices {
     if (env.STRIPE_ENABLED) {
-        const service = new EnabledBillingService(db);
+        const service = new EnabledBillingService(db, hooks);
         return {
             billingService: service,
             stripeBillingService: service,
@@ -25,10 +25,10 @@ export function createBillingServices(db: PrismaClient): BillingServices {
     };
 }
 
-export function createBillingService(db: PrismaClient): BillingService {
-    return createBillingServices(db).billingService;
+export function createBillingService(db: PrismaClient, hooks?: BillingServiceHooks): BillingService {
+    return createBillingServices(db, hooks).billingService;
 }
 
-export function createStripeBillingService(db: PrismaClient): StripeBillingService | null {
-    return createBillingServices(db).stripeBillingService;
+export function createStripeBillingService(db: PrismaClient, hooks?: BillingServiceHooks): StripeBillingService | null {
+    return createBillingServices(db, hooks).stripeBillingService;
 }

@@ -274,6 +274,39 @@ apiTestSuite({
             expect(events[0]!.payload).toMatchObject({ headSha: "head-7", baseSha: "main-sha-2" });
         });
 
+        // Under activation the automatic preview run is suppressed - no build, no analysis run - but the push is a
+        // real event, so it is persisted for the explicit request to claim later.
+        test("startRunFromPullRequestWebhook persists a pending event and starts nothing under activation", async ({
+            harness,
+            seedResult: { app, service },
+        }) => {
+            harness.triggerWorkflow.mockClear();
+            harness.startAnalysisRun.mockClear();
+            await harness.db.organizationSettings.upsert({
+                where: { organizationId: harness.organizationId },
+                create: { organizationId: harness.organizationId, activationEnabled: true },
+                update: { activationEnabled: true },
+            });
+
+            await service.startRunFromPullRequestWebhook("opened", harness.organizationId, pullRequestPayload(9));
+
+            await harness.db.organizationSettings.update({
+                where: { organizationId: harness.organizationId },
+                data: { activationEnabled: false },
+            });
+
+            const branch = await harness.db.branch.findFirstOrThrow({
+                where: { applicationId: app.id, prInfo: { prNumber: 9 } },
+                select: { id: true },
+            });
+            expect(harness.triggerWorkflow).not.toHaveBeenCalled();
+            expect(harness.startAnalysisRun).not.toHaveBeenCalled();
+            const events = await harness.db.analysisEvent.findMany({ where: { branchId: branch.id } });
+            expect(events).toHaveLength(1);
+            expect(events[0]!.claimedBySnapshotId).toBeNull();
+            expect(events[0]!.payload).toMatchObject({ headSha: "head-9", baseSha: "main-sha-2" });
+        });
+
         // Home lists branches that carry a FeatureBranchInfo, so a row created here is a pull request the customer
         // sees on their dashboard the moment they go live - for a PR Autonoma never reviewed and has nothing to say
         // about. No row, no build, no comment until the app is live.
@@ -1361,7 +1394,7 @@ apiTestSuite({
             ).rejects.toThrow(NotFoundError);
         });
 
-        test("deploy is blocked and comments on the PR when the org is out of credits and both gates are on", async ({
+        test("an out-of-credits deploy persists the event, comments, and starts no run", async ({
             harness,
             seedResult: { app },
         }) => {
@@ -1388,7 +1421,10 @@ apiTestSuite({
                 select: { id: true },
             });
             expect(branch).not.toBeNull();
-            expect(await harness.db.analysisEvent.count({ where: { branchId: branch!.id } })).toBe(0);
+            // Deferred, not lost: the event persists before the credit gate throws, so a top-up re-pokes it.
+            const events = await harness.db.analysisEvent.findMany({ where: { branchId: branch!.id } });
+            expect(events).toHaveLength(1);
+            expect(events[0]!.claimedBySnapshotId).toBeNull();
         });
 
         test("deploy proceeds once the org has a positive balance", async ({ harness }) => {

@@ -56,6 +56,7 @@ await events.hasPending(branchId);                          // is there a reason
 await events.claimPending(tx, branchId, snapshotId);        // steals from superseded/cancelled/failed claims
 await events.markHandledByActiveSnapshot(branchId);         // the already-analyzed path (no new snapshot opens)
 await events.listForSnapshot(snapshotId);                   // what this run analyzed
+await events.listPendingBranchHeads(organizationId);        // newest pending head per branch, for the top-up sweeper
 ```
 
 ## Invariants the module holds

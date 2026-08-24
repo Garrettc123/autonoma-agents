@@ -18,7 +18,8 @@ import {
 } from "@autonoma/types";
 import type { AnalysisRunWorkflowInput, PreviewBuildWorkflowInput } from "@autonoma/workflow";
 import { z } from "zod";
-import { enqueueAndStartAnalysisRun } from "../analysis/enqueue-and-start-analysis-run";
+import { enqueueAnalysisEvent } from "../analysis/enqueue-and-start-analysis-run";
+import { isActivationGated } from "../analysis/is-activation-gated";
 import { env } from "../env";
 import { applicationBranchRefs } from "../github/application-branch-refs";
 import { isBaseTrunkGateEnforced } from "../github/base-trunk-gate";
@@ -165,6 +166,30 @@ export class PreviewkitTriggerService extends Service {
             action,
         });
 
+        // No branch means no analysis run to defer, so the credit gate simply guards the standalone build.
+        if (request.branchId == null) {
+            await this.assertDeployCreditsAvailable(
+                request.organizationId,
+                request.repoFullName,
+                request.prNumber,
+                request.headSha,
+                request.branchId,
+            );
+            await this.startBuildWithoutRun(request);
+            return {};
+        }
+
+        const launch = {
+            branchId: request.branchId,
+            organizationId: request.organizationId,
+            source: request.source,
+            headSha: request.headSha,
+            baseSha: request.baseSha,
+        };
+
+        // Persist the event BEFORE the credit gate, so an out-of-credits deploy is deferred (a top-up re-pokes it)
+        // rather than lost - the same enqueue-before-throw shape the diffs trigger uses.
+        await enqueueAnalysisEvent(this.events, launch);
         await this.assertDeployCreditsAvailable(
             request.organizationId,
             request.repoFullName,
@@ -173,21 +198,11 @@ export class PreviewkitTriggerService extends Service {
             request.branchId,
         );
 
-        if (request.branchId == null) {
-            await this.startBuildWithoutRun(request);
-            return {};
-        }
-
-        const workflowId = await enqueueAndStartAnalysisRun(
-            { events: this.events, startAnalysisRun: this.startAnalysisRun },
-            {
-                branchId: request.branchId,
-                organizationId: request.organizationId,
-                source: request.source,
-                headSha: request.headSha,
-                baseSha: request.baseSha,
-            },
-        );
+        const workflowId = await this.startAnalysisRun({
+            branchId: launch.branchId,
+            headSha: launch.headSha,
+            baseSha: launch.baseSha,
+        });
         return { workflowId };
     }
 
@@ -313,22 +328,11 @@ export class PreviewkitTriggerService extends Service {
             return;
         }
 
-        if (await this.isActivationGated(organizationId)) {
-            this.logger.info(
-                "Activation: skipping the automatic preview run; a run starts only on an explicit request",
-                {
-                    action,
-                    organizationId,
-                    repo: repo.full_name,
-                    pr: pr.number,
-                },
-            );
-            return;
-        }
-
         // Only a PR merging INTO the app's trunk is in scope for orgs that opt in. The trunk ref came from the
         // application read above, so the comparison is free; the org-flag lookup runs only when the base differs. An
         // app with no recorded trunk (or an unlinked repo) cannot be judged either way, so it is left to proceed.
+        // Checked before the activation defer below: an off-trunk PR is not a real analyzable event, so it must
+        // leave no pending event behind.
         const trunkRef = application?.trunkRef;
         const baseIsOffTrunk = trunkRef != null && !sameGitRef(pr.base.ref, trunkRef);
         if (baseIsOffTrunk && (await isBaseTrunkGateEnforced(this.db, organizationId))) {
@@ -343,6 +347,35 @@ export class PreviewkitTriggerService extends Service {
         }
 
         const branchId = await this.resolveBranchIdForPr(organizationId, repo.id, pr.number, pr.head.ref);
+
+        // Under activation no automatic run starts - not the analysis, nor the build its verdict would warrant - but
+        // the push is a real event, so persist it (when a branch resolved) for the explicit request to claim later.
+        if (await isActivationGated(this.db, organizationId)) {
+            if (branchId == null) {
+                this.logger.info("Activation: skipping the automatic preview run; no branch resolved to persist on", {
+                    action,
+                    organizationId,
+                    repo: repo.full_name,
+                    pr: pr.number,
+                });
+                return;
+            }
+            this.logger.info("Activation: skipping the automatic preview run; persisting a pending event instead", {
+                branch: { branchId },
+                action,
+                organizationId,
+                repo: repo.full_name,
+                pr: pr.number,
+            });
+            await enqueueAnalysisEvent(this.events, {
+                branchId,
+                organizationId,
+                source: "webhook",
+                headSha: pr.head.sha,
+                baseSha: pr.base.sha,
+            });
+            return;
+        }
 
         await this.startRun(
             {
@@ -476,18 +509,6 @@ export class PreviewkitTriggerService extends Service {
             select: { previewkitBuildDraft: true },
         });
         return settings?.previewkitBuildDraft ?? false;
-    }
-
-    /**
-     * Under activation no automatic run starts - not the analysis, nor the build its verdict would warrant. An
-     * explicit request still runs, which is why this is asked at the one entry point meaning "GitHub pushed".
-     */
-    private async isActivationGated(organizationId: string): Promise<boolean> {
-        const settings = await this.db.organizationSettings.findUnique({
-            where: { organizationId },
-            select: { activationEnabled: true },
-        });
-        return settings?.activationEnabled === true;
     }
 
     /**

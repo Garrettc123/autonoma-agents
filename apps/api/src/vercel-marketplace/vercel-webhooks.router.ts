@@ -6,6 +6,7 @@ import { logger as rootLogger } from "@autonoma/logger";
 import { buildSdkUrl } from "@autonoma/types";
 import { Hono } from "hono";
 import { z } from "zod";
+import { repokeAnalysisOnCreditsGranted } from "../analysis/credit-topup-repoker";
 import { getVercelEncryptionHelper } from "../context";
 import { diffsTriggerService } from "../diffs/diffs-service";
 import { env } from "../env";
@@ -563,7 +564,9 @@ async function handleCheckRunStart(payload: CheckRunStartPayload): Promise<void>
 
 async function handleInvoicePaid(payload: unknown): Promise<void> {
     const { installationId, invoiceId } = InvoicePayloadSchema.parse(payload);
-    await processVercelInvoicePaid(installationId, invoiceId);
+    await processVercelInvoicePaid(installationId, invoiceId, {
+        onCreditsGranted: repokeAnalysisOnCreditsGranted,
+    });
 }
 
 async function handleInvoiceNotPaid(payload: unknown): Promise<void> {

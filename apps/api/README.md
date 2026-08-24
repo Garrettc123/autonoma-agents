@@ -260,17 +260,33 @@ default and bounded by the global `MERGE_GATE_ENABLED` kill switch; enabled per 
   the resolving push (via `resolveFixingPushAuthors`, mapped from the issue's `resolvedAt`), riding their logins on
   `bug.fixed`.
 
-### Analysis event inbox (dual-write)
+### Analysis event inbox
 
-Every path that starts an analysis run first persists an `AnalysisEvent` (the `@autonoma/analysis` inbox), then
-starts the workflow exactly as before. The single seam is `enqueueAndStartAnalysisRun`
-(`src/analysis/enqueue-and-start-analysis-run.ts`), which both `DiffsTriggerService.startRun` and
-`PreviewkitTriggerService.startRun` route through - so future work can make the workflow drain the inbox, and
-reclassify the credits/activation gates, in one place. Each producer threads its `source`
-(`webhook`/`label`/`comment`/`ui`/`vercel`/`ci`/`onboarding`/`mcp`/`admin`/`http`) down to the seam; the
-merge-gate maps its activation `ANALYSIS_RUN_SOURCE` onto that enum. Gates all sit before the seam, so a gated
-trigger writes no event - byte-equivalent with the pre-inbox behavior. Nothing reads events yet; this is a
-dual-write that validates the write path against production traffic.
+A push persists an `AnalysisEvent` (the `@autonoma/analysis` inbox), and the analysis workflow drains it - it
+peeks the newest pending event for a head and claims the branch's pending events when it opens the snapshot. Two
+seams live in `src/analysis/`:
+
+- `enqueueAndStartAnalysisRun` - enqueue then poke, for a real event we can act on now.
+- `enqueueAnalysisEvent` - enqueue **without** poking, for a real event we cannot act on yet.
+
+`analysisPokeGate` (`src/analysis/analysis-poke-gate.ts`) is the one poke-eligibility predicate - activation +
+analysis credits - shared by both producers and the credit-top-up sweeper, so "wake the workflow" and "may the
+run proceed" cannot disagree. It decides:
+
+- **Not a real analyzable event** (app not live, base not trunk, draft, already-analyzed) -> nothing is inserted.
+- **Real but deferred** -> the event persists without a poke. An activation-gated push waits for its explicit
+  request to claim it; an out-of-credits push waits for a top-up (the credits comment + refusal are unchanged, the
+  event just also persists).
+- **Otherwise** -> enqueue and poke.
+
+A credit grant fires the billing service's `onCreditsGranted` hook, wired in the Stripe/Vercel webhook routes to
+`AnalysisCreditTopUpRepoker.repokeOrganization` (`src/analysis/credit-topup-repoker.ts`), which starts one run per
+branch with a pending event - but only when `analysisPokeGate` now allows it, so an activation-gated org's deferred
+events are never poked by a top-up.
+
+Each producer threads its `source`
+(`webhook`/`label`/`comment`/`ui`/`vercel`/`ci`/`onboarding`/`mcp`/`admin`/`http`) down to the seam; the merge-gate
+maps its activation `ANALYSIS_RUN_SOURCE` onto that enum.
 
 ### Explicit deploy requests are not refusable
 

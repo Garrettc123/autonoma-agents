@@ -5,6 +5,7 @@ import { BILLING_STRIPE_WEBHOOK_EVENT_TYPES, type BillingStripeWebhookEventType 
 import { Hono } from "hono";
 import type Stripe from "stripe";
 import { z } from "zod";
+import { repokeAnalysisOnCreditsGranted } from "../analysis/credit-topup-repoker";
 import { env } from "../env.ts";
 
 export const stripeHttpRouter = new Hono();
@@ -40,7 +41,7 @@ stripeHttpRouter.post("/webhook", async (c) => {
 
     logger.info("Dispatching Stripe webhook event", { eventType: event.type, eventId: event.id });
 
-    void processWebhookEvent(event).catch((err) => {
+    void processWebhookEvent(event, { onCreditsGranted: repokeAnalysisOnCreditsGranted }).catch((err) => {
         logger.fatal("Error processing Stripe webhook event", {
             eventId: event.id,
             eventType: event.type,

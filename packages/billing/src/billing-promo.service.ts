@@ -2,17 +2,22 @@ import { CreditTransactionType, type PrismaClient } from "@autonoma/db";
 import { BadRequestError } from "@autonoma/errors";
 import { ensureBillingProvisioning } from "./billing-provisioning";
 import { isUniqueConstraintError, normalizePromoCode } from "./billing-utils";
+import { fireCreditsGrantedHook } from "./fire-credits-granted-hook";
 import { Service } from "./service";
 import type {
     BillingPromoCodeItem,
     CreatePromoCodeInput,
+    CreditsGrantedHook,
     ListPromoCodesInput,
     ListPromoCodesResult,
     RedeemPromoCodeResult,
 } from "./types";
 
 export class BillingPromoService extends Service {
-    constructor(private readonly db: PrismaClient) {
+    constructor(
+        private readonly db: PrismaClient,
+        private readonly onCreditsGranted?: CreditsGrantedHook,
+    ) {
         super();
     }
 
@@ -26,7 +31,7 @@ export class BillingPromoService extends Service {
 
         const now = new Date();
 
-        return this.db.$transaction(async (tx) => {
+        const result = await this.db.$transaction(async (tx) => {
             const promo = await tx.billingPromoCode.findUnique({
                 where: { code: normalizedCode },
                 select: {
@@ -139,6 +144,12 @@ export class BillingPromoService extends Service {
                 remainingRedemptions,
             };
         });
+
+        // A promo top-up must re-poke deferred analysis just like a Stripe or Vercel grant does - fired after the
+        // grant commits, best-effort, so a re-poke failure never fails the redemption.
+        await fireCreditsGrantedHook(this.onCreditsGranted, organizationId, this.logger);
+
+        return result;
     }
 
     async listPromoCodes(input?: ListPromoCodesInput): Promise<ListPromoCodesResult> {

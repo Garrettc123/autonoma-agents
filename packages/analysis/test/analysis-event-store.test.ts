@@ -1,7 +1,26 @@
-import type { Prisma, SnapshotStatus } from "@autonoma/db";
+import type { Prisma, PullRequestCacheState, SnapshotStatus } from "@autonoma/db";
 import type { AnalysisEventSource } from "@autonoma/types";
 import { expect } from "vitest";
 import { type AnalysisHarness, analysisSuite, type SeededAnalysis } from "./harness";
+
+/** A second branch on the run's app, carrying a PR in the given lifecycle state. */
+async function createPrBranch(
+    harness: AnalysisHarness,
+    run: SeededAnalysis,
+    prNumber: number,
+    prState: PullRequestCacheState,
+): Promise<string> {
+    const branch = await harness.db.branch.create({
+        data: {
+            name: `feature/${prNumber}`,
+            applicationId: run.applicationId,
+            organizationId: run.organizationId,
+            prInfo: { create: { applicationId: run.applicationId, prNumber, prState } },
+        },
+        select: { id: true },
+    });
+    return branch.id;
+}
 
 async function enqueueCommits(
     harness: AnalysisHarness,
@@ -163,6 +182,53 @@ analysisSuite({
 
             expect(await harness.eventStore.markHandledByActiveSnapshot(run.branchId)).toBe(0);
             expect(await harness.eventStore.hasPending(run.branchId)).toBe(true);
+        });
+
+        test("listPendingBranchHeads returns the newest pending head per branch in the org", async ({ harness }) => {
+            const run = await harness.seedAnalysis();
+            const branch2 = await harness.db.branch.create({
+                data: { name: "feature/two", applicationId: run.applicationId, organizationId: run.organizationId },
+                select: { id: true },
+            });
+            const run2 = { ...run, branchId: branch2.id };
+
+            const older = await enqueueCommits(harness, run, "sha-old", { baseSha: "base-old" });
+            const newer = await enqueueCommits(harness, run, "sha-new", { baseSha: "base-new" });
+            await stampCreatedAt(harness, older, new Date("2026-01-01T00:00:00Z"));
+            await stampCreatedAt(harness, newer, new Date("2026-01-02T00:00:00Z"));
+            await enqueueCommits(harness, run2, "sha-two");
+
+            const heads = await harness.eventStore.listPendingBranchHeads(run.organizationId);
+            const byBranch = new Map(heads.map((head) => [head.branchId, head]));
+            expect(byBranch.size).toBe(2);
+            expect(byBranch.get(run.branchId)).toMatchObject({ headSha: "sha-new", baseSha: "base-new" });
+            expect(byBranch.get(branch2.id)).toMatchObject({ headSha: "sha-two" });
+        });
+
+        test("listPendingBranchHeads omits a branch whose events are all claimed by a live run", async ({
+            harness,
+        }) => {
+            const run = await harness.seedAnalysis();
+            await enqueueCommits(harness, run, "sha-a");
+            const live = await harness.addSnapshotWithStatus(run.branchId, "processing");
+            await claim(harness, run.branchId, live);
+
+            expect(await harness.eventStore.listPendingBranchHeads(run.organizationId)).toHaveLength(0);
+        });
+
+        test("listPendingBranchHeads skips a branch whose PR closed, keeps open and PR-less ones", async ({
+            harness,
+        }) => {
+            const run = await harness.seedAnalysis();
+            const openBranch = await createPrBranch(harness, run, 7, "open");
+            const closedBranch = await createPrBranch(harness, run, 8, "closed");
+
+            await enqueueCommits(harness, run, "sha-main");
+            await enqueueCommits(harness, { ...run, branchId: openBranch }, "sha-open");
+            await enqueueCommits(harness, { ...run, branchId: closedBranch }, "sha-closed");
+
+            const heads = await harness.eventStore.listPendingBranchHeads(run.organizationId);
+            expect(new Set(heads.map((head) => head.branchId))).toEqual(new Set([run.branchId, openBranch]));
         });
     },
 });
