@@ -9,9 +9,19 @@ import {
     analysisVerdictPlane,
     analysisVerdictSchema,
 } from "@autonoma/types";
+import type { BehaviorOutcome } from "components/analysis/verdict-story";
 import type { FindingBadgeVariant } from "components/investigation/finding-category";
 
 export type VerdictPlane = "app_health" | "coverage";
+
+/**
+ * Whether a verdict's actual behavior confirmed the expectation (a `passed` verdict) or contradicted it (everything
+ * else that carries an expected/actual claim - a bug). Drives the expected/actual pair's tone so a passing verdict is
+ * never painted like a failure. Derived from the taxonomy tier, so a new verdict is placed once and reaches this.
+ */
+export function verdictBehaviorOutcome(category: string): BehaviorOutcome {
+    return analysisFindingTier(category) === "passed" ? "match" : "divergence";
+}
 
 export interface AnalysisVerdictMeta {
     label: string;

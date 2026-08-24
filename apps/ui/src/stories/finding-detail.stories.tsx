@@ -145,6 +145,38 @@ export const OriginalOnly: Story = {
 };
 
 /**
+ * A `passed` verdict: the app behaved exactly as the test expected. The actual behavior MATCHED the expectation, so
+ * the "Actual" claim is tinted success-green with a check - not painted danger-red like a divergence would be.
+ */
+export const Passed: Story = {
+  args: {
+    finding: {
+      id: "create-physical-card-md",
+      slug: "create-physical-card-md",
+      category: "passed",
+      confidence: "high",
+      planFidelity: "exact",
+      stepCount: 9,
+      headline: "Physical card creation increments the pending count",
+      expectedBehavior:
+        "After creating the physical card, the dashboard should immediately show `+2 pending approval` and a success confirmation.",
+      actualBehavior:
+        "The modal closed, the dashboard showed `+2 pending approval`, and the success toast stated `Card Created Successfully` for the new Lime Physical card.",
+      observedAppIssues:
+        "An initial login-screen visual glitch showed overlapping/duplicate `demo@autonoma.app` text in the email field before the first interaction; it disappeared after the field was clicked.",
+      evidence: [
+        {
+          source: "video",
+          detail: "The recording shows the pending count advancing to 2 and the success toast confirming the new card.",
+        },
+      ],
+      videoUrl: "https://assets.autonoma.app/test-generation/demo/video.webm",
+    },
+    backLink,
+  },
+};
+
+/**
  * A kept `plan_mismatch`: the app worked, the test's plan did not match it, and self-heal could not stabilize it
  * within budget. It carries no app expected/actual - there is no app-behavior claim to make - so its diagnosis is the
  * "Why it could not be stabilized" post-mortem instead.

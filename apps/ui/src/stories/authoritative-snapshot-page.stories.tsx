@@ -498,6 +498,58 @@ const findingDetailSetupFailure: AnalysisFindingDetailFixture = {
   previousPlan: undefined,
 };
 
+// A passed verdict's payload: an app-health verdict whose actual behavior MATCHED the expectation, so the drawer's
+// side-by-side expected/actual pair renders the "Actual" claim as a success (green check) rather than a divergence
+// (red X). The recording plays and the observed-app-issues note still surfaces glitches seen independent of the pass.
+const findingDetailPassed: AnalysisFindingDetailFixture = {
+  ...findingDetailData,
+  findingId: "create-physical-card",
+  testCase: {
+    id: "tc_create-physical-card",
+    name: "create-physical-card.md",
+    slug: "create-physical-card",
+    description: "A signed-in user creates a new physical card and it is marked pending.",
+  },
+  iterations: [
+    {
+      number: 1,
+      category: "passed",
+      headline: "Physical card creation increments the pending count",
+      createdAt: RUN_AT,
+    },
+  ],
+  classification: {
+    number: 1,
+    category: "passed",
+    confidence: "high",
+    headline: "Physical card creation increments the pending count",
+    createdAt: RUN_AT,
+    expectedBehavior:
+      "After creating the physical card, the dashboard should immediately show `+2 pending approval` and a success confirmation.",
+    actualBehavior:
+      "The modal closed, the dashboard showed `+2 pending approval`, and the success toast stated `Card Created " +
+      "Successfully` for the new Lime Physical card.",
+    remediation: undefined,
+    rootCause: undefined,
+    observedAppIssues:
+      "An initial login-screen visual glitch showed overlapping/duplicate `demo@autonoma.app` text in the email " +
+      "field before the first interaction; it disappeared after the field was clicked.",
+    evidence: [
+      {
+        source: "video",
+        detail: "The recording shows the pending count advancing to 2 and the success toast confirming the new card.",
+      },
+    ],
+    keyScreenshotUrl: MOCK_SCREENSHOT,
+  },
+  generation: {
+    ...findingDetailData.generation!,
+    id: "gen_create-physical-card",
+  },
+  plan: findingDetailData.plan,
+  previousPlan: undefined,
+};
+
 // A finding whose plan this checkpoint rewrote, for the plan tab's diff toggle: the current plan reads as markdown,
 // "Changed this checkpoint" flips to the monospace diff against the pre-PR plan.
 const findingDetailWithPlanDiff: AnalysisFindingDetailFixture = {
@@ -916,6 +968,24 @@ export const RunningTests: Story = {
 export const Drawer: Story = {
   args: {
     path: `/app/${baseApplication.slug}/pull-requests/${PR_NUMBER}/snapshots/${SNAPSHOT_ID}/running/finding/checkout-place-order`,
+  },
+};
+
+/**
+ * The drawer summary for a `passed` verdict: the actual behavior confirmed the expectation, so the side-by-side
+ * expected/actual pair renders the "Actual" claim in success-green with a check - not danger-red like a divergence.
+ */
+export const DrawerPassed: Story = {
+  args: {
+    path: `/app/${baseApplication.slug}/pull-requests/${PR_NUMBER}/snapshots/${SNAPSHOT_ID}/running/finding/create-physical-card`,
+  },
+  parameters: {
+    msw: {
+      handlers: appShellHandlers({
+        ...pageFixtures,
+        branches: { ...pageFixtures.branches, analysisFindingDetail: findingDetailPassed },
+      }),
+    },
   },
 };
 

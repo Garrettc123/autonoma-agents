@@ -28,10 +28,21 @@ const SECTION_ICON_SIZE = 13;
  */
 type HeadingLevel = 2 | 3;
 
-/** The two app-behavior claims, tinted to their plane so the expected/actual contrast reads at a glance. */
+/**
+ * Whether the observed behavior confirmed the expectation or contradicted it. A passing verdict's actual behavior
+ * MATCHED what was expected, so it must not be painted like a failure; a bug's actual behavior is a `divergence`.
+ * Drives the "Actual" claim's tone and icon so the pair never reads as an error when the run actually passed.
+ */
+export type BehaviorOutcome = "match" | "divergence";
+
+/**
+ * The app-behavior claims, tinted to their meaning so the expected/actual contrast reads at a glance. The "Actual"
+ * claim has two tones: red when it diverged from the expectation (a bug), green when it matched it (a pass).
+ */
 const BEHAVIOR_TONES = {
   expected: "border-l-status-pending/60 bg-status-pending/5",
-  actual: "border-l-status-critical/60 bg-status-critical/5",
+  actualDivergence: "border-l-status-critical/60 bg-status-critical/5",
+  actualMatch: "border-l-status-success/60 bg-status-success/5",
 } as const;
 
 /** Each evidence source gets an icon and an accent so a reviewer skims the list by kind instead of reading tags. */
@@ -133,18 +144,29 @@ export function ExpectedSection({
   );
 }
 
-/** The actual app behavior of an app-health verdict, tinted danger-red. Renders nothing when the field is absent. */
+/**
+ * The actual app behavior of an app-health verdict. Tinted danger-red when it diverged from the expectation (a bug),
+ * success-green when it matched it (a pass) so a passing verdict never reads as an error. Renders nothing when the
+ * field is absent.
+ */
 export function ActualSection({
   level = 3,
+  outcome = "divergence",
   icon,
   children,
 }: {
   level?: HeadingLevel;
+  outcome?: BehaviorOutcome;
   icon?: ReactNode;
   children: ReactNode;
 }) {
   return (
-    <BehaviorClaim title="Actual" tone="actual" level={level} icon={icon}>
+    <BehaviorClaim
+      title="Actual"
+      tone={outcome === "match" ? "actualMatch" : "actualDivergence"}
+      level={level}
+      icon={icon}
+    >
       {children}
     </BehaviorClaim>
   );
@@ -158,24 +180,32 @@ export function ActualSection({
 export function ExpectedActualSections({
   expected,
   actual,
+  outcome = "divergence",
   level = 3,
 }: {
   expected: ReactNode;
   actual: ReactNode;
+  /** Whether the actual behavior matched the expectation (a pass) or contradicted it (a bug). Defaults to a bug. */
+  outcome?: BehaviorOutcome;
   level?: HeadingLevel;
 }) {
   const hasExpected = !isBlank(expected);
   const hasActual = !isBlank(actual);
   if (!hasExpected && !hasActual) return null;
   const expectedIcon = <CheckCircleIcon size={SECTION_ICON_SIZE} className="text-status-pending" />;
-  const actualIcon = <XCircleIcon size={SECTION_ICON_SIZE} className="text-status-critical" />;
+  const actualIcon =
+    outcome === "match" ? (
+      <CheckCircleIcon size={SECTION_ICON_SIZE} className="text-status-success" />
+    ) : (
+      <XCircleIcon size={SECTION_ICON_SIZE} className="text-status-critical" />
+    );
   if (!hasExpected || !hasActual) {
     return (
       <>
         <ExpectedSection level={level} icon={expectedIcon}>
           {expected}
         </ExpectedSection>
-        <ActualSection level={level} icon={actualIcon}>
+        <ActualSection level={level} outcome={outcome} icon={actualIcon}>
           {actual}
         </ActualSection>
       </>
@@ -186,7 +216,7 @@ export function ExpectedActualSections({
       <ExpectedSection level={level} icon={expectedIcon}>
         {expected}
       </ExpectedSection>
-      <ActualSection level={level} icon={actualIcon}>
+      <ActualSection level={level} outcome={outcome} icon={actualIcon}>
         {actual}
       </ActualSection>
     </div>

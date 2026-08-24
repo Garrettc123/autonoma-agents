@@ -8,6 +8,7 @@ import { ScalesIcon } from "@phosphor-icons/react/Scales";
 import { TrashIcon } from "@phosphor-icons/react/Trash";
 import { WarningOctagonIcon } from "@phosphor-icons/react/WarningOctagon";
 import { WrenchIcon } from "@phosphor-icons/react/Wrench";
+import { verdictBehaviorOutcome } from "components/analysis/verdict-meta";
 import {
   ClassificationErrorBlock,
   ExpectedActualSections,
@@ -41,7 +42,11 @@ export function FindingDrawerSummary({
 
       <MediaPanel classification={classification} generation={generation} />
 
-      <ExpectedActualSections expected={classification.expectedBehavior} actual={classification.actualBehavior} />
+      <ExpectedActualSections
+        expected={classification.expectedBehavior}
+        actual={classification.actualBehavior}
+        outcome={verdictBehaviorOutcome(classification.category)}
+      />
       <ProseSection title="Root cause" tone="secondary" icon={<MagnifyingGlassIcon size={ICON} />}>
         {classification.rootCause}
       </ProseSection>
