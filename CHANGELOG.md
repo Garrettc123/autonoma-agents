@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.260824.2](https://github.com/Autonoma-AI/agent/compare/v1.260824.1...v1.260824.2) (2026-08-24)
+
+
+### Features
+
+* **platform:** give beta and production their own static node groups ([#2774](https://github.com/Autonoma-AI/agent/issues/2774)) ([06a76a9](https://github.com/Autonoma-AI/agent/commit/06a76a9805145396a32a716bc392875b5fcecde7))
+
+
+### Bug Fixes
+
+* passing verdicts no longer read as errors in expected/actual ([#2771](https://github.com/Autonoma-AI/agent/issues/2771)) ([fe73735](https://github.com/Autonoma-AI/agent/commit/fe73735f71d6462c7ae21e06eb78b99997b8f884))
+* **previewkit:** let an app declare that it listens on nothing ([#2763](https://github.com/Autonoma-AI/agent/issues/2763)) ([6963567](https://github.com/Autonoma-AI/agent/commit/6963567647e56bacd1e54d0c87d889ea9b0db19a))
+
 ## [1.260824.1](https://github.com/Autonoma-AI/agent/compare/v1.260820.3...v1.260824.1) (2026-08-24)
 
 
