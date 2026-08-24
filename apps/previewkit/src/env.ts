@@ -123,6 +123,13 @@ export const env = createEnv({
         // PreviewkitJobLauncher on the runner Job. The JSON shape is re-validated at the boundary in
         // src/runner/job-spec.ts.
         PREVIEWKIT_JOB_SPEC: z.string().optional(),
+
+        // Preview-build circuit breaker (src/pipeline/build-circuit-breaker.ts).
+        PREVIEWKIT_BUILD_CIRCUIT_BREAKER_ENABLED: z.stringbool().default(false),
+        // N consecutive failed builds of one app before its circuit opens.
+        PREVIEWKIT_BUILD_CIRCUIT_FAILURE_THRESHOLD: z.coerce.number().int().positive().default(5),
+        // Half-open cooldown: once the newest failure is this old, one probe build is let through.
+        PREVIEWKIT_BUILD_CIRCUIT_COOLDOWN_MS: timeoutEnv(21_600_000), // 6 hours
     },
     runtimeEnv: process.env,
 });

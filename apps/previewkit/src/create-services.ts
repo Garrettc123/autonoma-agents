@@ -11,9 +11,12 @@ import { createPreviewkitDefaults } from "./config";
 import { Deployer } from "./deployer/deployer";
 import { resolveNpmRegistryMirror } from "./dockerfile-builder/resolve-npm-registry-mirror";
 import { env } from "./env";
+import { PreviewBuildCircuitOpenedError } from "./errors";
 import { GitHubProvider } from "./git-provider/github-provider";
 import { logger } from "./logger";
+import { type BuildCircuitAlert, BuildCircuitBreaker } from "./pipeline/build-circuit-breaker";
 import { PreviewPipeline } from "./pipeline/preview-pipeline";
+import { PrismaBuildCircuitStore } from "./pipeline/prisma-build-circuit-store";
 import { TeardownPipeline } from "./pipeline/teardown-pipeline";
 import { BuildSecretSource } from "./secrets/build-secret-source";
 import { ExternalSecretRelease } from "./secrets/external-secret-release";
@@ -164,6 +167,14 @@ export async function createPreviewkitServices(): Promise<PreviewkitServices> {
         env.DOCKER_HUB_MIRROR,
     );
 
+    // Preview-build circuit breaker. Dormant behind its flag (off = no DB read, path
+    // unchanged); when on, pauses a repeatedly-failing app and alerts once per episode.
+    const buildCircuit = new BuildCircuitBreaker(new PrismaBuildCircuitStore(), emitBuildCircuitAlert, {
+        enabled: env.PREVIEWKIT_BUILD_CIRCUIT_BREAKER_ENABLED,
+        failureThreshold: env.PREVIEWKIT_BUILD_CIRCUIT_FAILURE_THRESHOLD,
+        cooldownMs: env.PREVIEWKIT_BUILD_CIRCUIT_COOLDOWN_MS,
+    });
+
     // Pipelines
     const previewPipeline = new PreviewPipeline({
         provider: githubProvider,
@@ -173,6 +184,7 @@ export async function createPreviewkitServices(): Promise<PreviewkitServices> {
         registryUrl: previewkitDefaults.defaults.registry,
         dockerHubMirror: env.DOCKER_HUB_MIRROR,
         npmRegistryMirror,
+        buildCircuit,
         ...(logSink != null ? { logSink } : {}),
     });
 
@@ -202,4 +214,16 @@ function createBuildLogSink(): BuildLogSink | undefined {
         return undefined;
     }
     return new LokiBuildLogSink(env.LOKI_URL);
+}
+
+/** The one-time "circuit opened" team alert: a distinct Sentry error-level issue via the logger seam. */
+function emitBuildCircuitAlert({ repoFullName, appName, consecutiveFailures, since }: BuildCircuitAlert): void {
+    const message =
+        `Preview builds for ${repoFullName} / ${appName} have failed ${consecutiveFailures} times in a row - ` +
+        "circuit opened, pausing new builds until the build is fixed";
+    logger.captureError(
+        new PreviewBuildCircuitOpenedError(message),
+        { extra: { repoFullName, appName, consecutiveFailures, since: since.toISOString() } },
+        "error",
+    );
 }

@@ -86,6 +86,7 @@ export type PreviewJobOutcome =
     | "finalize_failed"
     | "superseded"
     | "skipped"
+    | "circuit_open"
     | "torn_down"
     | "redeployed"
     | "restarted"
@@ -127,9 +128,17 @@ async function runDeploy(
     // means config/namespace could not be resolved, so there is nothing to
     // finalize - let it propagate (non-zero exit) so the Job retries.
     const prep = await previewPipeline.prepare(target);
-    if (prep.skipped) {
+    if (prep.kind === "skipped") {
         logger.info("Preview deploy skipped (repo not linked or no preview config)", ids);
         return "skipped";
+    }
+    if (prep.kind === "circuit_open") {
+        // Breaker paused this app's builds; prepare already surfaced + alerted. Exit 0
+        // (handled), no build - no buildkit node for a hopeless build.
+        logger.warn("Preview deploy paused by the build circuit breaker", {
+            extra: { ...ids.extra, trippedApps: prep.trippedApps },
+        });
+        return "circuit_open";
     }
 
     let deployed: DeployPreviewEnvironmentOutput | undefined;

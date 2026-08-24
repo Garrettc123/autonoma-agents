@@ -46,6 +46,7 @@ import { enrichRepositoryShas } from "../multirepo/enrich-repository-shas";
 import { resolveDependencyCheckout } from "../multirepo/resolve-dependency-checkout";
 import { resolveTargetBranch } from "../multirepo/resolve-target-branch";
 import type { BuildSecretSource } from "../secrets/build-secret-source";
+import type { BuildCircuitChecker } from "./build-circuit-breaker";
 import { computeFinalOutcomes, toBuildStates, toFinalAppStates } from "./outcomes";
 import { StatusWriter } from "./status-writer";
 
@@ -115,15 +116,19 @@ interface PreviewPipelineOptions {
      *  terminal status into it (the builder mirrors raw output), keyed by
      *  namespace. Optional - absent disables mirroring entirely. */
     logSink?: BuildLogSink;
+    /** Preview-build circuit breaker. Absent (or its flag off) disables the gate. */
+    buildCircuit?: BuildCircuitChecker;
 }
 
 /**
- * Result of {@link PreviewPipeline.prepare}. `skipped` short-circuits the rest
- * of the pipeline for repos that opted out (no preview config).
+ * Result of {@link PreviewPipeline.prepare}. `skipped` = repo opted out (not linked,
+ * or no preview config); `circuit_open` = the breaker paused this repo's builds;
+ * `prepared` = proceed to build/deploy.
  */
 export type PreparePreviewResult =
-    | { skipped: true }
-    | { skipped: false; namespace: string; commentId: string; feedbackEnabled: boolean };
+    | { kind: "skipped" }
+    | { kind: "circuit_open"; trippedApps: string[] }
+    | { kind: "prepared"; namespace: string; commentId: string; feedbackEnabled: boolean };
 
 export class PreviewPipeline {
     private readonly provider: GitProvider;
@@ -134,6 +139,7 @@ export class PreviewPipeline {
     private readonly dockerHubMirror: string;
     private readonly npmRegistryMirror: string;
     private readonly logSink?: BuildLogSink;
+    private readonly buildCircuit?: BuildCircuitChecker;
     private readonly statusWriter: StatusWriter;
 
     constructor(options: PreviewPipelineOptions) {
@@ -145,13 +151,14 @@ export class PreviewPipeline {
         this.dockerHubMirror = options.dockerHubMirror;
         this.npmRegistryMirror = options.npmRegistryMirror;
         this.logSink = options.logSink;
+        this.buildCircuit = options.buildCircuit;
         this.statusWriter = new StatusWriter(this.deployer, this.logSink);
     }
 
     /**
      * Step 1 - resolve the Application + its preview config, set the initial
      * commit status + PR comment, and ensure the namespace exists so status can
-     * be polled from the first moment. Returns `{ skipped: true }` for repos
+     * be polled from the first moment. Returns `{ kind: "skipped" }` for repos
      * that opted out (not linked, or no preview config). Config is latest-only:
      * every deploy and redeploy resolves the Application's current config.
      */
@@ -178,7 +185,7 @@ export class PreviewPipeline {
                 organizationId,
                 githubRepositoryId,
             });
-            return { skipped: true };
+            return { kind: "skipped" };
         }
         logger.info("Prepare step 1/6 resolved linked Application", {
             repo: repoFullName,
@@ -198,7 +205,7 @@ export class PreviewPipeline {
                 pr: prNumber,
                 sha: shortSha,
             });
-            return { skipped: true };
+            return { kind: "skipped" };
         }
         logger.info("Prepare step 2/6 resolved preview config", {
             repo: repoFullName,
@@ -232,6 +239,11 @@ export class PreviewPipeline {
             });
         }
         const feedbackEnabled = isPullRequest && isLive;
+
+        // Circuit breaker: pause here - before any namespace or build node - when this
+        // app's recent builds keep failing, surfacing why on the commit status.
+        const circuitResult = await this.checkBuildCircuit(target, resolved, feedbackEnabled);
+        if (circuitResult != null) return circuitResult;
 
         if (feedbackEnabled) {
             logger.info("Prepare step 3/6 setting initial pending commit status", { repo: repoFullName, pr: prNumber });
@@ -281,7 +293,56 @@ export class PreviewPipeline {
             namespace,
             feedbackEnabled,
         });
-        return { skipped: false, namespace, commentId, feedbackEnabled };
+        return { kind: "prepared", namespace, commentId, feedbackEnabled };
+    }
+
+    /**
+     * Returns a `circuit_open` short-circuit (after surfacing the paused reason on the
+     * commit status) when the breaker has paused this repo's builds, else `undefined`
+     * to proceed. Runs before the namespace, so a paused app never provisions a node.
+     * Fails open: this guards the critical deploy path, so any breaker error (a
+     * transient DB blip) is logged and the build proceeds - never made worse than
+     * having no breaker at all.
+     */
+    private async checkBuildCircuit(
+        target: PreviewDeployTarget,
+        config: PreviewConfig,
+        feedbackEnabled: boolean,
+    ): Promise<Extract<PreparePreviewResult, { kind: "circuit_open" }> | undefined> {
+        if (this.buildCircuit == null) return undefined;
+        const { repoFullName, prNumber, headSha } = target;
+
+        try {
+            const decision = await this.buildCircuit.evaluate(
+                target,
+                config.apps.map((app) => app.name),
+            );
+            if (!decision.blocked) return undefined;
+
+            const trippedApps = decision.trippedApps.map((app) => app.appName);
+            logger.warn("Preview build paused by the circuit breaker", {
+                repo: repoFullName,
+                pr: prNumber,
+                extra: { trippedApps, maxFailures: decision.maxFailures },
+            });
+
+            if (feedbackEnabled) {
+                await this.provider.setCommitStatus(
+                    repoFullName,
+                    headSha,
+                    "failure",
+                    circuitPausedDescription(decision.maxFailures),
+                );
+            }
+            return { kind: "circuit_open", trippedApps };
+        } catch (err) {
+            logger.warn("Build circuit breaker errored; proceeding with the build (fail open)", {
+                repo: repoFullName,
+                pr: prNumber,
+                err,
+            });
+            return undefined;
+        }
     }
 
     /**
@@ -1858,6 +1919,11 @@ async function recordSafe(fn: () => Promise<void>): Promise<void> {
     } catch (err) {
         logger.error("Failed to record Previewkit DB target", err);
     }
+}
+
+/** Commit-status text shown while a repo's builds are circuit-paused. */
+function circuitPausedDescription(consecutiveFailures: number): string {
+    return `Preview builds paused after ${consecutiveFailures} consecutive failures - push a fix to resume`;
 }
 
 /**

@@ -43,7 +43,7 @@ const deployOutput: DeployPreviewEnvironmentOutput = {
 /** A controllable fake of the slice of PreviewPipeline the runner drives. */
 class FakeDeployPipeline implements DeployPipeline {
     prepareResult: PreparePreviewResult = {
-        skipped: false,
+        kind: "prepared",
         namespace: "preview-acme-widgets-pr-42",
         commentId: "comment-1",
         feedbackEnabled: true,
@@ -135,11 +135,21 @@ describe("runPreviewJob deploy mode", () => {
 
     it("returns skipped and never builds when prepare opts out", async () => {
         const pipeline = new FakeDeployPipeline();
-        pipeline.prepareResult = { skipped: true };
+        pipeline.prepareResult = { kind: "skipped" };
 
         const outcome = await runPreviewJob(runners(pipeline), deploySpec(), new AbortController().signal, fakeDeps());
 
         expect(outcome).toBe("skipped");
+        expect(pipeline.calls).toEqual(["prepare"]);
+    });
+
+    it("returns circuit_open and never builds when the breaker paused this app", async () => {
+        const pipeline = new FakeDeployPipeline();
+        pipeline.prepareResult = { kind: "circuit_open", trippedApps: ["web"] };
+
+        const outcome = await runPreviewJob(runners(pipeline), deploySpec(), new AbortController().signal, fakeDeps());
+
+        expect(outcome).toBe("circuit_open");
         expect(pipeline.calls).toEqual(["prepare"]);
     });
 

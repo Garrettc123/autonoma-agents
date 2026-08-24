@@ -2248,6 +2248,40 @@ model PreviewkitAppInstance {
   @@map("previewkit_app_instance")
 }
 
+// Preview-build circuit breaker state for one (org, repo, app). The open/closed
+// decision is derived from PreviewkitAppBuild history; this row persists only what
+// history cannot: openedAt/alertedAt (alert-once dedup; null openedAt = closed),
+// probedAt (a half-open probe launched, so only ONE builds until its result lands)
+// and resetAt (a manual reset boundary). Keyed (org, repo, app) - not per-environment
+// - because failures span many PRs. Rows kept (not deleted) on close so resetAt survives.
+model PreviewkitBuildCircuit {
+  id String @id @default(cuid())
+
+  organizationId String @map("organization_id")
+  repoFullName   String @map("repo_full_name")
+  appName        String @map("app_name")
+
+  // Null while closed; set on open, kept across half-open probes so the alert fires once.
+  openedAt            DateTime? @map("opened_at")
+  alertedAt           DateTime? @map("alerted_at")
+  // Last-observed streak length - display only; the gate recomputes it from history.
+  consecutiveFailures Int       @default(0) @map("consecutive_failures")
+
+  // A half-open probe build let through; while newer than the last failure (and within
+  // its TTL) the circuit blocks other pushes, so only one probe builds at a time.
+  probedAt DateTime? @map("probed_at")
+
+  // Manual reset boundary; failures finished at or before it don't count.
+  resetAt DateTime? @map("reset_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([organizationId, repoFullName, appName])
+  @@index([organizationId])
+  @@map("previewkit_build_circuit")
+}
+
 // One version of the key that encrypts previewkit secret values. `wrap` is the
 // key material sealed by the previewkit secrets CMK - never the plaintext key,
 // which exists only in memory, only in a process that needs it, and never in

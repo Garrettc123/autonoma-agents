@@ -92,7 +92,7 @@ describe("PreviewPipeline.prepare PR feedback gate", () => {
 
         const result = await pipeline.prepare(target(7));
 
-        expect(result).toMatchObject({ skipped: false, feedbackEnabled: false });
+        expect(result).toMatchObject({ kind: "prepared", feedbackEnabled: false });
         expect(provider.setCommitStatus).not.toHaveBeenCalled();
     });
 
@@ -101,7 +101,7 @@ describe("PreviewPipeline.prepare PR feedback gate", () => {
 
         const result = await pipeline.prepare(target(7));
 
-        expect(result).toMatchObject({ skipped: false, feedbackEnabled: true });
+        expect(result).toMatchObject({ kind: "prepared", feedbackEnabled: true });
         expect(provider.setCommitStatus).toHaveBeenCalledWith(
             "acme/web",
             "abc1234def5678",
@@ -141,7 +141,7 @@ describe("PreviewPipeline.prepare PR feedback gate", () => {
 
         const result = await pipeline.prepare(target(7));
 
-        expect(result).toMatchObject({ skipped: false, namespace: NAMESPACE });
+        expect(result).toMatchObject({ kind: "prepared", namespace: NAMESPACE });
         expect(deployer.ensureNamespace).toHaveBeenCalledTimes(1);
         expect(loadConfig).toHaveBeenCalledWith("app_1");
     });

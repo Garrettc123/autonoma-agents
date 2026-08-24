@@ -105,6 +105,28 @@ an unexpected crash exits non-zero, so the Job's `backoffLimit: 1` retries just 
   evidence for an OOM kill, which gets no chance to log or record anything itself.
 - `create-services.ts` - builds `PreviewkitServices` (pipelines + provider) once per process.
 - `env.ts` - all env vars (`createEnv`); extends `@autonoma/logger/env`.
+- `pipeline/build-circuit-breaker.ts` + `pipeline/prisma-build-circuit-store.ts` - the preview-build
+  circuit breaker. Gated in `prepare` (before any namespace or buildkit node), keyed on
+  `(organizationId, repoFullName, appName)`: if an app's last `PREVIEWKIT_BUILD_CIRCUIT_FAILURE_THRESHOLD`
+  builds all failed (a leading run of `failed` `PreviewkitAppBuild` rows across every PR of the repo,
+  ignoring `superseded` builds), the circuit opens - `prepare` short-circuits with a
+  `{ kind: "circuit_open" }` `PreparePreviewResult`, sets a "paused" failure commit status, and the
+  runner exits `circuit_open` without building. The gate fails open: any breaker error (a transient DB
+  blip) is logged and the build proceeds - a guard must never make a deploy worse than not having it.
+  Previews are all-or-nothing, so one hopeless app pauses the whole repo. The
+  open/closed decision is DERIVED fresh from build history each call; the `PreviewkitBuildCircuit` row
+  persists only what history cannot express: the alert-once bookkeeping (`openedAt`/`alertedAt`), the
+  half-open probe marker (`probedAt`), and the manual-reset boundary (`resetAt`, via `resetBuildCircuit`).
+  Half-open: once the newest failure is older than `PREVIEWKIT_BUILD_CIRCUIT_COOLDOWN_MS`, ONE push is let
+  through as a probe and `probedAt` is stamped; while that probe is in flight (newer than the last
+  failure and within a ~1h TTL, since it writes no build row until it finishes) every other push is
+  blocked, so a busy repo can't fan out concurrent probes for the same broken app. A failed probe writes
+  a fresh failure and re-arms the cooldown; a successful one breaks the streak and closes the circuit.
+  On open it fires a one-time
+  team alert - a Sentry error-level `PreviewBuildCircuitOpenedError` (wired in `create-services.ts`), so
+  a silently-broken customer is found on day one. Ships dormant behind
+  `PREVIEWKIT_BUILD_CIRCUIT_BREAKER_ENABLED` (default off): when off, `evaluate` returns immediately with
+  no DB read, so the deploy path is unchanged.
 - `pipeline/preview-pipeline.ts` - the deploy steps the runner drives (`prepare` / `build` /
   `deployEnvironment` / `finalize` / `fail` / `restartApp`), per-app build loop (`buildOneApp`),
   final-outcome computation, PR-comment payload. Previews are ALL-OR-NOTHING: `build` throws when
@@ -178,16 +200,16 @@ an unexpected crash exits non-zero, so the Job's `backoffLimit: 1` retries just 
       unpopulated Secret brings the pod up "ready" against missing credentials.
       `secrets/external-secret-release.ts` is all that survives of the ESO path and it is
       decommissioning, not deploy logic: a namespace deployed before the cutover still has an
-      ExternalSecret *owning* its Secret, and ESO would keep reconciling that from a store nobody
+      ExternalSecret _owning_ its Secret, and ESO would keep reconciling that from a store nobody
       writes, so taking the target over deletes it with `Orphan` propagation (the default cascade
       would garbage-collect the live preview's Secret with it). For namespaces that will not
       redeploy soon - mainly the long-lived PR-0 (main-branch) environments -
       `deployment/previewkit/cluster/release-external-secrets.sh` sweeps them (dry-run by default,
       needs kubectl on the PREVIEW cluster). This is one-way: nothing hands a Secret back to ESO.
-  The runner does NOT start the Autonoma review: `analysisRunWorkflow` launched the build in the first place
-  and watches the environment row for readiness itself, so it owns everything downstream. The runner stays
-  responsible for build, deploy, environment status writes, and the commit status. The single Autonoma PR
-  comment (preview status + analysis) is owned by the analysis run workflow, not the runner.
+      The runner does NOT start the Autonoma review: `analysisRunWorkflow` launched the build in the first place
+      and watches the environment row for readiness itself, so it owns everything downstream. The runner stays
+      responsible for build, deploy, environment status writes, and the commit status. The single Autonoma PR
+      comment (preview status + analysis) is owned by the analysis run workflow, not the runner.
 
 ## The public surface lives in apps/api
 
@@ -359,6 +381,13 @@ app lines in a recent window.
   of a former JSON column). App-build `status` enum is `success | failed` (NOT "ok"). `PreviewkitBuild`
   is `@@unique([environmentId, headSha])` so `recordBuildFinished` upserts idempotently across
   Job retries; a superseded build's row is marked `superseded`.
+- `PreviewkitBuildCircuit` - the preview-build circuit breaker state for one `(organizationId,
+repoFullName, appName)`. Keyed by (org, repo, app) - not per-environment - because the failures span
+  many PRs. The open/closed decision is derived from `PreviewkitAppBuild` history, so this row holds only
+  what history cannot: `openedAt`/`alertedAt` (null `openedAt` = closed; the pair dedupes the one-time
+  alert per open episode) and `resetAt` (a manual-reset boundary - failures at/before it stop counting).
+  Rows are kept, not deleted, on close so `resetAt` survives. No relation back to `Organization` (like
+  `SkipRecord`); the gate reads the three key columns and never joins.
 - `PreviewkitConfig` - the Application's DB-stored preview config (latest-only; one row per
   Application, overwritten in place on save). This is what the deploy pipeline reads. There is no
   revision history: saving overwrites the row, and every deploy/redeploy resolves the current
@@ -456,6 +485,10 @@ the shared `previewkit-env-file` secret: the launcher injects it per-Job from th
 alongside `DATABASE_URL`, because the key it names lives in the database that URL points at - a
 runner writing to beta's DB needs beta's CMK, not production's. The platform still installs External
 Secrets for its own env-file secrets (`deployment/secrets-manager/`); previewkit no longer uses it.
+`PREVIEWKIT_BUILD_CIRCUIT_BREAKER_ENABLED` (default `false`) gates the preview-build circuit breaker
+(see `pipeline/build-circuit-breaker.ts`); off = dormant, no extra DB read. `PREVIEWKIT_BUILD_CIRCUIT_FAILURE_THRESHOLD`
+(default 5) is N consecutive failed builds before an app's circuit opens; `PREVIEWKIT_BUILD_CIRCUIT_COOLDOWN_MS`
+(default 6h) is the half-open cooldown after which one probe build is let through.
 `PREVIEWKIT_JOB_SPEC` is the per-Job `{mode, event, ...}` payload the launcher sets on each runner Job.
 `DATABASE_URL` is set on each runner Job by the launcher (`PreviewkitJobLauncher`,
 `@autonoma/k8s/previewkit-jobs`, constructed by both the API and the diffs worker) to the _launching

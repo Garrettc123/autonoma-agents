@@ -19,3 +19,15 @@ export class PreviewPlatformError extends Error {
         this.name = "PreviewPlatformError";
     }
 }
+
+/**
+ * Captured to Sentry at error level when a repo's app crosses the failure threshold
+ * and its preview-build circuit opens. Its own class so it groups as a distinct Sentry
+ * issue, separate from any individual build failure.
+ */
+export class PreviewBuildCircuitOpenedError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = "PreviewBuildCircuitOpenedError";
+    }
+}
