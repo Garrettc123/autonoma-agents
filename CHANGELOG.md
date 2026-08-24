@@ -1,5 +1,42 @@
 # Changelog
 
+## [1.260824.1](https://github.com/Autonoma-AI/agent/compare/v1.260820.3...v1.260824.1) (2026-08-24)
+
+
+### Features
+
+* add AnalysisEvent inbox schema and store (dormant) ([#2686](https://github.com/Autonoma-AI/agent/issues/2686)) ([44cb276](https://github.com/Autonoma-AI/agent/commit/44cb276d10a23855a91255b073fa4e33a5f0f7d2))
+* **analysis:** already-analyzed skip yields to pending events ([#2751](https://github.com/Autonoma-AI/agent/issues/2751)) ([dae8b72](https://github.com/Autonoma-AI/agent/commit/dae8b72fcbe5618a0b0b45a6efe09125999ad92e))
+* **api:** defer out-of-credits and activation-gated pushes as pending events ([#2691](https://github.com/Autonoma-AI/agent/issues/2691)) ([f76e091](https://github.com/Autonoma-AI/agent/commit/f76e091307300e3cc5438a82f6471e6f0a2f4955))
+* **billing:** record why a branch trigger was blocked ([#2696](https://github.com/Autonoma-AI/agent/issues/2696)) ([9a5afab](https://github.com/Autonoma-AI/agent/commit/9a5afabb0653f13db529a31686411d1c7ef34d2f))
+* **diffs:** fetch recorded event heads into the analysis checkout ([#2750](https://github.com/Autonoma-AI/agent/issues/2750)) ([483078b](https://github.com/Autonoma-AI/agent/commit/483078b7f9ed9ae678a733164c5ae834d7822737))
+* **diffs:** impact agent receives the run's claimed events ([#2749](https://github.com/Autonoma-AI/agent/issues/2749)) ([569d7ce](https://github.com/Autonoma-AI/agent/commit/569d7cee1498d89c6d2c4f62cf83d1821dfa20ca))
+* **diffs:** rewrite the classifier decision prompt ([#2715](https://github.com/Autonoma-AI/agent/issues/2715)) ([c647616](https://github.com/Autonoma-AI/agent/commit/c647616f89c4bd8957616f8395119440d8ab826f))
+* dual-write AnalysisEvents from every analysis trigger ([#2687](https://github.com/Autonoma-AI/agent/issues/2687)) ([a161986](https://github.com/Autonoma-AI/agent/commit/a1619866687f9beec0b8cd69797e5675befcec2a))
+* **evals:** persist classifier reasoning and honour an env-file override ([#2712](https://github.com/Autonoma-AI/agent/issues/2712)) ([a712526](https://github.com/Autonoma-AI/agent/commit/a712526f6fb5bd8cc0dff9a075a486072398fc0d))
+* **platform:** give the Temporal server its own node group and upgrade to chart 1.6.0 ([#2761](https://github.com/Autonoma-AI/agent/issues/2761)) ([c773fce](https://github.com/Autonoma-AI/agent/commit/c773fce7077a36bf737ca24ae43566bd6b0238c4))
+* **previewkit:** put build-time-ness on the secret instead of the app ([#2740](https://github.com/Autonoma-AI/agent/issues/2740)) ([c12f73f](https://github.com/Autonoma-AI/agent/commit/c12f73f146f573689c24e8f91757febccf2505ee))
+* **scenario:** record the deployed commit sha on branch deployments ([#2725](https://github.com/Autonoma-AI/agent/issues/2725)) ([4b8a70a](https://github.com/Autonoma-AI/agent/commit/4b8a70aa5bc0c99ea3c042f8abc5a309aaffa43f))
+* **terraform:** import main-vpc's 3 self-managed NAT instances ([#2741](https://github.com/Autonoma-AI/agent/issues/2741)) ([15ef097](https://github.com/Autonoma-AI/agent/commit/15ef097ec7f5d40052ec468acc1f24e9198e9325))
+* **terraform:** import the 6 hand-provisioned platform service instances ([#2739](https://github.com/Autonoma-AI/agent/issues/2739)) ([ba3f60d](https://github.com/Autonoma-AI/agent/commit/ba3f60d000200fbcc02d635624f7dc689062046b))
+* tooltip defining "feature" on the PR verdict badge ([#2746](https://github.com/Autonoma-AI/agent/issues/2746)) ([c5b9c44](https://github.com/Autonoma-AI/agent/commit/c5b9c440367e7f6a1bc3d06ec76de9591365a293))
+* **ui:** PR header badge shows the accumulated PR verdict, not the latest snapshot ([#2747](https://github.com/Autonoma-AI/agent/issues/2747)) ([7c6e9d6](https://github.com/Autonoma-AI/agent/commit/7c6e9d653b379de4e30608a3eae4430d39833c4e))
+* **workflow:** the analysis run resolves its head at open time and drains the inbox ([#2690](https://github.com/Autonoma-AI/agent/issues/2690)) ([8407be3](https://github.com/Autonoma-AI/agent/commit/8407be3f96923c888756f1049df746b3a472f1b9))
+
+
+### Bug Fixes
+
+* **cli:** give the rrweb playback test room to run under CI contention ([#2744](https://github.com/Autonoma-AI/agent/issues/2744)) ([b81889b](https://github.com/Autonoma-AI/agent/commit/b81889b2a4ceaeb3f42337f203eca0ee8e9118fd))
+* **cli:** keep the repo-signals fixture setup inside its hook budget ([#2745](https://github.com/Autonoma-AI/agent/issues/2745)) ([6293592](https://github.com/Autonoma-AI/agent/commit/62935921c729009f145bb14863095fcdf2d093f6))
+* constrain report evidence image size and align its caption ([#2738](https://github.com/Autonoma-AI/agent/issues/2738)) ([45d7443](https://github.com/Autonoma-AI/agent/commit/45d744392514d70f46b04df55ae9e9d2e529eab1))
+* **monitoring:** let the previewkit agent discover kube-state-metrics ([#2762](https://github.com/Autonoma-AI/agent/issues/2762)) ([cb29b58](https://github.com/Autonoma-AI/agent/commit/cb29b58360395deba26b4cb0433eb8172584a2cb))
+* **previewkit:** validate a secret the same way on both write paths ([#2754](https://github.com/Autonoma-AI/agent/issues/2754)) ([fe9f089](https://github.com/Autonoma-AI/agent/commit/fe9f089a40bf974e16af18fe0e7a72bcec33082e))
+* **terraform:** let the previewkit runner price builds against real A… ([#2708](https://github.com/Autonoma-AI/agent/issues/2708)) ([37eaa10](https://github.com/Autonoma-AI/agent/commit/37eaa10d2d6f8eab93eb97c1392f4b791f311971))
+* **terraform:** stop tracking the ALB controller's shared NodePort ingress rule ([#2737](https://github.com/Autonoma-AI/agent/issues/2737)) ([3d41e34](https://github.com/Autonoma-AI/agent/commit/3d41e34e0ea912bcc6308195d93d345d9cf18f68))
+* **ui:** PR verdict copy - one verb ("couldn't confirm") and name the verified unit "feature" ([#2735](https://github.com/Autonoma-AI/agent/issues/2735)) ([ba2130d](https://github.com/Autonoma-AI/agent/commit/ba2130d11f4fb8e7a0231a7ec0b7c3ec3a4d8ac5))
+* **ui:** show the PR tab bar (and Usage) without a previewkit environ… ([#2706](https://github.com/Autonoma-AI/agent/issues/2706)) ([aec060c](https://github.com/Autonoma-AI/agent/commit/aec060c9cb3f459e948a8495ec8b6651220ede1b))
+* **ui:** warm the finding drawer chunk on run-list render so the first click is instant ([#2671](https://github.com/Autonoma-AI/agent/issues/2671)) ([2c88cbe](https://github.com/Autonoma-AI/agent/commit/2c88cbeae691784daaa11c09957455d866d37777))
+
 ## [1.260820.3](https://github.com/Autonoma-AI/agent/compare/v1.260820.2...v1.260820.3) (2026-08-20)
 
 
