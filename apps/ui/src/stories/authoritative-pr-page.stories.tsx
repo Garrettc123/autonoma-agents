@@ -450,6 +450,135 @@ export const Report: Story = {
   },
 };
 
+// A clean PR: no bug, no coverage gap, every flow verified. The banner is green and the "Open issues" panel is
+// omitted entirely (never an empty "Open issues (0)"), leaving the coverage counts to carry the good news.
+const CLEAN_SUMMARY =
+  "Autonoma re-ran the checkout, cart and add-to-cart flows this PR touches and every one held up end to end. " +
+  "Nothing regressed and there is nothing to fix.";
+
+const cleanReport: NonNullable<TrpcFixtures["branches"]> = {
+  analysisReport: {
+    impactReasoning:
+      "This PR tidies the checkout submit handler without changing behaviour. I re-ran the three flows that " +
+      "exercise it to confirm nothing regressed.",
+    reportMarkdown: [
+      "## Checkout tidy-up",
+      "",
+      "This PR refactors the checkout submit handler without changing behaviour. All three flows that exercise it - " +
+        "guest checkout, the cart badge counter, and add-to-cart - were re-run and passed end to end.",
+    ].join("\n"),
+    title: "Checkout holds up after the refactor",
+    headline: CLEAN_SUMMARY,
+    flows: [
+      {
+        title: "Guest checkout",
+        detail: "Cart totals and the confirmation screen were confirmed end to end.",
+        status: "verified" as const,
+        owner: "none" as const,
+        passedCount: 1,
+        gapCount: 0,
+        bugCount: 0,
+        checkedThisRunCount: 1,
+        testSlugs: ["checkout-guest"],
+      },
+      {
+        title: "Cart badge counter",
+        detail: "The badge reflected the cart's item count end to end.",
+        status: "verified" as const,
+        owner: "none" as const,
+        passedCount: 1,
+        gapCount: 0,
+        bugCount: 0,
+        checkedThisRunCount: 1,
+        testSlugs: ["cart-badge-count"],
+      },
+      {
+        title: "Add to cart",
+        detail: "A guest could add items to the cart and see the total update.",
+        status: "verified" as const,
+        owner: "none" as const,
+        passedCount: 1,
+        gapCount: 0,
+        bugCount: 0,
+        checkedThisRunCount: 1,
+        testSlugs: ["guest-add-to-cart"],
+      },
+    ],
+    reportEvidence: [],
+    run: {
+      state: "healthy",
+      coverage: { byCategory: [], total: 0 },
+      bugCount: 0,
+      passedCount: 3,
+      testCount: 3,
+    },
+    verdict: { state: "healthy", bugCount: 0, coverageGapCount: 0, investigatedCount: 3 },
+    branchId: BRANCH_ID,
+    findings: [
+      withRunSignals({
+        id: "checkout-guest",
+        slug: "checkout-guest",
+        category: "passed",
+        headline: "A guest can complete checkout end to end",
+        evidence: [],
+        stepCount: 12,
+        runSuccess: true,
+      }),
+      withRunSignals({
+        id: "cart-badge-count",
+        slug: "cart-badge-count",
+        category: "passed",
+        headline: "The cart badge reflects the number of items",
+        evidence: [],
+        stepCount: 6,
+        runSuccess: true,
+      }),
+      withRunSignals({
+        id: "guest-add-to-cart",
+        slug: "guest-add-to-cart",
+        category: "passed",
+        headline: "A guest can add items to the cart",
+        evidence: [],
+        stepCount: 8,
+        runSuccess: true,
+      }),
+    ],
+  },
+};
+
+// The latest checkpoint, green: the run reached its conclusion and the app held up.
+const cleanLatest: (typeof snapshotHistory)[number] = {
+  ...snapshotHistory[0]!,
+  health: "healthy",
+  summary: {
+    ...snapshotHistory[0]!.summary!,
+    tone: "success",
+    label: "3/3 verified",
+    reason: undefined,
+    executionState: "passed",
+    analysis: { jobStatus: "completed", bugCount: 0, passedCount: 3, coverageCount: 0 },
+  },
+};
+
+/** A clean PR: green verdict banner with coverage counts, no "Open issues" panel, report collapsed below. */
+export const Clean: Story = {
+  args: { path: OVERVIEW_PATH },
+  parameters: {
+    msw: {
+      handlers: appShellHandlers({
+        ...chromeFixtures,
+        branches: {
+          ...chromeFixtures.branches,
+          snapshotHistory: [cleanLatest, snapshotHistory[1]!],
+          ...cleanReport,
+          analysisIssues: [],
+          analysisJob: { status: "completed", startedAt: STARTED_AT, completedAt: COMPLETED_AT },
+        },
+      }),
+    },
+  },
+};
+
 // The same report, but with flows whose `testSlugs` cite the run's actual findings - so each flow can expand to the
 // checks behind it. The shared `analysisReport` above deliberately cites carried-over slugs with no finding this run
 // (the common real case, where a flow's dropdown stays empty), so this variant exists to exercise the populated one.
@@ -514,15 +643,15 @@ export const FlowsExpanded: Story = {
   parameters: { msw: { handlers: flowsHandlers } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await canvas.findByText("What this PR covers");
-    // The flow list is the only <details> on this page, so open them all rather than matching disclosure copy.
+    await canvas.findByText("Flows tested in this PR");
+    // Open every disclosure (the flow findings and the collapsed "Full report") rather than matching copy.
     for (const details of canvasElement.querySelectorAll("details")) details.setAttribute("open", "");
   },
 };
 
 /**
- * A run still in flight with no earlier settled report: the PR page shows no live progress, only a card linking
- * into the in-progress checkpoint where the staged view lives.
+ * A run still in flight with no earlier settled report: the hero becomes an "Analyzing..." banner linking into the
+ * in-progress checkpoint where the staged view lives - the PR page itself shows no live progress.
  */
 export const Running: Story = {
   args: { path: OVERVIEW_PATH },
@@ -670,28 +799,26 @@ const notConfirmedBranches: NonNullable<TrpcFixtures["branches"]> = {
   analysisJob: { status: "completed", startedAt: STARTED_AT, completedAt: COMPLETED_AT },
 };
 
-// NotConfirmed carries the accumulated header pill; FeatureTooltip omits it so its hover has a single "features
-// verified" target - the report-card badge, which owns the tooltip (the header pill has none).
 const notConfirmedHandlers = appShellHandlers({
   ...chromeFixtures,
   branches: { ...notConfirmedBranches, pipelineStatusByBranchId: notConfirmedHeaderStatus },
 });
-const featureTooltipHandlers = appShellHandlers({ ...chromeFixtures, branches: notConfirmedBranches });
+const verdictInfoHandlers = appShellHandlers({ ...chromeFixtures, branches: notConfirmedBranches });
 
-/** No client bug, but coverage gaps: the verdict headline states how much was verified, and is not green. */
+/** No client bug, but coverage gaps: the verdict banner states how much was verified, and is not green. */
 export const NotConfirmed: Story = {
   args: { path: OVERVIEW_PATH },
   parameters: { msw: { handlers: notConfirmedHandlers } },
 };
 
-/** The verdict badge's feature-definition tooltip, opened: hovering the "N/M features verified" pill defines the unit. */
-export const FeatureTooltip: Story = {
+/** The verdict banner's (i), opened: hovering it explains what the "not confirmed" state means for the PR. */
+export const VerdictInfo: Story = {
   args: { path: OVERVIEW_PATH },
-  parameters: { msw: { handlers: featureTooltipHandlers } },
+  parameters: { msw: { handlers: verdictInfoHandlers } },
   play: async ({ canvasElement }) => {
-    await userEvent.hover(await within(canvasElement).findByText(/features verified/i));
+    await userEvent.hover(await within(canvasElement).findByRole("button", { name: /what this verdict means/i }));
     // The tooltip renders in a portal, outside `canvasElement` - reach it through the document body.
-    await within(document.body).findByText(/recognizable user journey/i);
+    await within(document.body).findByText(/wasn't fully confirmed/i);
   },
 };
 

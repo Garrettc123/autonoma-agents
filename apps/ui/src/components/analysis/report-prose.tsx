@@ -1,5 +1,6 @@
 import { Panel, PanelBody, PanelHeader, PanelTitle } from "@autonoma/blacklight";
 import type { AnalysisFindingView, ResolvedEvidenceAsset } from "@autonoma/types";
+import { CaretRightIcon } from "@phosphor-icons/react/CaretRight";
 import { ReasoningMarkdown } from "components/snapshot/reasoning-block";
 import type { ReactNode } from "react";
 import { AppLink } from "routes/_blacklight/_app-shell/-app-link";
@@ -9,6 +10,9 @@ import { AppLink } from "routes/_blacklight/_app-shell/-app-link";
  * Markdown with its inline tokens resolved: `evidence:<assetId>` images against the report's signed evidence, and
  * `issue:<id>` / `finding:<slug>` links against this PR's known issues and this report's findings. A token that
  * references an unknown id/slug renders as plain text (a fabricated reference resolves to nothing).
+ *
+ * On the PR overview the prose is demoted behind a collapsed "Full report" expander (`collapsible`) so the verdict
+ * banner's headline is the only always-visible prose; the snapshot per-job view keeps it open as the "Report" panel.
  */
 export function AnalysisReportProse({
   markdown,
@@ -17,6 +21,7 @@ export function AnalysisReportProse({
   snapshotId,
   findings,
   issueIds,
+  collapsible = false,
 }: {
   markdown: string;
   evidence: ResolvedEvidenceAsset[];
@@ -25,6 +30,8 @@ export function AnalysisReportProse({
   findings: AnalysisFindingView[];
   /** The ids of issues this PR knows about, so a token to a real issue links and a fabricated one stays text. */
   issueIds: ReadonlySet<string>;
+  /** When set, render collapsed behind a "Full report" expander instead of an always-open "Report" panel. */
+  collapsible?: boolean;
 }) {
   // The Reporter writes `finding:<slug>` tokens because slugs are what it reasons in; the route is keyed on the
   // finding's own id, so resolve one to the other here.
@@ -57,19 +64,37 @@ export function AnalysisReportProse({
     );
   };
 
+  const body = (
+    <ReasoningMarkdown
+      content={markdown}
+      evidence={evidence}
+      renderIssueLink={renderIssueLink}
+      renderFindingLink={renderFindingLink}
+    />
+  );
+
+  if (collapsible) {
+    return (
+      <Panel>
+        <details className="group">
+          <summary className="cursor-pointer list-none">
+            <PanelHeader className="transition-colors hover:bg-surface-raised">
+              <PanelTitle>Full report</PanelTitle>
+              <CaretRightIcon size={12} className="text-text-secondary transition-transform group-open:rotate-90" />
+            </PanelHeader>
+          </summary>
+          <PanelBody>{body}</PanelBody>
+        </details>
+      </Panel>
+    );
+  }
+
   return (
     <Panel>
       <PanelHeader>
         <PanelTitle>Report</PanelTitle>
       </PanelHeader>
-      <PanelBody>
-        <ReasoningMarkdown
-          content={markdown}
-          evidence={evidence}
-          renderIssueLink={renderIssueLink}
-          renderFindingLink={renderFindingLink}
-        />
-      </PanelBody>
+      <PanelBody>{body}</PanelBody>
     </Panel>
   );
 }

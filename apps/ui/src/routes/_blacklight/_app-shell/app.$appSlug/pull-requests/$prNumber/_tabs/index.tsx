@@ -1,15 +1,15 @@
 import { Badge, Panel, PanelBody, Skeleton, StatusDot } from "@autonoma/blacklight";
 import { ArrowRightIcon } from "@phosphor-icons/react/ArrowRight";
 import { CaretRightIcon } from "@phosphor-icons/react/CaretRight";
-import { CircleNotchIcon } from "@phosphor-icons/react/CircleNotch";
 import { GitPullRequestIcon } from "@phosphor-icons/react/GitPullRequest";
 import { useSuspenseQueries } from "@tanstack/react-query";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { AnalysisJobStatus } from "components/analysis/analysis-job-status";
+import { AnalyzingBanner } from "components/analysis/analyzing-banner";
 import { AnalysisFlowList } from "components/analysis/flow-list";
 import { AnalysisOpenIssuesList } from "components/analysis/open-issues-list";
-import { AnalysisPrIssuesHeadline } from "components/analysis/pr-issues-headline";
 import { AnalysisReportProse } from "components/analysis/report-prose";
+import { VerdictBanner } from "components/analysis/verdict-banner";
 import { CheckpointSummaryPill } from "components/pr-status/checkpoint-summary-pill";
 import { ShaRange } from "components/snapshot/sha-range";
 import { CATEGORY, buildSections, type EntryCategory } from "components/snapshot/snapshot-entries";
@@ -134,8 +134,9 @@ function PrOverview({
   );
 }
 
-// The authoritative PR overview: the latest completed report and its issues, plus a card into the in-progress
-// checkpoint when a run is live. No live progress here - that is the checkpoint page's staged view.
+// The authoritative PR overview: the latest completed report leads with its verdict banner, then issues, coverage
+// and a collapsed report. While a run is live the banner becomes an "Analyzing..." hero into the checkpoint's
+// staged view; the last settled report stays below it. No live progress here - that is the checkpoint page's job.
 function AuthoritativePrOverview({
   branchId,
   prNumber,
@@ -149,7 +150,7 @@ function AuthoritativePrOverview({
   latestSnapshot: Snapshot;
   analysisJob: NonNullable<RouterOutputs["branches"]["analysisJob"]>;
 }) {
-  // No `jobStatus`: the PR page does not poll - the in-flight card sends the reader to the checkpoint to watch.
+  // No `jobStatus`: the PR page does not poll - the analyzing banner sends the reader to the checkpoint to watch.
   const { data: latestReport } = useAnalysisReport(latestSnapshot.id);
   const runInFlight = latestReport == null && analysisJob.status !== "failed";
   // While the latest run is unsettled, show the most recent earlier settled run's report (latest excluded).
@@ -159,7 +160,6 @@ function AuthoritativePrOverview({
     <div className="p-6">
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_19rem]">
         <div className="flex min-w-0 flex-col gap-4">
-          {runInFlight && <InProgressCheckpointCard prNumber={prNumber} snapshot={latestSnapshot} />}
           {latestReport != null ? (
             <Suspense fallback={<AuthoritativeReportSkeleton />}>
               <AuthoritativeReportColumn
@@ -169,35 +169,30 @@ function AuthoritativePrOverview({
                 report={latestReport}
               />
             </Suspense>
+          ) : runInFlight ? (
+            <>
+              <AnalyzingBanner
+                prNumber={prNumber}
+                snapshotId={latestSnapshot.id}
+                startedAt={analysisJob.startedAt ?? undefined}
+              />
+              {earlierSettled != null && (
+                <Suspense fallback={<AuthoritativeReportSkeleton />}>
+                  <SettledReportColumn branchId={branchId} prNumber={prNumber} snapshotId={earlierSettled.id} />
+                </Suspense>
+              )}
+            </>
           ) : earlierSettled != null ? (
             <Suspense fallback={<AuthoritativeReportSkeleton />}>
               <SettledReportColumn branchId={branchId} prNumber={prNumber} snapshotId={earlierSettled.id} />
             </Suspense>
           ) : (
-            !runInFlight && <AnalysisJobStatus job={analysisJob} />
+            <AnalysisJobStatus job={analysisJob} />
           )}
         </div>
         <CheckpointRail prNumber={prNumber} snapshots={snapshots} />
       </div>
     </div>
-  );
-}
-
-// A card linking into an unsettled run's checkpoint, where the live staged view lives.
-function InProgressCheckpointCard({ prNumber, snapshot }: { prNumber: number; snapshot: Snapshot }) {
-  return (
-    <AppLink
-      to="/app/$appSlug/pull-requests/$prNumber/snapshots/$snapshotId"
-      params={{ prNumber, snapshotId: snapshot.id }}
-      className="flex items-center gap-3 rounded-lg border border-border-dim bg-surface-base px-4 py-3 transition-colors hover:border-border-mid hover:bg-surface-raised"
-    >
-      <CircleNotchIcon size={18} className="shrink-0 animate-spin text-primary" />
-      <div className="min-w-0 flex-1">
-        <p className="text-sm text-text-primary">A new checkpoint is being analyzed</p>
-        <p className="font-mono text-2xs text-text-secondary">Open it to watch the run stage by stage</p>
-      </div>
-      <ArrowRightIcon size={14} className="shrink-0 text-text-secondary" />
-    </AppLink>
   );
 }
 
@@ -217,7 +212,8 @@ function SettledReportColumn({
 }
 
 // The issues-first report column, split from the overview so it (and its open-issues query) only loads once the
-// report has landed - a still-running run never pays for it.
+// report has landed - a still-running run never pays for it. Ordered banner -> open issues -> coverage ->
+// collapsed report -> impact link, leading with the answer and demoting the prose.
 function AuthoritativeReportColumn({
   branchId,
   prNumber,
@@ -230,19 +226,24 @@ function AuthoritativeReportColumn({
   report: NonNullable<RouterOutputs["branches"]["analysisReport"]>;
 }) {
   const { data: issues } = useAnalysisIssues(branchId);
-  // The list + headline surface only the open issues; the token resolver knows every issue id (open + resolved)
+  // The banner + list surface only the open issues; the token resolver knows every issue id (open + resolved)
   // so a report-prose `issue:` token to a resolved issue still links (a fabricated id stays plain text).
   const openIssues = issues.filter((issue) => issue.status === "open");
   const issueIds = new Set(issues.map((issue) => issue.id));
 
   return (
     <>
-      <AnalysisPrIssuesHeadline
+      <VerdictBanner
         verdict={report.verdict}
         title={report.title}
         headline={report.headline}
         flows={report.flows}
+        openIssueCount={openIssues.length}
+        testsRunCount={report.verdict.investigatedCount}
       />
+      {/* A clean PR shows the green banner and its coverage alone - never an empty "Open issues (0)" panel. */}
+      {openIssues.length > 0 && <AnalysisOpenIssuesList issues={openIssues} prNumber={prNumber} />}
+      <AnalysisFlowList flows={report.flows} findings={report.findings} prNumber={prNumber} snapshotId={snapshotId} />
       {report.reportMarkdown != null && (
         <AnalysisReportProse
           markdown={report.reportMarkdown}
@@ -251,10 +252,9 @@ function AuthoritativeReportColumn({
           snapshotId={snapshotId}
           findings={report.findings}
           issueIds={issueIds}
+          collapsible
         />
       )}
-      <AnalysisFlowList flows={report.flows} findings={report.findings} prNumber={prNumber} snapshotId={snapshotId} />
-      <AnalysisOpenIssuesList issues={openIssues} prNumber={prNumber} />
       <LatestSnapshotLink prNumber={prNumber} snapshotId={snapshotId} />
     </>
   );

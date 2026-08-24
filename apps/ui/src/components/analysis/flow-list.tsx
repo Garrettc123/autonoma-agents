@@ -65,7 +65,7 @@ export function AnalysisFlowList({
   return (
     <Panel>
       <PanelHeader>
-        <PanelTitle>What this PR covers</PanelTitle>
+        <PanelTitle>Flows tested in this PR</PanelTitle>
       </PanelHeader>
       <PanelBody className="p-0">
         <ul className="divide-y divide-border-dim">

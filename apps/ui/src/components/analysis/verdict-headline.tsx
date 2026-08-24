@@ -9,7 +9,7 @@ type DotStatus = NonNullable<React.ComponentProps<typeof StatusDot>["status"]>;
  * THE colour of each verdict state. A `Record` over the state union, so a new state is a compile error here until it
  * is given a tone; no surface may re-derive its own mapping.
  */
-const VERDICT_TONE: Record<AnalysisVerdictState, { variant: BadgeVariant; dot: DotStatus }> = {
+export const VERDICT_TONE: Record<AnalysisVerdictState, { variant: BadgeVariant; dot: DotStatus }> = {
   bug_found: { variant: "critical", dot: "critical" },
   not_confirmed: { variant: "warn", dot: "warn" },
   // A conclusion the run reached, so it reads green alongside a verified run; the badge says which of the two it is.
