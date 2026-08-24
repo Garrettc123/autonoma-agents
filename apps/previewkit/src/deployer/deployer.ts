@@ -237,6 +237,11 @@ export class Deployer {
         const domain = config.domain ?? this.domain;
         const routes: Record<string, GatekeeperRoute> = {};
         for (const app of config.apps) {
+            // A route names a Service and a port. An app that declares no port has
+            // neither, so it gets no route - there is nothing for the wildcard
+            // Ingress to forward to, and a host that resolves to a missing Service
+            // is a 502 the customer has to explain to themselves.
+            if (app.port == null) continue;
             routes[buildAppHostname(app.name, prNumber, repoFullName, domain, this.secret)] = {
                 service: app.name,
                 port: app.port,
@@ -759,11 +764,11 @@ export class Deployer {
         const service = buildAppService({ app, namespace, imageTag, resolvedEnv, prNumber, publicUrl: url, headSha });
 
         await this.applyDeployment(namespace, deployment);
-        await this.applyService(namespace, service);
+        if (service != null) await this.applyService(namespace, service);
 
         await this.waitForDeploymentReady(namespace, app.name);
 
-        logger.info("Deployed app", { app: app.name, url, namespace });
+        logger.info("Deployed app", { app: app.name, url, namespace, exposesPort: app.port != null });
         return { name: app.name, url };
     }
 

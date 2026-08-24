@@ -159,7 +159,7 @@ export function buildAppDeployment(opts: AppResourceOptions): k8s.V1Deployment {
     const envVars = Object.entries(resolvedEnv)
         .filter(([name]) => !isProtectedPreviewkitEnvKey(name))
         .map(([name, value]) => ({ name, value }));
-    if (!resolvedEnv.PORT) {
+    if (!resolvedEnv.PORT && app.port != null) {
         envVars.push({ name: "PORT", value: String(app.port) });
     }
     envVars.push(
@@ -208,7 +208,7 @@ export function buildAppDeployment(opts: AppResourceOptions): k8s.V1Deployment {
                             name: app.name,
                             image: imageTag,
                             imagePullPolicy: "Always",
-                            ports: [{ containerPort: app.port }],
+                            ...(app.port != null && { ports: [{ containerPort: app.port }] }),
                             ...(envFrom.length > 0 && { envFrom }),
                             env: envVars,
                             ...(app.command && {
@@ -223,14 +223,21 @@ export function buildAppDeployment(opts: AppResourceOptions): k8s.V1Deployment {
                                     memory: app.resources.memory,
                                 },
                             },
-                            // Every app gets the same probe, on the port it already
-                            // declares. A health path was one more thing to configure,
+                            // Every app that declares a port gets the same probe, on
+                            // that port. A health path was one more thing to configure,
                             // one more thing to get wrong, and one more thing to keep
                             // correct as an app's routes move - and 170 of the apps
                             // that set one just pointed it at `/`, which says nothing a
-                            // socket check does not. An app that set nothing got no
-                            // probe at all and was called Ready the instant its
-                            // container started, so this is strictly better for those.
+                            // socket check does not.
+                            //
+                            // An app with NO port accepts no inbound connections (a
+                            // worker, poller, or queue consumer), so there is nothing to
+                            // probe: it is Ready once its container is running. Probing
+                            // it anyway is not a stricter check but an impossible one -
+                            // the socket never opens, so the pod stays NotReady, the
+                            // deploy burns its full timeout, and the all-or-nothing
+                            // environment fails around a process that was healthy the
+                            // whole time.
                             //
                             // READINESS ONLY, no liveness. A liveness probe aimed at
                             // someone else's application restarts it, and a slow boot
@@ -241,11 +248,13 @@ export function buildAppDeployment(opts: AppResourceOptions): k8s.V1Deployment {
                             // A socket that accepts is not the same as an app that can
                             // serve, so callers must tolerate a first request landing
                             // early: see `withColdStartRetry` in `@autonoma/scenario`.
-                            readinessProbe: {
-                                tcpSocket: { port: app.port },
-                                initialDelaySeconds: 5,
-                                periodSeconds: 5,
-                            },
+                            ...(app.port != null && {
+                                readinessProbe: {
+                                    tcpSocket: { port: app.port },
+                                    initialDelaySeconds: 5,
+                                    periodSeconds: 5,
+                                },
+                            }),
                         },
                     ],
                 },
@@ -254,8 +263,14 @@ export function buildAppDeployment(opts: AppResourceOptions): k8s.V1Deployment {
     };
 }
 
-export function buildAppService(opts: AppResourceOptions): k8s.V1Service {
+/**
+ * The app's ClusterIP Service, or undefined when the app declares no port - a
+ * Service exists to carry traffic to a port, so an app that accepts no inbound
+ * connections has nothing for one to select.
+ */
+export function buildAppService(opts: AppResourceOptions): k8s.V1Service | undefined {
     const { app, namespace } = opts;
+    if (app.port == null) return undefined;
     const labels = {
         ...BASE_LABELS,
         app: app.name,

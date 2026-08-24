@@ -71,7 +71,8 @@ export interface PreviewkitConfigAppRow {
     dockerfile: string | null;
     build: unknown;
     blueprint: unknown;
-    port: number;
+    /** Null for an app that accepts no inbound connections; see `port` in the document schema. */
+    port: number | null;
     command: string | null;
     primary: boolean | null;
     sdkImplemented: boolean | null;
@@ -141,7 +142,7 @@ export interface PreviewkitConfigAppValues {
     dockerfile?: string;
     build?: PreviewConfig["apps"][number]["build"];
     blueprint?: PreviewConfig["apps"][number]["blueprint"];
-    port: number;
+    port?: number;
     command?: string;
     primary?: boolean;
     sdkImplemented?: boolean;
@@ -267,7 +268,7 @@ function appFromRow(app: PreviewkitConfigAppRow): Record<string, unknown> {
         dockerfile: app.dockerfile ?? undefined,
         build: app.build ?? undefined,
         blueprint: app.blueprint ?? undefined,
-        port: app.port,
+        port: app.port ?? undefined,
         connections: byPosition(app.connections).map((connection) => ({
             key: connection.key,
             value: connection.value,

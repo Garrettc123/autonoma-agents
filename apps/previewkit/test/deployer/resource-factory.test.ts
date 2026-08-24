@@ -18,6 +18,15 @@ const baseApp: AppConfig = {
     resources: { tier: "medium", cpu: "250m", memory: "1Gi" },
 };
 
+/** A poller: it long-polls outward and nothing ever connects to it, so it declares no port. */
+const workerApp: AppConfig = {
+    name: "temporal-worker",
+    repository: "my-org/my-repo",
+    path: "./apps/worker",
+    connections: [],
+    resources: { tier: "medium", cpu: "250m", memory: "1Gi" },
+};
+
 const baseOpts = {
     app: baseApp,
     namespace: "preview-my-org-my-repo-pr-42",
@@ -199,17 +208,44 @@ describe("buildAppDeployment", () => {
     });
 
     /**
-     * Every app gets the same socket probe on the port it declares - no path to
-     * configure and none to keep correct. An app that configured nothing used to
-     * get no probe at all and counted as Ready the moment its container started,
-     * so this is strictly stricter for those.
+     * Every app that declares a port gets the same socket probe on it - no path to
+     * configure and none to keep correct.
      */
-    it("gives every app a TCP readiness probe on its port", () => {
+    it("gives every app that declares a port a TCP readiness probe on it", () => {
         const dep = buildAppDeployment(baseOpts);
         const container = dep.spec!.template.spec!.containers[0]!;
 
         expect(container.readinessProbe?.tcpSocket?.port).toBe(baseApp.port);
         expect(container.readinessProbe?.httpGet).toBeUndefined();
+    });
+
+    /**
+     * A worker binds nothing, so a socket probe on it can never pass: the pod
+     * stays NotReady, the deploy burns its full timeout, and the all-or-nothing
+     * environment fails around a process that was healthy the whole time.
+     */
+    it("gives an app with no port no readiness probe at all", () => {
+        const dep = buildAppDeployment({ ...baseOpts, app: workerApp });
+        const container = dep.spec!.template.spec!.containers[0]!;
+
+        expect(container.readinessProbe).toBeUndefined();
+        expect(container.livenessProbe).toBeUndefined();
+    });
+
+    it("declares no container port and injects no PORT for an app with no port", () => {
+        const dep = buildAppDeployment({ ...baseOpts, app: workerApp });
+        const container = dep.spec!.template.spec!.containers[0]!;
+
+        expect(container.ports).toBeUndefined();
+        expect(container.env?.find((e) => e.name === "PORT")).toBeUndefined();
+    });
+
+    it("still injects PORT for an app that declares one", () => {
+        const dep = buildAppDeployment(baseOpts);
+        const container = dep.spec!.template.spec!.containers[0]!;
+
+        expect(container.env?.find((e) => e.name === "PORT")?.value).toBe("3000");
+        expect(container.ports?.[0]?.containerPort).toBe(3000);
     });
 
     /**
@@ -238,10 +274,16 @@ describe("buildAppDeployment", () => {
 describe("buildAppService", () => {
     it("creates a ClusterIP service targeting the correct port", () => {
         const svc = buildAppService(baseOpts);
-        expect(svc.metadata?.name).toBe("web");
-        expect(svc.spec!.type).toBe("ClusterIP");
-        expect(svc.spec!.ports![0]!.port).toBe(3000);
-        expect(svc.spec!.selector!["app"]).toBe("web");
+        expect(svc?.metadata?.name).toBe("web");
+        expect(svc?.spec!.type).toBe("ClusterIP");
+        expect(svc?.spec!.ports![0]!.port).toBe(3000);
+        expect(svc?.spec!.selector!["app"]).toBe("web");
+    });
+
+    // A Service exists to carry traffic to a port; an app that accepts no inbound
+    // connections has nothing for one to select.
+    it("builds no service for an app with no port", () => {
+        expect(buildAppService({ ...baseOpts, app: workerApp })).toBeUndefined();
     });
 });
 

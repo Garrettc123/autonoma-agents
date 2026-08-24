@@ -51,11 +51,12 @@ const TERMINAL_APP_STATUSES: PreviewkitAppStatus[] = ["ready", "build_failed", "
 // fields are overwritten wholesale on every write (an absent field clears the
 // column), so a caller transitioning an app must pass the complete intended
 // state - e.g. carry `imageTag` through the `deploying` and `ready` writes so
-// it is not wiped. `port` always comes from the resolved config.
+// it is not wiped. `port` always comes from the resolved config, and is absent for
+// an app that accepts no inbound connections.
 export interface AppStateUpdate {
     appName: string;
     status: PreviewkitAppStatus;
-    port: number;
+    port?: number;
     imageTag?: string;
     url?: string;
     error?: string;
@@ -611,7 +612,7 @@ function requireAppId(appIds: Map<string, string>, appName: string, namespace: s
 // that the new config no longer declares.
 export async function recordAppsPending(
     namespace: string,
-    apps: Array<{ appName: string; port: number }>,
+    apps: Array<{ appName: string; port?: number }>,
 ): Promise<void> {
     const logger = rootLogger.child({ name: "recordAppsPending" });
     logger.info("Recording apps pending", { namespace, appCount: apps.length });
@@ -640,11 +641,11 @@ export async function recordAppsPending(
                     appName: app.appName,
                     appId: requireAppId(appIds, app.appName, namespace),
                     status: "pending",
-                    port: app.port,
+                    port: app.port ?? null,
                 },
                 update: {
                     status: "pending",
-                    port: app.port,
+                    port: app.port ?? null,
                     imageTag: null,
                     url: null,
                     error: null,
@@ -679,7 +680,7 @@ export async function recordAppStates(namespace: string, updates: AppStateUpdate
         for (const u of updates) {
             const mutable = {
                 status: u.status,
-                port: u.port,
+                port: u.port ?? null,
                 imageTag: u.imageTag ?? null,
                 url: u.url ?? null,
                 error: u.error ?? null,
@@ -751,7 +752,7 @@ export async function recordAppRedeployOutcome(namespace: string, update: AppSta
 
         const mutable = {
             status: update.status,
-            port: update.port,
+            port: update.port ?? null,
             imageTag: update.imageTag ?? null,
             url: update.url ?? null,
             error: update.error ?? null,

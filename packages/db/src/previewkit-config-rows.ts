@@ -1,5 +1,5 @@
 import type { PreviewkitConfigRowValues } from "@autonoma/types";
-import type { Prisma } from "./generated/prisma/client";
+import { Prisma } from "./generated/prisma/client";
 
 /**
  * The include every reader of a preview config uses. The `orderBy`s are what make
@@ -27,7 +27,9 @@ export function previewkitConfigCreateChildren(values: PreviewkitConfigRowValues
         branchConventionPattern: values.branchConventionPattern,
         branchConventionReplacement: values.branchConventionReplacement,
         repositories: { create: values.repositories },
-        apps: { create: values.apps.map((app) => ({ ...app, connections: { create: app.connections } })) },
+        apps: {
+            create: values.apps.map((app) => ({ ...appColumns(app), connections: { create: app.connections } })),
+        },
         services: {
             create: values.services.map((service) => ({ ...service, setupTasks: { create: service.setupTasks } })),
         },
@@ -35,14 +37,50 @@ export function previewkitConfigCreateChildren(values: PreviewkitConfigRowValues
     } satisfies Prisma.PreviewkitConfigUpdateInput;
 }
 
-/** The config's own columns, without any of its children. */
+/**
+ * The config's own columns, without any of its children.
+ *
+ * Every absent optional is written as an explicit `null`. A save carries the WHOLE
+ * document - callers apply a patch to the document and then save all of it - so a
+ * field the save does not name has been removed, not left unspecified. Prisma reads
+ * `undefined` in an `update` as "skip this column", which would silently keep the
+ * old value and make removing a field impossible.
+ */
 function configScalars(values: PreviewkitConfigRowValues) {
     return {
-        domain: values.domain,
-        registry: values.registry,
-        branchConventionType: values.branchConventionType,
-        branchConventionPattern: values.branchConventionPattern,
-        branchConventionReplacement: values.branchConventionReplacement,
+        domain: values.domain ?? null,
+        registry: values.registry ?? null,
+        branchConventionType: values.branchConventionType ?? null,
+        branchConventionPattern: values.branchConventionPattern ?? null,
+        branchConventionReplacement: values.branchConventionReplacement ?? null,
+    };
+}
+
+/**
+ * An app row's columns for a create or an update, with every absent optional as an
+ * explicit `null` rather than `undefined`. Written out field by field instead of
+ * spreading the values object: the spread is what let `undefined` reach Prisma's
+ * `update`, where it means "skip" and quietly preserves the value the save just
+ * removed. `port` is the one that bites hardest - an app relieved of its port would
+ * keep the old one and go on getting a TCP readiness probe it can never pass.
+ */
+function appColumns(app: PreviewkitConfigRowValues["apps"][number]) {
+    return {
+        position: app.position,
+        name: app.name,
+        repository: app.repository,
+        path: app.path,
+        buildContext: app.buildContext ?? null,
+        dockerfile: app.dockerfile ?? null,
+        build: app.build ?? Prisma.DbNull,
+        blueprint: app.blueprint ?? Prisma.DbNull,
+        port: app.port ?? null,
+        command: app.command ?? null,
+        primary: app.primary ?? null,
+        sdkImplemented: app.sdkImplemented ?? null,
+        sdkPath: app.sdkPath ?? null,
+        resourcesTier: app.resourcesTier,
+        dependsOn: app.dependsOn,
     };
 }
 
@@ -79,16 +117,16 @@ export async function writePreviewkitConfigTopology(
 
     for (const app of values.apps) {
         const id = idByName.get(app.name);
-        const { connections, ...columns } = app;
+        const columns = appColumns(app);
         if (id == null) {
             await tx.previewkitApp.create({
-                data: { ...columns, configId, connections: { create: connections } },
+                data: { ...columns, configId, connections: { create: app.connections } },
             });
             continue;
         }
         await tx.previewkitApp.update({
             where: { id },
-            data: { ...columns, connections: { deleteMany: {}, create: connections } },
+            data: { ...columns, connections: { deleteMany: {}, create: app.connections } },
         });
     }
 

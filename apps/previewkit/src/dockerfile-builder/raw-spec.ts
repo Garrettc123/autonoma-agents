@@ -47,8 +47,13 @@ export interface GenerateDockerfileContext {
     npmRegistryMirror: string;
     /** Merged build args (build_args + the build-time secret values); emitted as `ENV` lines. */
     buildArgs: Record<string, string>;
-    /** Container port the app listens on; emitted as `ENV PORT` + `EXPOSE`. */
-    port: number;
+    /**
+     * Container port the app listens on; emitted as `ENV PORT` + `EXPOSE`. Absent
+     * for an app that accepts no inbound connections, which gets neither line -
+     * `EXPOSE` would advertise a port nothing binds, and `ENV PORT` would hand the
+     * process a number it has no use for.
+     */
+    port?: number;
     /** App name (Kubernetes name); used as the raw runtime WORKDIR. */
     appName: string;
     /**
@@ -93,7 +98,9 @@ export function renderDockerfile(spec: RawSpec, ctx: GenerateDockerfileContext):
     for (const line of envLines(ctx.buildArgs)) {
         lines.push(line);
     }
-    lines.push(`ENV PORT=${ctx.port}`, "");
+    if (ctx.port != null) {
+        lines.push(`ENV PORT=${ctx.port}`, "");
+    }
 
     for (const line of spec.build) {
         lines.push(line, "");
@@ -103,7 +110,9 @@ export function renderDockerfile(spec: RawSpec, ctx: GenerateDockerfileContext):
         lines.push(`WORKDIR ${spec.appWorkdir}`, "");
     }
 
-    lines.push(`EXPOSE ${ctx.port}`);
+    if (ctx.port != null) {
+        lines.push(`EXPOSE ${ctx.port}`);
+    }
     lines.push(`CMD ${spec.start}`);
 
     return lines.join("\n") + "\n";

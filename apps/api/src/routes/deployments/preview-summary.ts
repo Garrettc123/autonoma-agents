@@ -164,7 +164,7 @@ export function buildServiceSummaries({
             imageTag: string | null;
             error: string | null;
             url: string | null;
-            port: number;
+            port: number | null;
             updatedAt: Date;
         }>;
     };

@@ -2238,7 +2238,8 @@ model PreviewkitAppInstance {
   imageTag String?             @map("image_tag")
   error    String?
   url      String?
-  port     Int
+  /// Null for an app that accepts no inbound connections (see PreviewkitApp.port).
+  port     Int?
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -2447,7 +2448,11 @@ model PreviewkitApp {
   build        Json?
   /// ![PreviewkitBlueprint]
   blueprint    Json?
-  port         Int
+  /// Null means the app accepts no inbound connections - a worker, poller, or queue
+  /// consumer. The deployer gives every port-declaring app a TCP readiness probe,
+  /// which a process that binds nothing can never pass, so null is what keeps such an
+  /// app from hanging until the deploy timeout.
+  port         Int?
   command      String?
 
   // Tri-state: the config schema allows an explicit `false`, so null means the

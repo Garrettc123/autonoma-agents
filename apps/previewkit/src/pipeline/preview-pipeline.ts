@@ -1211,7 +1211,7 @@ export class PreviewPipeline {
 
         const base: AppStateUpdate = {
             appName,
-            port: appRow.port,
+            port: appRow.port ?? undefined,
             status: "ready",
             imageTag: appRow.imageTag ?? undefined,
             url: appRow.url ?? undefined,
@@ -1546,6 +1546,12 @@ export class PreviewPipeline {
         // the schema makes them mutually exclusive. It is lowered to a `runtime`
         // Build and built by the existing single-stage generator (interim path).
         if (app.blueprint != null) {
+            // The config schema refuses a blueprint without a port, so this is a
+            // guard against a document that reached here unvalidated rather than a
+            // case an author can produce.
+            if (app.port == null) {
+                throw new Error(`App "${app.name}" uses a blueprint but declares no port`);
+            }
             const facts = detectBlueprintFacts(app.blueprint, repoDir, app.path);
             const build = blueprintToBuild(app.blueprint, app.port, facts);
             // `root` (monorepo) builds from the repo root so sibling workspace packages resolve.

@@ -837,3 +837,44 @@ describe("legacy aws service flags fold into options", () => {
         if (result.success) expect(result.service.options).toEqual({});
     });
 });
+
+describe("previewConfigSchema optional port", () => {
+    function parseApp(app: Record<string, unknown>) {
+        return previewConfigSchema.safeParse({ version: 2, apps: [{ repository: "acme/web", ...app }] });
+    }
+
+    /**
+     * A worker binds nothing, so the TCP readiness probe the deployer gives every
+     * port-declaring app can never pass on it. Omitting the port is the only way to
+     * say so, and it is what keeps the deploy from hanging until its timeout.
+     */
+    it("accepts an app that declares no port", () => {
+        const result = parseApp({ name: "temporal-worker" });
+        expect(result.success).toBe(true);
+        if (result.success) expect(result.data.apps[0]?.port).toBeUndefined();
+    });
+
+    it("still accepts an app that declares one", () => {
+        const result = parseApp({ name: "web", port: 3000 });
+        expect(result.success).toBe(true);
+        if (result.success) expect(result.data.apps[0]?.port).toBe(3000);
+    });
+
+    // The three roles below are reachability by definition, so a missing port is a
+    // contradiction rather than a worker declaration.
+    it.each([
+        ["blueprint", { name: "web", blueprint: { preset: "nextjs" } }],
+        ["primary", { name: "web", primary: true }],
+        ["sdk_implemented", { name: "web", sdk_implemented: true }],
+    ])("rejects a portless app that declares %s", (role, app) => {
+        const result = parseApp(app);
+        expect(result.success).toBe(false);
+        if (!result.success) {
+            expect(result.error.issues.some((issue) => issue.path.includes(role))).toBe(true);
+        }
+    });
+
+    it("allows an explicit false on a role rather than treating it as set", () => {
+        expect(parseApp({ name: "worker", primary: false, sdk_implemented: false }).success).toBe(true);
+    });
+});

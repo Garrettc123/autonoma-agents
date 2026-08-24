@@ -9,7 +9,8 @@ const VARIABLE_TEMPLATE_REGEX = /\{\{(pr|namespace|owner)\}\}/g;
 
 interface ServiceEntry {
     host: string;
-    port: number;
+    /** Absent for an app that accepts no inbound connections; `{{name.port}}` then throws. */
+    port?: number;
     url?: string;
     hostname?: string;
 }
@@ -133,6 +134,12 @@ export class EnvInjector {
             return svc.hostname;
         }
         if (field === "host") return svc.host;
+        if (svc.port == null) {
+            throw new Error(
+                `{{${name}.port}} is not available: the "${name}" app declares no port, so it accepts no ` +
+                    "inbound connections and there is nothing to connect to.",
+            );
+        }
         return String(svc.port);
     }
 

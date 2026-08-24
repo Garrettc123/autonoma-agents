@@ -335,12 +335,14 @@ describe("previewConfigSchema", () => {
         expect(result.success).toBe(false);
     });
 
-    it("rejects missing port", () => {
+    // A missing port is how an app declares it accepts no inbound connections, so
+    // the deployer gives it no readiness probe rather than one it can never pass.
+    it("accepts a missing port", () => {
         const result = previewConfigSchema.safeParse({
             version: 2,
-            apps: [{ name: "web", repository: "acme/web" }],
+            apps: [{ name: "temporal-worker", repository: "acme/web" }],
         });
-        expect(result.success).toBe(false);
+        expect(result.success).toBe(true);
     });
 
     it("rejects negative port", () => {

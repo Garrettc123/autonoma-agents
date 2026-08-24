@@ -244,3 +244,22 @@ describe("generateDockerfile", () => {
         });
     });
 });
+
+describe("generateDockerfile for an app with no port", () => {
+    const { port: _port, ...portless } = ctx;
+
+    /**
+     * A worker binds nothing, so EXPOSE would advertise a port that never opens and
+     * ENV PORT would hand the process a number it has no use for - and, worse, one
+     * a framework's default server might decide to bind.
+     */
+    it("emits neither ENV PORT nor EXPOSE", () => {
+        const df = generateDockerfile(
+            { framework: "node", package_manager: "pnpm", node_version: "22", build_context: "app" },
+            portless,
+        );
+        expect(df).not.toContain("ENV PORT");
+        expect(df).not.toContain("EXPOSE");
+        expect(df).toContain("CMD pnpm start");
+    });
+});

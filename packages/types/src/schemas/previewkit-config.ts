@@ -683,6 +683,20 @@ const connectionSchema = z.object({
 });
 
 /**
+ * The roles that make an app reachable by definition, so declaring one without a
+ * `port` is a contradiction rather than a worker. Returns the field names to
+ * attach the issue to, so the editor highlights the role the author set rather
+ * than the port they left out.
+ */
+function portRequiringRoles(app: { blueprint?: unknown; primary?: boolean; sdk_implemented?: boolean }): string[] {
+    const roles: string[] = [];
+    if (app.blueprint != null) roles.push("blueprint");
+    if (app.primary === true) roles.push("primary");
+    if (app.sdk_implemented === true) roles.push("sdk_implemented");
+    return roles;
+}
+
+/**
  * Builds the preview config schema. Two knobs, both about what the caller is
  * trusted to send:
  * - `build` is the app build contract: {@link authoredBuildSchema} for anything a
@@ -724,7 +738,28 @@ function buildPreviewConfigSchema<TBuild extends z.ZodType>(build: TBuild, allow
             blueprint: blueprintSchema.optional(),
             // The AWS-secret keys to also inject at build time (Docker build args).
             // Runtime secret values live in AWS Secrets Manager, never in this document.
-            port: z.number().int().positive(),
+            /**
+             * The port this app listens on. ABSENT means the app accepts no inbound
+             * connections at all - a worker, poller, or queue consumer - and is the
+             * only way to say so: the deployer gives every port-declaring app a TCP
+             * readiness probe, which a process that binds nothing can never pass, so
+             * a portless app that declared a port would hang until the deploy timeout.
+             * Absence (rather than a companion `network: none` flag) keeps one field
+             * answering "does this app accept inbound connections?", so there is no
+             * second value to contradict it.
+             */
+            port: z
+                .number()
+                .int()
+                .positive()
+                .optional()
+                .describe(
+                    "The port this app listens on. OMIT it for an app that accepts no inbound connections - a " +
+                        "worker, poller, or queue consumer that only makes outbound calls. Every app that " +
+                        "declares a port gets a TCP readiness probe on it, which such an app can never pass, so " +
+                        "declaring a port it does not bind makes its deploy hang until the timeout and fails the " +
+                        "whole environment. Required for a primary app, an SDK host, or any app with a blueprint.",
+                ),
             // Non-secret variables wired to the topology, resolved at deploy time.
             // All user-typed values are secrets (AWS), so they never appear here.
             connections: z.array(connectionSchema).default([]),
@@ -758,6 +793,18 @@ function buildPreviewConfigSchema<TBuild extends z.ZodType>(build: TBuild, allow
                     message:
                         "an app cannot set both `build` and `blueprint` - `blueprint` is the preset-based deploy model, `build` is the manual one",
                     path: ["blueprint"],
+                });
+            }
+            if (app.port != null) return;
+            // Three roles are reachability by definition, so omitting the port is a
+            // contradiction rather than a worker declaration - and each one fails
+            // far from here (a blueprint lowers to a start command that binds a
+            // port; primary and sdk_implemented are addressed over HTTP).
+            for (const role of portRequiringRoles(app)) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: `\`${role}\` needs a \`port\` - omit \`port\` only for an app that accepts no inbound connections`,
+                    path: [role],
                 });
             }
         });

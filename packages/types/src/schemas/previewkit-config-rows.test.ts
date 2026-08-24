@@ -35,7 +35,7 @@ function store(values: PreviewkitConfigRowValues): PreviewkitConfigRows {
             dockerfile: app.dockerfile ?? null,
             build: app.build ?? null,
             blueprint: app.blueprint ?? null,
-            port: app.port,
+            port: app.port ?? null,
             command: app.command ?? null,
             primary: app.primary ?? null,
             sdkImplemented: app.sdkImplemented ?? null,
@@ -400,5 +400,36 @@ describe("legacy aws flag mirror columns", () => {
         expect(values.s3).toBeUndefined();
         expect(values.sqs).toBeUndefined();
         expect(values.sns).toBeUndefined();
+    });
+});
+
+describe("portless apps", () => {
+    /**
+     * An absent port must survive as ABSENT, not as a null that a reader's schema
+     * then rejects, and not as a zero. It is the whole declaration that the app
+     * accepts no inbound connections, so losing it in storage silently restores
+     * the readiness probe that a worker can never pass.
+     */
+    it("round trips an app that declares no port", () => {
+        const result = expectRoundTrip({
+            version: 2,
+            apps: [
+                { name: "web", repository: "acme/web", port: 3000 },
+                { name: "temporal-worker", repository: "acme/web" },
+            ],
+        });
+
+        // Undefined, never null: a null reaches the reader's schema as a type error
+        // on a field it would otherwise accept as absent.
+        expect(result.apps[1]?.port).toBeUndefined();
+        expect(result.apps[1]?.port).not.toBeNull();
+        expect(result.apps[0]?.port).toBe(3000);
+    });
+
+    it("decomposes an absent port to an absent column value", () => {
+        const values = previewkitConfigRowValues(
+            parse({ version: 2, apps: [{ name: "temporal-worker", repository: "acme/web" }] }),
+        );
+        expect(values.apps[0]?.port).toBeUndefined();
     });
 });

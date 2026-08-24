@@ -199,5 +199,66 @@ integrationTestSuite({
             expect(await harness.db.previewkitApp.count({ where: { configId } })).toBe(0);
             expect(await harness.db.previewkitConfig.count({ where: { id: configId } })).toBe(0);
         });
+
+        /**
+         * The whole point of an optional port: an app that turns out to be a worker has
+         * its port REMOVED from an existing config. Apps are diffed by name and updated
+         * in place, and Prisma reads `undefined` in an update as "skip this column" - so
+         * an absent port has to reach it as an explicit null or the old value survives,
+         * the composed document still carries it, and the deployer goes on building the
+         * TCP readiness probe the worker can never pass.
+         */
+        test("removing an app's port on a re-save clears the stored column", async ({
+            harness,
+            seedResult: { orgId, config },
+        }) => {
+            const appId = await harness.createApp(orgId);
+            await harness.linkPreviewRepo(appId, orgId, REPO_FULL_NAME);
+            await config.save(
+                appId,
+                orgId,
+                document({
+                    apps: [
+                        { name: "web", repository: REPO_FULL_NAME, port: 3000, primary: true },
+                        { name: "temporal-worker", repository: REPO_FULL_NAME, port: 9000, command: "pnpm worker" },
+                    ],
+                }),
+            );
+
+            const seeded = await harness.db.previewkitApp.findFirstOrThrow({
+                where: { name: "temporal-worker" },
+                select: { id: true, port: true },
+            });
+            expect(seeded.port).toBe(9000);
+
+            await config.save(
+                appId,
+                orgId,
+                document({
+                    apps: [
+                        { name: "web", repository: REPO_FULL_NAME, port: 3000, primary: true },
+                        { name: "temporal-worker", repository: REPO_FULL_NAME },
+                    ],
+                }),
+            );
+
+            const worker = await harness.db.previewkitApp.findFirstOrThrow({
+                where: { name: "temporal-worker" },
+                select: { id: true, port: true, command: true },
+            });
+            expect(worker.port).toBeNull();
+            // Same row, so its secrets, instances and builds are still attached.
+            expect(worker.id).toBe(seeded.id);
+            // The identical footgun on every other optional column: a removed `command`
+            // must clear too, not silently keep the value the save dropped.
+            expect(worker.command).toBeNull();
+
+            const stored = await harness.db.previewkitConfig.findUniqueOrThrow({
+                where: { applicationId: appId },
+                include: previewkitConfigRowsInclude,
+            });
+            const composed = trustedPreviewConfigSchema.parse(documentFromPreviewkitConfigRows(stored));
+            expect(composed.apps.find((app) => app.name === "temporal-worker")?.port).toBeUndefined();
+        });
     },
 });

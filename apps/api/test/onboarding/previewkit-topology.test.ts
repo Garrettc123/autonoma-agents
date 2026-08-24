@@ -61,13 +61,16 @@ integrationTestSuite({
             const appId = await createApp();
             await linkRepository(harness, appId, 93_001);
 
+            // A primary app is reachable by definition, so omitting its port is a
+            // contradiction - unlike a worker, where an absent port is the declaration
+            // that it accepts no inbound connections.
             const result = await manager.validatePreviewkitConfig(appId, orgId, {
                 version: 2,
-                apps: [{ name: "web", repository: "acme/web", path: "." }],
+                apps: [{ name: "web", repository: "acme/web", path: ".", primary: true }],
             });
 
             expect(result.valid).toBe(false);
-            const portIssue = result.issues.find((issue) => issue.path.join(".") === "apps.0.port");
+            const portIssue = result.issues.find((issue) => issue.path.join(".") === "apps.0.primary");
             expect(portIssue).toMatchObject({ severity: "error", code: "schema" });
         });
 

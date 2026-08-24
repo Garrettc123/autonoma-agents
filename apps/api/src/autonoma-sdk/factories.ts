@@ -31,7 +31,7 @@ import { z } from "zod";
 
 const logger = rootLogger.child({ name: "AutonomaSdkFactories" });
 
-/** `PreviewkitAppInstance.port` is required; a recipe that omits it gets the usual web port. */
+/** A seeded preview app whose recipe declares no port gets the usual web port. */
 const DEFAULT_PREVIEW_APP_PORT = 3000;
 
 /**

@@ -436,3 +436,44 @@ describe("EnvInjector", () => {
         expect(resolved["STATIC"]).toBe("no-template-here");
     });
 });
+
+describe("EnvInjector portless apps", () => {
+    const injector = new EnvInjector(new RecipeRegistry());
+    const worker: AppConfig = {
+        name: "temporal-worker",
+        repository: "acme-corp/my-repo",
+        path: "./apps/worker",
+        connections: [],
+        resources: { tier: "standard", cpu: "250m", memory: "512Mi" },
+    };
+
+    /**
+     * A template that reaches for a worker's port is wiring something to an address
+     * nothing listens on. Resolving it to "undefined" would ship that string into
+     * the container and surface as a connection error far from the cause.
+     */
+    it("rejects a {{name.port}} template for an app that declares no port", () => {
+        expect(() =>
+            injector.applyTemplates(
+                { WORKER_ADDR: "{{temporal-worker.host}}:{{temporal-worker.port}}" },
+                [...apps, worker],
+                services,
+                "preview-ns",
+                defaultContext,
+                defaultPublicUrlInfo,
+            ),
+        ).toThrow(/declares no port/);
+    });
+
+    it("still resolves the worker's in-cluster host", () => {
+        const resolved = injector.applyTemplates(
+            { WORKER_HOST: "{{temporal-worker.host}}" },
+            [...apps, worker],
+            services,
+            "preview-ns",
+            defaultContext,
+            defaultPublicUrlInfo,
+        );
+        expect(resolved["WORKER_HOST"]).toBe("temporal-worker");
+    });
+});
