@@ -12,6 +12,8 @@ export interface RepoCloneSpec {
     commitSha: string;
     /** Base SHA to additionally fetch, enabling `git diff baseSha..commitSha`. Absent => read-only. */
     baseSha?: string;
+    /** Further shas to fetch best-effort; a sha the remote no longer serves is skipped. */
+    extraShas?: string[];
 }
 
 export interface CloneWorkspaceSpec {
@@ -100,7 +102,7 @@ export class Codebase {
     static async clone(
         githubClient: GitHubInstallationClient,
         targetDir: string,
-        opts: { repoName: string; commitSha: string; baseSha?: string },
+        opts: { repoName: string; commitSha: string; baseSha?: string; extraShas?: string[] },
     ): Promise<Codebase> {
         const logger = rootLogger.child({
             name: "Codebase.clone",
@@ -117,6 +119,7 @@ export class Codebase {
                 fullName: opts.repoName,
                 headSha: opts.commitSha,
                 baseSha: opts.baseSha,
+                extraShas: opts.extraShas,
                 targetDir,
             });
         } catch (error) {
@@ -248,6 +251,7 @@ async function cloneInto(
         fullName: spec.name,
         headSha: spec.commitSha,
         baseSha: spec.baseSha,
+        extraShas: spec.extraShas,
         targetDir: dir,
     });
     return { name: spec.name, role, relPath, dir, headSha: spec.commitSha, baseSha: spec.baseSha };

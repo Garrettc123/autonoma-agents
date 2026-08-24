@@ -190,6 +190,11 @@ export interface CloneRepositoryParams {
     fullName: string;
     headSha: string;
     baseSha?: string;
+    /**
+     * Additional shas to fetch after the clone, best-effort. Unlike `baseSha`, a sha the remote no longer serves
+     * (force-pushed away, GC'd) is logged and skipped, never an error.
+     */
+    extraShas?: string[];
     targetDir: string;
     depth?: number;
 }
@@ -392,6 +397,12 @@ export class OctokitGitHubInstallationClient implements GitHubInstallationClient
                 }
             }
 
+            // Sequential on purpose: concurrent fetches into one shallow clone contend for the repo's shallow
+            // file lock.
+            for (const sha of params.extraShas ?? []) {
+                await this.fetchExtraShaBestEffort(sha, targetDir, depth, gitEnv, token);
+            }
+
             this.logger.info("Repository cloned successfully", {
                 fullName,
                 targetDir,
@@ -443,6 +454,42 @@ export class OctokitGitHubInstallationClient implements GitHubInstallationClient
                 throw new UnreachableBaseShaError(baseSha);
             }
             throw err;
+        }
+    }
+
+    /**
+     * Failure is logged and swallowed deliberately: an extra sha's absence must never fail a clone that has its
+     * head and base.
+     */
+    private async fetchExtraShaBestEffort(
+        sha: string,
+        targetDir: string,
+        depth: number,
+        gitEnv: NodeJS.ProcessEnv,
+        token: string,
+    ): Promise<void> {
+        try {
+            await runGitStep(
+                "cat-file-extra",
+                ["cat-file", "-t", sha],
+                { timeoutMs: CAT_FILE_TIMEOUT_MS, cwd: targetDir },
+                token,
+                this.logger,
+            );
+            return;
+        } catch (err) {
+            this.logger.debug("Extra SHA not in shallow clone, fetching explicitly", { sha, err });
+        }
+        try {
+            await runGitStep(
+                "fetch-extra",
+                ["fetch", `--depth=${depth}`, "origin", sha],
+                { timeoutMs: FETCH_TIMEOUT_MS, cwd: targetDir, env: gitEnv },
+                token,
+                this.logger,
+            );
+        } catch (err) {
+            this.logger.warn("Extra SHA could not be fetched; continuing without it", { sha, err });
         }
     }
 

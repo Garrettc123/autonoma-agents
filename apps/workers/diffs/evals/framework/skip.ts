@@ -29,9 +29,14 @@ export async function rehydrateOrSkip(
     coords: CodebaseCoords,
     helpers: RunCaseHelpers,
     ctx: CaseSkipContext,
+    options?: { extraShas?: string[] },
 ): Promise<Codebase> {
     try {
-        const { codebase, dispose } = await ensureCachedCheckout(coords, { logger: ctx.logger, label: ctx.caseName });
+        const { codebase, dispose } = await ensureCachedCheckout(coords, {
+            logger: ctx.logger,
+            label: ctx.caseName,
+            extraShas: options?.extraShas,
+        });
         // The case owns this worktree; remove it when the case finishes so concurrent cases do not
         // accumulate trees on disk for the length of the run.
         helpers.onCleanup(dispose);

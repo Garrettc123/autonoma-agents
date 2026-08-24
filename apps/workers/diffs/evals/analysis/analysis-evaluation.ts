@@ -1,3 +1,4 @@
+import { recordedEventShas } from "@autonoma/analysis";
 import { type Codebase, DiffsAgent, type DiffsAgentResult } from "@autonoma/diffs";
 import type { ModelSession } from "@autonoma/diffs/analysis";
 import { type CheckFailure, type LoadedCase, type RunCaseHelpers } from "@autonoma/evals";
@@ -51,7 +52,12 @@ export class AnalysisEvaluation extends ScoredReplayEvaluation<
 
     protected override async setUp(testCase: AnalysisCase, helpers: RunCaseHelpers): Promise<AnalysisContext> {
         const { coords, agentInput } = rehydrateAnalysisInput(testCase.input);
-        const codebase = await rehydrateOrSkip(coords, helpers, { logger: this.logger, caseName: testCase.name });
+        const codebase = await rehydrateOrSkip(
+            coords,
+            helpers,
+            { logger: this.logger, caseName: testCase.name },
+            { extraShas: recordedEventShas(agentInput.events ?? [], [coords.headSha, coords.baseSha]) },
+        );
         return { codebase, agentInput };
     }
 

@@ -6,6 +6,7 @@ export {
     type PendingBranchHead,
 } from "./analysis-event-store";
 export { AnalysisEventResolver, type ResolvedAnalysisEvent } from "./analysis-event-resolver";
+export { recordedEventShas } from "./recorded-event-shas";
 export {
     Analysis,
     type RecordClassificationInput,

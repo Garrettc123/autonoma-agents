@@ -119,6 +119,8 @@ interface CloneCoords {
     headSha: string;
     /** Also fetched into the clone so `git diff base..head` works. */
     baseSha?: string;
+    /** Further shas fetched best-effort; absence never fails the clone. */
+    extraShas?: string[];
 }
 
 /**
@@ -147,6 +149,7 @@ async function withCheckout<T>(
                       name: github.repoFullName.toLowerCase(),
                       commitSha: primary.headSha,
                       baseSha: primary.baseSha,
+                      extraShas: primary.extraShas,
                   },
                   dependencies: dependencies.dependencies,
                   unavailable: dependencies.unavailable,
@@ -155,6 +158,7 @@ async function withCheckout<T>(
                   repoName: github.repoFullName,
                   commitSha: primary.headSha,
                   baseSha: primary.baseSha,
+                  extraShas: primary.extraShas,
               });
         try {
             return await body(codebase);
@@ -182,11 +186,17 @@ export async function withSnapshotContext<T>(
     snapshotId: string,
     targetDirSeed: string,
     body: (context: SnapshotContext) => Promise<T>,
+    options?: SnapshotContextOptions,
 ): Promise<T> {
     const meta = await loadSnapshotMeta(snapshotId);
     const github = await resolveGitHubAccess(meta);
     const dependencies = await resolveDependencyCheckouts(db, snapshotId);
-    return cloneWithBaseRecovery(meta, github, dependencies, targetDirSeed, body);
+    return cloneWithBaseRecovery(meta, github, dependencies, targetDirSeed, body, options);
+}
+
+export interface SnapshotContextOptions {
+    /** Further shas to fetch into the primary repo's clone, best-effort; a missing sha is skipped, never an error. */
+    extraShas?: string[];
 }
 
 /**
@@ -202,11 +212,12 @@ async function cloneWithBaseRecovery<T>(
     dependencies: Awaited<ReturnType<typeof resolveDependencyCheckouts>>,
     targetDirSeed: string,
     body: (context: SnapshotContext) => Promise<T>,
+    options?: SnapshotContextOptions,
 ): Promise<T> {
     const cloneAndRun = (snapshot: SnapshotMeta) =>
         withCheckout(
             github,
-            { headSha: snapshot.headSha, baseSha: snapshot.baseSha },
+            { headSha: snapshot.headSha, baseSha: snapshot.baseSha, extraShas: options?.extraShas },
             dependencies,
             targetDirSeed,
             (codebase) => body(buildSnapshotContext(snapshot, github, codebase)),

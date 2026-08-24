@@ -1,3 +1,4 @@
+import { AnalysisEventResolver, recordedEventShas } from "@autonoma/analysis";
 import { db } from "@autonoma/db";
 import { assertSnapshotPending } from "@autonoma/diffs/analysis";
 import { logger as rootLogger } from "@autonoma/logger";
@@ -5,7 +6,7 @@ import type { RunImpactAnalysisInput, RunImpactAnalysisOutput } from "@autonoma/
 import { selectImpactTargets } from "../../analysis/impact-analysis";
 import { SnapshotDependencyManifestPinner } from "../../codebase/pin-dependency-manifest";
 import { withSnapshotContext } from "../../codebase/snapshot-context";
-import { getAnalysisStore } from "../../services";
+import { getAnalysisEventStore, getAnalysisStore } from "../../services";
 
 /**
  * Impact Analysis stage. Fails fast unless the snapshot is `processing` (later stages read its frozen baseline
@@ -30,8 +31,11 @@ export async function runImpactAnalysis(input: RunImpactAnalysisInput): Promise<
     // snapshot immune to a redeploy landing mid-run.
     await new SnapshotDependencyManifestPinner(db).ensurePinned(snapshotId);
 
-    const selection = await withSnapshotContext(snapshotId, `impact-${snapshotId}`, (context) =>
-        selectImpactTargets({ snapshotId, codebase: context.codebase }),
+    const selection = await withSnapshotContext(
+        snapshotId,
+        `impact-${snapshotId}`,
+        (context) => selectImpactTargets({ snapshotId, codebase: context.codebase }),
+        { extraShas: await claimedEventShas(snapshotId) },
     );
 
     const analysis = getAnalysisStore().forAnalysis(snapshotId);
@@ -49,4 +53,14 @@ export async function runImpactAnalysis(input: RunImpactAnalysisInput): Promise<
     const targetCount = selection.targets.length;
     logger.info("Impact Analysis stage finished", { extra: { targetCount } });
     return { targetCount };
+}
+
+/** Fetched into the clone so the agent can diff the recorded movement (a rebase, a force push), not just base..head. */
+async function claimedEventShas(snapshotId: string): Promise<string[]> {
+    const events = await new AnalysisEventResolver(getAnalysisEventStore()).resolveForSnapshot(snapshotId);
+    const snapshot = await db.branchSnapshot.findUniqueOrThrow({
+        where: { id: snapshotId },
+        select: { headSha: true, baseSha: true },
+    });
+    return recordedEventShas(events, [snapshot.headSha, snapshot.baseSha]);
 }

@@ -80,6 +80,8 @@ export interface EnsureCachedCheckoutOptions {
     /** Human-readable label (e.g. the case name) used to name this checkout's worktree dir. */
     label?: string;
     logger?: Logger;
+    /** Further shas to fetch best-effort; unlike `baseSha`/`headSha`, one rotting away never skips the case. */
+    extraShas?: string[];
 }
 
 /**
@@ -157,11 +159,19 @@ async function fetchIntoCache(coords: CodebaseCoords, options: EnsureCachedCheck
 
     await ensureBaseClone({ repoDir, worktreesDir, getCloneUrl, publicUrl, logger });
 
-    // Fetch both commits under the per-repo lock: fetch mutates the shared `.git`, so concurrent cases
+    // Fetch the commits under the per-repo lock: fetch mutates the shared `.git`, so concurrent cases
     // would race. The worktree add and the model work both happen outside this section.
     await withRepoLock(repoDir, async () => {
         await fetchSha({ repoDir, getCloneUrl, sha: headSha, repoFullName, logger });
         await fetchSha({ repoDir, getCloneUrl, sha: baseSha, repoFullName, logger });
+        for (const sha of options.extraShas ?? []) {
+            try {
+                await fetchSha({ repoDir, getCloneUrl, sha, repoFullName, logger });
+            } catch (err) {
+                if (!(err instanceof UnfetchableShaError)) throw err;
+                logger.warn("Extra sha no longer fetchable; continuing without it", { extra: { sha } });
+            }
+        }
     });
 
     await assertReachable({ repoDir, sha: baseSha, repoFullName });

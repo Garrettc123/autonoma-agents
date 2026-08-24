@@ -15,7 +15,14 @@ const execFileAsync = promisify(execFile);
  */
 
 /** The distinct git invocations the clone path makes, in the order they can fail. */
-export type GitStep = "clone" | "checkout-head" | "fetch-head" | "cat-file-base" | "fetch-base";
+export type GitStep =
+    | "clone"
+    | "checkout-head"
+    | "fetch-head"
+    | "cat-file-base"
+    | "fetch-base"
+    | "cat-file-extra"
+    | "fetch-extra";
 
 /** `child_process.execFile` rejection shape, narrowed to the fields we surface. Timeout kills set `code` to `null`, so every field is nullish-tolerant. */
 const execErrorSchema = z.object({
