@@ -1,3 +1,4 @@
+import type { ResolvedAnalysisEvent } from "@autonoma/analysis";
 import type { BranchHistory, DiffAnalysis, MergeContextInfo, PreClassifiedConflictInfo } from "../../diffs-agent";
 import type { FlowIndex } from "../../flow-index";
 import { buildPlanAuthoringContext } from "../../plan-authoring";
@@ -16,6 +17,8 @@ export interface DiffsPromptInput {
     /** The PR's commit range. Rendered so the agent can read the patch itself; without it the only range it can
      * guess is `HEAD~1`, which on a multi-commit PR is silently a fraction of the change. */
     range: { baseSha: string; headSha: string };
+    /** The analysis events the run claimed, oldest first. Empty renders no section at all. */
+    events: ResolvedAnalysisEvent[];
     flowIndex: FlowIndex;
     merges: MergeContextInfo[];
     preClassifiedConflicts: PreClassifiedConflictInfo[];
@@ -56,13 +59,10 @@ ${analysis.summary}
 ## Affected Files
 ${listAffectedFiles(analysis.affectedFiles)}
 
-## Reading the change
-This PR's commit range is \`${range.baseSha}..${range.headSha}\`. Use these SHAs verbatim - the clone is checked out at the head and the base has NO branch name, so \`HEAD~1\`, \`origin/main\` and a merge-base all silently give you a fraction of a multi-commit PR.
+${renderRangeSection(range)}`;
 
-Explore the patch yourself with \`bash\`, scoping to what you need rather than pulling it whole:
-- \`git diff ${range.baseSha}..${range.headSha} --stat\` for the full file list with change magnitude
-- \`git diff ${range.baseSha}..${range.headSha} -- <path>\` for one file or directory
-- \`git log ${range.baseSha}..${range.headSha} --name-only\` for which commit touched what`;
+    const eventsSection = renderEvents(input.events);
+    if (eventsSection !== "") prompt += `\n\n${eventsSection}`;
 
     if (merges.length > 0) {
         prompt += "\n\n## Merges in this range\n";
@@ -175,6 +175,48 @@ You are the sole author of new tests in this flow. Each \`create_test\` mints a 
 4. Identify potentially affected tests by passing every candidate slug to \`read_tests\` in one call, then \`mark_affected_test\` for each affected one
 5. Identify test gaps and author new tests with \`create_test\` - browse the suite first to ground the coverage justification, and bind a \`scenarioId\` when the test needs seeded data
 6. Call \`finish\` with your overall reasoning - even if no actions were needed (e.g. pure refactors), explain why`;
+
+/** Base==head is a real case - a same-head run answering pending events - not an error. */
+function renderRangeSection(range: { baseSha: string; headSha: string }): string {
+    if (range.baseSha === range.headSha) {
+        return `## Reading the change
+This run has NO commit range: base and head are the same commit (\`${range.headSha}\`), so there is no new diff to read. The run exists because of its triggering events (below) - judge impact from those events and the current state of the code, and do not hunt for a patch.`;
+    }
+    return `## Reading the change
+This PR's commit range is \`${range.baseSha}..${range.headSha}\`. Use these SHAs verbatim - the clone is checked out at the head and the base has NO branch name, so \`HEAD~1\`, \`origin/main\` and a merge-base all silently give you a fraction of a multi-commit PR.
+
+Explore the patch yourself with \`bash\`, scoping to what you need rather than pulling it whole:
+- \`git diff ${range.baseSha}..${range.headSha} --stat\` for the full file list with change magnitude
+- \`git diff ${range.baseSha}..${range.headSha} -- <path>\` for one file or directory
+- \`git log ${range.baseSha}..${range.headSha} --name-only\` for which commit touched what`;
+}
+
+/** Collapses to `""` when the run claimed nothing, so an event-less run's prompt is byte-identical. */
+function renderEvents(events: ResolvedAnalysisEvent[]): string {
+    if (events.length === 0) return "";
+    const lines = events.map((event) => renderEvent(event)).join("\n");
+    return (
+        "## Triggering events\n" +
+        "The recorded events this run is answering, oldest first. The diff is the ground truth for what the code " +
+        "looks like NOW; the events are the record of how and why it got there. Use them to understand the " +
+        "branch's movement - a push burst, a rebase, a force push - and never count a change twice because it " +
+        "shows up both in the diff and in an event.\n\n" +
+        `${lines}\n\n` +
+        "A recorded head that is not an ancestor of the current head means the branch was rebased or force-pushed: " +
+        "the range diff then mixes the PR's own changes with replayed history, so use the recorded heads to tell " +
+        "them apart. A recorded sha may or may not still be present in the clone - check with " +
+        "`git cat-file -e <sha>` before diffing against one."
+    );
+}
+
+function renderEvent(event: ResolvedAnalysisEvent): string {
+    switch (event.type) {
+        case "commits_pushed": {
+            const base = event.payload.baseSha != null ? `, base \`${event.payload.baseSha}\`` : "";
+            return `- ${event.createdAt.toISOString()} [${event.source}] commits pushed: head \`${event.payload.headSha}\`${base}`;
+        }
+    }
+}
 
 /**
  * The branch's prior-analysis history, framed as work already done - NOT as verdicts to reproduce. Each subsection

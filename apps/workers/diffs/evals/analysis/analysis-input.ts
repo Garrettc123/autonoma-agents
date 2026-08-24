@@ -1,5 +1,6 @@
 import type { DiffsAgentInput, FlowInfo, ScenarioInfo } from "@autonoma/diffs";
 import { FlowIndex, ScenarioIndex, scenarioRecipeDataSchema } from "@autonoma/diffs";
+import { analysisEventBodySchema, analysisEventSourceSchema } from "@autonoma/types";
 import { z } from "zod";
 import { type CodebaseCoords, codebaseCoordsSchema } from "../framework";
 
@@ -56,6 +57,14 @@ const preClassifiedConflictInfoSchema = z.object({
     involvedPrNumbers: z.array(z.number()),
 });
 
+// `createdAt` freezes as an ISO string in the JSON, so it must coerce (not `z.date()`) on rehydration.
+const resolvedAnalysisEventSchema = z
+    .object({
+        source: analysisEventSourceSchema,
+        createdAt: z.coerce.date(),
+    })
+    .and(analysisEventBodySchema);
+
 const branchHistorySchema = z.object({
     removedTests: z.array(z.object({ slug: z.string(), name: z.string(), reason: z.string().optional() })),
     priorReports: z.array(z.object({ snapshotId: z.string(), report: z.string() })),
@@ -91,6 +100,7 @@ export const analysisCaseInputSchema = z.object({
     testScopeGuidelines: z.string().optional(),
     scenarioRecipes: z.array(scenarioRecipeDataSchema).optional(),
     branchHistory: branchHistorySchema.optional(),
+    events: z.array(resolvedAnalysisEventSchema).optional(),
 });
 
 export type AnalysisCaseInput = z.infer<typeof analysisCaseInputSchema>;
@@ -121,6 +131,7 @@ export function rehydrateAnalysisInput(parsed: AnalysisCaseInput): RehydratedAna
         scenarioRecipes: parsed.scenarioRecipes ?? [],
         testScopeGuidelines: parsed.testScopeGuidelines,
         branchHistory: parsed.branchHistory,
+        events: parsed.events ?? [],
     };
 
     return { coords: parsed.codebase, agentInput };
@@ -148,5 +159,6 @@ export function serializeAnalysisInput(
         testScopeGuidelines: agentInput.testScopeGuidelines,
         scenarioRecipes: agentInput.scenarioRecipes ?? [],
         branchHistory: agentInput.branchHistory,
+        events: agentInput.events ?? [],
     });
 }

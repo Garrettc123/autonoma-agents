@@ -1,4 +1,5 @@
 import { Agent, type AgentTool, type LanguageModel, type ModelMessage } from "@autonoma/ai";
+import type { ResolvedAnalysisEvent } from "@autonoma/analysis";
 import { type Logger, logger as rootLogger } from "@autonoma/logger";
 import type { Codebase } from "../../codebase";
 import { buildRepoManifestSection } from "../../codebase";
@@ -78,6 +79,12 @@ export interface DiffsAgentInput {
      * branch, where selection is identical to a stateless run.
      */
     branchHistory?: BranchHistory;
+    /**
+     * The analysis events the run claimed, oldest first - the record of repo movement (push bursts, rebases,
+     * force pushes) the base..head diff alone cannot describe. Absent/empty leaves the prompt byte-identical to
+     * an event-less run.
+     */
+    events?: ResolvedAnalysisEvent[];
 }
 
 export interface DiffsAgentResult {
@@ -130,6 +137,7 @@ export class DiffsAgent extends Agent<DiffsAgentInput, DiffsAgentResult, DiffsAg
         let prompt = buildDiffsUserPrompt({
             analysis,
             range: { baseSha: input.baseSha, headSha: input.headSha },
+            events: input.events ?? [],
             flowIndex: input.flowIndex,
             merges: input.merges ?? [],
             preClassifiedConflicts: input.preClassifiedConflicts ?? [],

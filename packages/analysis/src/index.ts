@@ -5,6 +5,7 @@ export {
     type EnqueueAnalysisEventInput,
     type PendingBranchHead,
 } from "./analysis-event-store";
+export { AnalysisEventResolver, type ResolvedAnalysisEvent } from "./analysis-event-resolver";
 export {
     Analysis,
     type RecordClassificationInput,

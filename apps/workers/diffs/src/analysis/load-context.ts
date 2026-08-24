@@ -1,4 +1,4 @@
-import { AnalysisStore, PRIOR_REPORTS_LIMIT } from "@autonoma/analysis";
+import { AnalysisEventResolver, AnalysisEventStore, AnalysisStore, PRIOR_REPORTS_LIMIT } from "@autonoma/analysis";
 import { db } from "@autonoma/db";
 import type { BranchHistory, DiffsAgentInput } from "@autonoma/diffs";
 import { FlowIndex, loadFlows, mapTestSuiteToContext } from "@autonoma/diffs";
@@ -84,7 +84,7 @@ export async function loadDiffsContext({
 }: LoadDiffsContextParams): Promise<{ metadata: DiffsAgentMetadata }> {
     const { existingTests } = mapTestSuiteToContext(suiteInfo);
 
-    const [flows, application, scenarios, branchHistory] = await Promise.all([
+    const [flows, application, scenarios, branchHistory, events] = await Promise.all([
         loadFlows(db, applicationId, suiteInfo),
         db.application.findUniqueOrThrow({
             where: { id: applicationId },
@@ -92,6 +92,7 @@ export async function loadDiffsContext({
         }),
         loadScenarioIndex(db, applicationId),
         loadBranchHistory(branchId, snapshotId),
+        new AnalysisEventResolver(new AnalysisEventStore(db)).resolveForSnapshot(snapshotId),
     ]);
     const flowIndex = new FlowIndex(flows);
 
@@ -104,6 +105,7 @@ export async function loadDiffsContext({
             removedTests: branchHistory.removedTests.length,
             priorReports: branchHistory.priorReports.length,
             openIssues: branchHistory.openIssues.length,
+            events: events.length,
         },
     });
 
@@ -116,6 +118,7 @@ export async function loadDiffsContext({
             scenarios,
             testScopeGuidelines: application.testScopeGuidelines ?? undefined,
             branchHistory,
+            events,
         },
     };
 }

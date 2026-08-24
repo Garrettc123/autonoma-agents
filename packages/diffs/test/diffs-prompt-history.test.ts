@@ -7,6 +7,7 @@ function baseInput(branchHistory?: BranchHistory): DiffsPromptInput {
     return {
         analysis: { affectedFiles: ["src/app.ts"], summary: "changed the app" },
         range: { baseSha: "aaaa111", headSha: "bbbb222" },
+        events: [],
         flowIndex: new FlowIndex([]),
         merges: [],
         preClassifiedConflicts: [],
