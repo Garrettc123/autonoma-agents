@@ -82,3 +82,23 @@ export function useUpdateVercelOverageCap() {
         successToast: { title: "Usage cap updated" },
     });
 }
+
+export function useTopupPackages() {
+    return useSuspenseQuery(trpc.billing.listTopupPackages.queryOptions());
+}
+
+export function useSpendCapStatus() {
+    return useSuspenseQuery(trpc.billing.getSpendCapStatus.queryOptions());
+}
+
+export function useUpdateSpendCap() {
+    const queryClient = useQueryClient();
+    return useAPIMutation({
+        ...trpc.billing.updateSpendCap.mutationOptions({
+            onSuccess: () => {
+                void queryClient.invalidateQueries({ queryKey: trpc.billing.getSpendCapStatus.queryKey() });
+            },
+        }),
+        successToast: { title: "Spend cap updated" },
+    });
+}

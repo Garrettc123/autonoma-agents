@@ -187,7 +187,6 @@ Billing is entirely optional. When `STRIPE_ENABLED` is `false` (the default), al
 | `STRIPE_SECRET_KEY` | No | - | Stripe secret API key. Required when `STRIPE_ENABLED` is `true`. |
 | `STRIPE_WEBHOOK_SECRET` | No | - | Stripe webhook signing secret for verifying incoming webhook events. Required when `STRIPE_ENABLED` is `true`. |
 | `STRIPE_SUBSCRIPTION_PRICE_ID` | No | - | Stripe Price ID for the subscription plan. Required when `STRIPE_ENABLED` is `true`. |
-| `STRIPE_TOPUP_PRICE_ID` | No | - | Stripe Price ID for credit top-up purchases. Required when `STRIPE_ENABLED` is `true`. |
 | `BILLING_GRACE_PERIOD_DAYS` | No | `3` | Number of days after a subscription lapses before access is revoked. |
 | `APP_URL` | No | `http://localhost:3000` | Frontend application URL. Used in Stripe checkout redirect URLs and billing emails. |
 

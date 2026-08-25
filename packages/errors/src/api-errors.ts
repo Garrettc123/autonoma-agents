@@ -88,6 +88,18 @@ export class InsufficientAnalysisCreditsError extends APIError {
 }
 
 /**
+ * Thrown when a manual top-up purchase is refused because it would push the organization's
+ * this-period top-up spend past its self-serve `BillingCustomer.spendCapAmountCents` ceiling.
+ * Distinct from `InsufficientCreditsError`/`InsufficientPreviewCreditsError` (which block work for
+ * lack of credits) - this blocks a *purchase* the org itself capped, not usage.
+ */
+export class SpendCapExceededError extends APIError {
+    constructor(message = "This purchase would exceed your spend cap for this period") {
+        super(message);
+    }
+}
+
+/**
  * Thrown when a call to a third-party API (e.g. Vercel, Stripe, GitHub) fails,
  * either due to a network error or a non-2xx response. Carries the provider
  * name so callers/observability can attribute the failure, and preserves the

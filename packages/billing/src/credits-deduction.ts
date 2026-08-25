@@ -2,6 +2,7 @@ import { Prisma, type PrismaClient } from "@autonoma/db";
 import type { CreditTransactionType } from "@autonoma/db";
 import type { Logger } from "@autonoma/logger";
 import { isUniqueConstraintError } from "./billing-utils";
+import { maybeTriggerAutoTopUp } from "./maybe-trigger-auto-top-up";
 
 type TxClient = Prisma.TransactionClient;
 type RawTxClient = TxClient & Pick<PrismaClient, "$queryRaw">;
@@ -54,7 +55,12 @@ export interface DeductCreditsFlooredResult {
  * `subscription_credit_balance` consumption (which still floors at 0 - only the combined
  * `credit_balance` gets the org's configurable floor). `fkColumn` is one of a small, code-controlled
  * set of column names, safe to splice as a raw identifier since it's never user input.
-
+ *
+ * A successful deduction also runs the org's auto top-up check. That lives here, on the shared
+ * primitive, rather than at each call site so that a new consumption path gets it by construction:
+ * the two newest paths (AI cost, previewkit build usage) call this function directly instead of
+ * going through `CreditsService`, and would otherwise let an org with auto top-up enabled drain
+ * past its threshold to its floor without ever recharging.
  */
 export async function deductCreditsFloored(
     db: PrismaClient,
@@ -63,7 +69,7 @@ export async function deductCreditsFloored(
 ): Promise<DeductCreditsFlooredResult> {
     const { organizationId, transactionId, transactionType, cost, fkColumn } = params;
 
-    return db
+    const result = await db
         .$transaction(async (tx) => {
             const rawTx = tx as RawTxClient;
             const fkColumnIdentifier = Prisma.raw(fkColumn.name);
@@ -164,4 +170,12 @@ export async function deductCreditsFloored(
             }
             throw error;
         });
+
+    // After the commit, never inside it: the recharge re-reads the balance this deduction just
+    // wrote and calls Stripe, and neither may happen while the `billing_customer` row lock is held.
+    if (result.deducted) {
+        await maybeTriggerAutoTopUp(db, organizationId, logger);
+    }
+
+    return result;
 }

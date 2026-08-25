@@ -4,7 +4,7 @@ import type {
     ComputePricingReference,
     CreditTransaction,
 } from "@autonoma/db";
-import type { BillingCheckoutType } from "@autonoma/types";
+import type { BillingCheckoutType, BillingTopupSource } from "@autonoma/types";
 import type { BillingPricingValues } from "./billing-pricing.types";
 import type { VercelOverageStatus } from "./vercel-overage.service";
 
@@ -52,6 +52,41 @@ export type ListPromoCodesResult = {
     totalPages: number;
 };
 
+export type BillingTopupPackageItem = {
+    id: string;
+    name: string;
+    stripePriceId: string;
+    priceCents: number;
+    creditsGranted: number;
+    sortOrder: number;
+    isActive: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+};
+
+export type CreateTopupPackageInput = {
+    name: string;
+    stripePriceId: string;
+    priceCents: number;
+    creditsGranted: number;
+    sortOrder?: number;
+};
+
+export type UpdateTopupPackageInput = {
+    name?: string;
+    priceCents?: number;
+    creditsGranted?: number;
+    sortOrder?: number;
+};
+
+/** This period's top-up spend against the org's self-serve cap - null cap means uncapped (today's behavior). */
+export type SpendCapStatus = {
+    capAmountCents: number | undefined;
+    amountChargedCentsThisPeriod: number;
+    periodKey: string;
+    periodEnd: Date;
+};
+
 export type DeductGenerationContext = {
     organizationId?: string;
     architecture?: ApplicationArchitecture;
@@ -73,6 +108,16 @@ export type PreviewDeployGateResult = { allowed: true } | { allowed: false; reas
 /** Why a new PR analysis run was declined - currently only one reason: the org's balance is at or below its credit floor. */
 export type AnalysisCreditsGateResult = { allowed: true } | { allowed: false; reason: "out_of_credits" };
 
+/**
+ * Everything a billing service can optionally be given. An object rather than a growing list of
+ * optional positional parameters, which is what unioning each consumer's needs would produce.
+ */
+export interface BillingServiceOptions {
+    /** Defaults to a logging no-op (see `LoggingBillingAlertNotifier`) when omitted. */
+    alertNotifier?: BillingAlertNotifier;
+}
+
+
 export type BillingSessionResult = {
     url: string | null;
 };
@@ -88,6 +133,7 @@ export type BillingStatusResult = {
     gracePeriodEndsAt: Date | undefined;
     autoTopUpEnabled: boolean;
     autoTopUpThreshold: number;
+    autoTopUpPackageId: string | undefined;
     /** All-time credits spent through the managed LLM proxy (planner CLI). */
     cliCreditsSpent: number;
     transactions: CreditTransaction[];
@@ -101,10 +147,11 @@ export interface BillingService {
         organizationId: string,
         type: BillingCheckoutType,
         returnPath?: string,
+        packageId?: string,
     ): Promise<BillingSessionResult>;
     createPortalSession(organizationId: string, returnPath?: string): Promise<BillingSessionResult>;
     getBillingStatus(organizationId: string): Promise<BillingStatusResult>;
-    updateAutoTopUp(organizationId: string, enabled: boolean, threshold: number): Promise<void>;
+    updateAutoTopUp(organizationId: string, enabled: boolean, threshold: number, packageId?: string): Promise<void>;
     checkCreditsGate(organizationId: string, runCount: number, architecture: ApplicationArchitecture): Promise<void>;
     deductCreditsForGeneration(generationId: string, context?: DeductGenerationContext): Promise<boolean>;
     checkLlmProxyGate(organizationId: string, freeCliCreditCap: number): Promise<LlmProxyGateResult>;
@@ -126,17 +173,45 @@ export interface BillingService {
     setPromoCodeActive(promoCodeId: string, isActive: boolean): Promise<BillingPromoCodeItem>;
     getVercelOverageStatus(organizationId: string): Promise<VercelOverageStatus>;
     updateVercelOverageCap(organizationId: string, maxOverageAmountUsd: number | undefined): Promise<void>;
+    getPricing(organizationId: string): Promise<BillingPricingValues>;
     updateComputePricing(
         organizationId: string,
         rates: { creditsPerVcpuHour: number; creditsPerGbMemoryHour: number },
     ): Promise<void>;
     getComputePricingReferences(): Promise<ComputePricingReference[]>;
-    getPricing(organizationId: string): Promise<BillingPricingValues>;
+    listActiveTopupPackages(): Promise<BillingTopupPackageItem[]>;
+    listAllTopupPackages(): Promise<BillingTopupPackageItem[]>;
+    createTopupPackage(input: CreateTopupPackageInput): Promise<BillingTopupPackageItem>;
+    updateTopupPackage(packageId: string, input: UpdateTopupPackageInput): Promise<BillingTopupPackageItem>;
+    setTopupPackageActive(packageId: string, isActive: boolean): Promise<BillingTopupPackageItem>;
+    getSpendCapStatus(organizationId: string): Promise<SpendCapStatus>;
+    updateSpendCap(organizationId: string, capAmountCents: number | undefined): Promise<void>;
+}
+
+/**
+ * The seam a spend-cap threshold alert is delivered through - kept out of `packages/billing`
+ * proper so this stays framework-agnostic (no email/Resend dependency here). Mirrors the injected-
+ * notifier pattern already used for `MergeGateSlackNotifier` (`apps/api/src/github/merge-gate-slack-notifier.ts`).
+ */
+export interface BillingAlertNotifier {
+    notifySpendCapThreshold(input: {
+        organizationId: string;
+        thresholdPercent: 50 | 80 | 100;
+        capAmountCents: number;
+        amountChargedCents: number;
+        periodEnd: Date;
+    }): Promise<void>;
 }
 
 export interface StripeBillingService {
     grantSubscriptionCredits(organizationId: string, stripeInvoiceId: string, customerEmail?: string): Promise<void>;
-    grantTopupCredits(organizationId: string, stripePaymentIntentId: string, customerEmail?: string): Promise<void>;
+    grantTopupCredits(
+        organizationId: string,
+        stripePaymentIntentId: string,
+        packageId: string | undefined,
+        source: BillingTopupSource,
+        customerEmail?: string,
+    ): Promise<void>;
     revokeTopupCredits(
         organizationId: string,
         stripeRefundId: string,

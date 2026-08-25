@@ -1,11 +1,21 @@
 import type { ApplicationArchitecture, PrismaClient } from "@autonoma/db";
-import type { BillingCheckoutType } from "@autonoma/types";
+import type { BillingCheckoutType, BillingTopupSource } from "@autonoma/types";
 import { AutoTopUpService } from "./auto-topup.service";
 import { BillingCustomerService } from "./billing-customer.service";
 import { BillingPricingService } from "./billing-pricing.service";
 import { BillingPromoService } from "./billing-promo.service";
+import { BillingTopupPackageService } from "./billing-topup-package.service";
 import { CreditsService } from "./credits.service";
-import type { BillingService, DeductGenerationContext, StripeBillingService } from "./types";
+import { LoggingBillingAlertNotifier } from "./logging-billing-alert-notifier";
+import { SpendCapService } from "./spend-cap.service";
+import type {
+    BillingService,
+    BillingServiceOptions,
+    CreateTopupPackageInput,
+    DeductGenerationContext,
+    StripeBillingService,
+    UpdateTopupPackageInput,
+} from "./types";
 import { VercelOverageService } from "./vercel-overage.service";
 
 export class EnabledBillingService implements BillingService, StripeBillingService {
@@ -14,11 +24,16 @@ export class EnabledBillingService implements BillingService, StripeBillingServi
     private readonly billingPricingService: BillingPricingService;
     private readonly billingPromoService: BillingPromoService;
     private readonly vercelOverageService: VercelOverageService;
+    private readonly topupPackageService: BillingTopupPackageService;
+    private readonly spendCapService: SpendCapService;
 
-    constructor(db: PrismaClient) {
+    constructor(db: PrismaClient, options: BillingServiceOptions = {}) {
+        const alertNotifier = options.alertNotifier ?? new LoggingBillingAlertNotifier();
         this.billingPricingService = new BillingPricingService(db);
-        const autoTopUpService = new AutoTopUpService(db);
-        this.billingCustomerService = new BillingCustomerService(db);
+        this.topupPackageService = new BillingTopupPackageService(db);
+        this.spendCapService = new SpendCapService(db, alertNotifier);
+        const autoTopUpService = new AutoTopUpService(db, this.topupPackageService, this.spendCapService);
+        this.billingCustomerService = new BillingCustomerService(db, this.topupPackageService, this.spendCapService);
         this.billingPromoService = new BillingPromoService(db);
         this.vercelOverageService = new VercelOverageService(db);
         this.creditsService = new CreditsService(
@@ -26,6 +41,8 @@ export class EnabledBillingService implements BillingService, StripeBillingServi
             autoTopUpService,
             this.billingPricingService,
             this.vercelOverageService,
+            this.topupPackageService,
+            this.spendCapService,
         );
     }
 
@@ -35,8 +52,8 @@ export class EnabledBillingService implements BillingService, StripeBillingServi
         return customer;
     }
 
-    createCheckoutSession(organizationId: string, type: BillingCheckoutType, returnPath?: string) {
-        return this.billingCustomerService.createCheckoutSession(organizationId, type, returnPath);
+    createCheckoutSession(organizationId: string, type: BillingCheckoutType, returnPath?: string, packageId?: string) {
+        return this.billingCustomerService.createCheckoutSession(organizationId, type, returnPath, packageId);
     }
 
     createPortalSession(organizationId: string, returnPath?: string) {
@@ -47,8 +64,8 @@ export class EnabledBillingService implements BillingService, StripeBillingServi
         return this.billingCustomerService.getBillingStatus(organizationId);
     }
 
-    updateAutoTopUp(organizationId: string, enabled: boolean, threshold: number) {
-        return this.billingCustomerService.updateAutoTopUp(organizationId, enabled, threshold);
+    updateAutoTopUp(organizationId: string, enabled: boolean, threshold: number, packageId?: string) {
+        return this.billingCustomerService.updateAutoTopUp(organizationId, enabled, threshold, packageId);
     }
 
     checkCreditsGate(organizationId: string, runCount: number, architecture: ApplicationArchitecture) {
@@ -104,8 +121,20 @@ export class EnabledBillingService implements BillingService, StripeBillingServi
         return this.billingCustomerService.startGracePeriodByOrganizationId(organizationId, gracePeriodDays);
     }
 
-    grantTopupCredits(organizationId: string, stripePaymentIntentId: string, customerEmail?: string) {
-        return this.creditsService.grantTopupCredits(organizationId, stripePaymentIntentId, customerEmail);
+    grantTopupCredits(
+        organizationId: string,
+        stripePaymentIntentId: string,
+        packageId: string | undefined,
+        source: BillingTopupSource,
+        customerEmail?: string,
+    ) {
+        return this.creditsService.grantTopupCredits(
+            organizationId,
+            stripePaymentIntentId,
+            packageId,
+            source,
+            customerEmail,
+        );
     }
 
     revokeTopupCredits(
@@ -164,6 +193,10 @@ export class EnabledBillingService implements BillingService, StripeBillingServi
         return this.vercelOverageService.updateOverageCap(organizationId, maxOverageAmountUsd);
     }
 
+    getPricing(organizationId: string) {
+        return this.billingPricingService.getOrCreatePricing(organizationId);
+    }
+
     updateComputePricing(
         organizationId: string,
         rates: { creditsPerVcpuHour: number; creditsPerGbMemoryHour: number },
@@ -175,7 +208,31 @@ export class EnabledBillingService implements BillingService, StripeBillingServi
         return this.billingPricingService.getComputePricingReferences();
     }
 
-    getPricing(organizationId: string) {
-        return this.billingPricingService.getOrCreatePricing(organizationId);
+    listActiveTopupPackages() {
+        return this.topupPackageService.listActive();
+    }
+
+    listAllTopupPackages() {
+        return this.topupPackageService.listAll();
+    }
+
+    createTopupPackage(input: CreateTopupPackageInput) {
+        return this.topupPackageService.create(input);
+    }
+
+    updateTopupPackage(packageId: string, input: UpdateTopupPackageInput) {
+        return this.topupPackageService.update(packageId, input);
+    }
+
+    setTopupPackageActive(packageId: string, isActive: boolean) {
+        return this.topupPackageService.setActive(packageId, isActive);
+    }
+
+    getSpendCapStatus(organizationId: string) {
+        return this.spendCapService.getStatus(organizationId);
+    }
+
+    updateSpendCap(organizationId: string, capAmountCents: number | undefined) {
+        return this.spendCapService.updateCap(organizationId, capAmountCents);
     }
 }

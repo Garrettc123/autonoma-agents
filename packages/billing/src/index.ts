@@ -3,11 +3,18 @@ export type { BillingServices } from "./billing.service";
 export type { BillingService, StripeBillingService } from "./types";
 export type {
     AnalysisCreditsGateResult,
+    BillingAlertNotifier,
+    BillingServiceOptions,
+    BillingTopupPackageItem,
+    CreateTopupPackageInput,
     DeductGenerationContext,
     LlmProxyGateReason,
     LlmProxyGateResult,
     PreviewDeployGateResult,
+    SpendCapStatus,
+    UpdateTopupPackageInput,
 } from "./types";
+export { LoggingBillingAlertNotifier } from "./logging-billing-alert-notifier";
 export { getStripe } from "./stripe-client";
 export { syncStripeDataToDb } from "./stripe-sync";
 export { processWebhookEvent } from "./webhook-handlers";
@@ -32,8 +39,6 @@ export { PrometheusClient } from "./preview-usage-meter/prometheus-client";
 export { PreviewUsageMeterSweepService } from "./preview-usage-meter/preview-usage-meter-sweep.service";
 export type { PreviewUsageMeterSweepResult } from "./preview-usage-meter/preview-usage-meter-sweep.service";
 export type { VercelOverageStatus } from "./vercel-overage.service";
-export { computePreviewUsageCost } from "./billing-utils";
-export type { BillingPricingValues } from "./billing-pricing.types";
 export {
     AWS_EC2_REGION_US_EAST_1,
     AWS_PRICING_LOCATION_US_EAST_1,
@@ -62,6 +67,8 @@ export { referenceToUsdRates, syncComputePricingReference } from "./aws-pricing/
 export type { ComputePricingSyncResult } from "./aws-pricing/compute-pricing-reference.service";
 export { persistAiCosts } from "./ai-cost-persister.service";
 export type { AiCostAnchor } from "./ai-cost-persister.service";
+export { computePreviewUsageCost } from "./billing-utils";
+export type { BillingPricingValues } from "./billing-pricing.types";
 export { deductCreditsForBuildUsage } from "./deduct-credits-for-build-usage";
 export { clearBranchTriggerBlock, recordBranchTriggerBlocked } from "./trigger-block";
 export { CreditsExhaustedError } from "./credits-exhausted-error";

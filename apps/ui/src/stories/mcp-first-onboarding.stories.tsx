@@ -151,6 +151,7 @@ export const WaitingWithoutCredits: Story = {
             gracePeriodEndsAt: undefined,
             autoTopUpEnabled: false,
             autoTopUpThreshold: 0,
+            autoTopUpPackageId: undefined,
             cliCreditsSpent: 0,
             transactions: [],
           },

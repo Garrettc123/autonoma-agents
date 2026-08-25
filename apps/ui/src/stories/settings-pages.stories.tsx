@@ -150,6 +150,49 @@ export const OrgBilling: Story = {
 };
 
 /**
+ * The top-up rows at their widest. Each row is a `whitespace-nowrap` Button holding a name on the left and
+ * price + credits on the right, inside a panel that is half of a two-column grid - so the longest name the
+ * catalog can produce is what decides whether the row stays inside its panel or runs out through the side of
+ * it. Pinned as a story because the failure is invisible at the fixture sizes every other billing shot uses.
+ */
+export const OrgBillingLongPackageNames: Story = {
+  parameters: {
+    msw: {
+      handlers: appShellHandlers({
+        ...generalFixtures,
+        billing: {
+          listTopupPackages: [
+            {
+              id: "topup_pkg_fixture_starter",
+              name: "Starter",
+              stripePriceId: "price_fixture_starter",
+              priceCents: 1000,
+              creditsGranted: 15_000,
+              sortOrder: 0,
+              isActive: true,
+              createdAt: FIXTURE_EPOCH,
+              updatedAt: FIXTURE_EPOCH,
+            },
+            {
+              id: "topup_pkg_fixture_scale",
+              name: "Scale annual commitment",
+              stripePriceId: "price_fixture_scale",
+              priceCents: 250_000,
+              creditsGranted: 3_750_000,
+              sortOrder: 1,
+              isActive: true,
+              createdAt: FIXTURE_EPOCH,
+              updatedAt: FIXTURE_EPOCH,
+            },
+          ],
+        },
+      }),
+    },
+  },
+  args: { path: `/app/${baseApplication.slug}/settings/billing` },
+};
+
+/**
  * The address billing used to live at, which still has to answer.
  *
  * Stripe builds every app-scoped checkout `success_url` as `/app/<slug>/billing`, so this is the screen a

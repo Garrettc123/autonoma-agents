@@ -20,6 +20,7 @@ import type { Auth } from "../auth";
 import { DemoEntrySourceStore } from "../demo/demo-entry-source.store";
 import { ParkedSessionStore } from "../demo/parked-session.store";
 import { DiffsTriggerService } from "../diffs/diffs-trigger.service";
+import { buildBillingAlertNotifier } from "../email/billing-alert-notifier";
 import { type EmailSender, buildEmailSender } from "../email/email-sender";
 import { env } from "../env";
 import { ActivationTriggerConfigService } from "../github/activation-trigger-config.service";
@@ -151,7 +152,10 @@ export function buildServices({
     triggerPreviewRedeployApp,
     emailSender,
 }: ServicesParams): Services {
-    const billingService = createBillingService(conn);
+    const resolvedEmailSender = emailSender ?? buildEmailSender(env.RESEND_API_KEY, env.RESEND_FROM_EMAIL);
+    const billingService = createBillingService(conn, {
+        alertNotifier: buildBillingAlertNotifier(conn, resolvedEmailSender),
+    });
     const secretValues = buildSecretValues(conn);
     const previewkitOperationsService = new PreviewkitOperationsService(conn, buildSecretKeys(conn));
     const previewkitSecretsService = new PreviewkitSecretsService(conn, secretValues);
@@ -280,7 +284,7 @@ export function buildServices({
         organization: new OrganizationService(
             conn,
             auth,
-            emailSender ?? buildEmailSender(env.RESEND_API_KEY, env.RESEND_FROM_EMAIL),
+            resolvedEmailSender,
             analytics,
             env.APP_URL,
             env.INTERNAL_DOMAIN,

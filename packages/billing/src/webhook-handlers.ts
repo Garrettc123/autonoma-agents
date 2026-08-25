@@ -1,11 +1,17 @@
 import { db } from "@autonoma/db";
 import { logger } from "@autonoma/logger";
-import { BILLING_PAYMENT_INTENT_TYPES, BILLING_STRIPE_SUBSCRIPTION_SYNC_EVENT_TYPES } from "@autonoma/types";
+import {
+    BILLING_PAYMENT_INTENT_TYPES,
+    BILLING_STRIPE_SUBSCRIPTION_SYNC_EVENT_TYPES,
+    BILLING_TOPUP_SOURCES,
+    type BillingTopupSource,
+} from "@autonoma/types";
 import type Stripe from "stripe";
 import { type StripeBillingService, createBillingServices } from "./billing.service";
 import { env } from "./env";
 import { getStripe } from "./stripe-client";
 import { syncStripeDataToDb } from "./stripe-sync";
+import type { BillingServiceOptions } from "./types";
 
 type StripeWebhookHandler = (event: Stripe.Event, billingService: StripeBillingService) => Promise<void>;
 const STRIPE_INVOICE_PARENT_TYPE_SUBSCRIPTION_DETAILS = "subscription_details" as const;
@@ -23,8 +29,8 @@ for (const eventType of BILLING_STRIPE_SUBSCRIPTION_SYNC_EVENT_TYPES) {
     webhookHandlers[eventType] = handleSubscriptionSync;
 }
 
-export async function processWebhookEvent(event: Stripe.Event): Promise<void> {
-    const { stripeBillingService: billingService } = createBillingServices(db);
+export async function processWebhookEvent(event: Stripe.Event, options?: BillingServiceOptions): Promise<void> {
+    const { stripeBillingService: billingService } = createBillingServices(db, options);
     if (billingService == null) {
         logger.info("Ignoring Stripe webhook event because STRIPE_ENABLED=false", {
             type: event.type,
@@ -91,7 +97,26 @@ async function handlePaymentIntentSucceeded(event: Stripe.Event, billingService:
     const paymentIntentType = paymentIntent.metadata.type;
     const organizationId = paymentIntent.metadata.organizationId;
     if (paymentIntentType !== BILLING_PAYMENT_INTENT_TYPES.TOPUP || organizationId == null) return;
-    await billingService.grantTopupCredits(organizationId, paymentIntent.id, paymentIntent.receipt_email ?? undefined);
+
+    // Anything created before packages/sources shipped has neither field, so both fall back to what
+    // the only path that existed at the time would have done: a manual purchase, priced off the
+    // org's pricing row (see CreditsService.resolveTopupGrant) rather than a package.
+    const packageId = paymentIntent.metadata.packageId;
+    const source = isBillingTopupSource(paymentIntent.metadata.source)
+        ? paymentIntent.metadata.source
+        : BILLING_TOPUP_SOURCES.MANUAL;
+
+    await billingService.grantTopupCredits(
+        organizationId,
+        paymentIntent.id,
+        packageId,
+        source,
+        paymentIntent.receipt_email ?? undefined,
+    );
+}
+
+function isBillingTopupSource(value: string | undefined): value is BillingTopupSource {
+    return value === BILLING_TOPUP_SOURCES.MANUAL || value === BILLING_TOPUP_SOURCES.AUTO;
 }
 
 async function handleCheckoutSessionCompleted(event: Stripe.Event): Promise<void> {

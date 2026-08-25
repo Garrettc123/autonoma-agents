@@ -10,6 +10,12 @@ import {
   PanelBody,
   PanelHeader,
   PanelTitle,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Separator,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -33,15 +39,18 @@ import {
   useCreateCheckoutSession,
   useCreatePortalSession,
   useRedeemPromoCode,
+  useTopupPackages,
   useUpdateAutoTopUp,
 } from "lib/query/billing.queries";
 import { toastManager } from "lib/toast-manager";
 import { useEffect, useState } from "react";
 import { ComputePricingPanel } from "./-compute-pricing-panel";
+import { SpendCapFields } from "./-spend-cap-fields";
 import { VercelOveragePanel } from "./-vercel-overage-panel";
 
 export function BillingPanel() {
   const { data } = useBillingStatus();
+  const { data: topupPackages } = useTopupPackages();
   const createCheckout = useCreateCheckoutSession();
   const createPortal = useCreatePortalSession();
   const updateAutoTopUp = useUpdateAutoTopUp();
@@ -50,11 +59,13 @@ export function BillingPanel() {
   const [promoCode, setPromoCode] = useState("");
   const [autoTopUpEnabled, setAutoTopUpEnabled] = useState(data.autoTopUpEnabled);
   const [autoTopUpThreshold, setAutoTopUpThreshold] = useState(String(data.autoTopUpThreshold));
+  const [autoTopUpPackageId, setAutoTopUpPackageId] = useState(data.autoTopUpPackageId ?? "");
 
   useEffect(() => {
     setAutoTopUpEnabled(data.autoTopUpEnabled);
     setAutoTopUpThreshold(String(data.autoTopUpThreshold));
-  }, [data.autoTopUpEnabled, data.autoTopUpThreshold]);
+    setAutoTopUpPackageId(data.autoTopUpPackageId ?? "");
+  }, [data.autoTopUpEnabled, data.autoTopUpThreshold, data.autoTopUpPackageId]);
 
   const subscribed = isSubscribed(data.subscriptionStatus);
   // Vercel-provisioned orgs pay through Vercel's own billing, never Stripe - Upgrade,
@@ -69,12 +80,15 @@ export function BillingPanel() {
   const canSaveAutoTopUp =
     Number.isFinite(thresholdValue) &&
     thresholdValue >= 0 &&
-    (autoTopUpEnabled !== data.autoTopUpEnabled || thresholdValue !== data.autoTopUpThreshold);
+    (!autoTopUpEnabled || autoTopUpPackageId.length > 0) &&
+    (autoTopUpEnabled !== data.autoTopUpEnabled ||
+      thresholdValue !== data.autoTopUpThreshold ||
+      autoTopUpPackageId !== (data.autoTopUpPackageId ?? ""));
 
-  function handleCreateCheckout(type: CheckoutType) {
+  function handleCreateCheckout(type: CheckoutType, packageId?: string) {
     const returnPath = `${window.location.pathname}${window.location.search}`;
     createCheckout.mutate(
-      { type, returnPath },
+      { type, returnPath, packageId },
       {
         onSuccess: (result) => {
           if (result.url == null) return;
@@ -99,9 +113,11 @@ export function BillingPanel() {
 
   function handleSaveAutoTopUp() {
     if (!Number.isFinite(thresholdValue) || thresholdValue < 0) return;
+    if (autoTopUpEnabled && autoTopUpPackageId.length === 0) return;
     updateAutoTopUp.mutate({
       enabled: autoTopUpEnabled,
       threshold: thresholdValue,
+      packageId: autoTopUpPackageId.length > 0 ? autoTopUpPackageId : undefined,
     });
   }
 
@@ -153,15 +169,36 @@ export function BillingPanel() {
           <PanelBody className="space-y-3">
             <p className="text-3xl font-semibold text-text-primary">{topupBalance.toLocaleString()}</p>
             {!isVercel && (
-              <Button
-                variant="outline"
-                onClick={() => handleCreateCheckout(CHECKOUT_TYPE_TOPUP)}
-                disabled={createCheckout.isPending}
-                aria-label="billing-buy-topup"
-              >
-                <LightningIcon size={14} />
-                Buy top-up
-              </Button>
+              <div className="space-y-1.5">
+                {topupPackages.length === 0 ? (
+                  <p className="text-2xs text-text-secondary">No top-up packages are available yet.</p>
+                ) : (
+                  topupPackages.map((pkg) => (
+                    <Button
+                      key={pkg.id}
+                      variant="outline"
+                      className="h-auto w-full flex-col items-start gap-1 py-2"
+                      onClick={() => handleCreateCheckout(CHECKOUT_TYPE_TOPUP, pkg.id)}
+                      disabled={createCheckout.isPending}
+                      aria-label={`billing-buy-topup-${pkg.id}`}
+                    >
+                      {/* Stacked, not name-left/price-right: this panel is one of four columns, so a
+                          single row cannot hold a name beside "$100.00 · 150,000 credits" without the
+                          Button's whitespace-nowrap pushing it out through the side of the panel. Each
+                          line gets the full width, and min-w-0 lets an overlong name ellipse instead. */}
+                      <span className="flex w-full min-w-0 items-center gap-2">
+                        <LightningIcon size={14} />
+                        <span className="truncate" title={pkg.name}>
+                          {pkg.name}
+                        </span>
+                      </span>
+                      <span className="w-full truncate text-left font-mono text-2xs text-text-secondary">
+                        ${(pkg.priceCents / 100).toFixed(2)} · {pkg.creditsGranted.toLocaleString()} credits
+                      </span>
+                    </Button>
+                  ))
+                )}
+              </div>
             )}
           </PanelBody>
         </Panel>
@@ -234,9 +271,11 @@ export function BillingPanel() {
         ) : (
           <Panel>
             <PanelHeader>
-              <PanelTitle>Auto top-up</PanelTitle>
+              <PanelTitle>Top-up controls</PanelTitle>
             </PanelHeader>
             <PanelBody className="space-y-4">
+              <p className="font-mono text-2xs uppercase tracking-widest text-text-secondary">Auto top-up</p>
+
               <label htmlFor="billing-auto-topup-enabled" className="flex items-center gap-3">
                 <Checkbox
                   id="billing-auto-topup-enabled"
@@ -261,6 +300,25 @@ export function BillingPanel() {
                 </p>
               </div>
 
+              <div className="space-y-2">
+                <Label htmlFor="billing-auto-topup-package">Package to recharge</Label>
+                <Select value={autoTopUpPackageId} onValueChange={(value) => setAutoTopUpPackageId(value ?? "")}>
+                  <SelectTrigger id="billing-auto-topup-package" className="w-full">
+                    <SelectValue placeholder="Select a package">
+                      {topupPackages.find((pkg) => pkg.id === autoTopUpPackageId)?.name}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {topupPackages.map((pkg) => (
+                      <SelectItem key={pkg.id} value={pkg.id}>
+                        {pkg.name} - ${(pkg.priceCents / 100).toFixed(2)} for {pkg.creditsGranted.toLocaleString()}{" "}
+                        credits
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
               <Button
                 variant="outline"
                 onClick={handleSaveAutoTopUp}
@@ -269,6 +327,10 @@ export function BillingPanel() {
               >
                 Save auto top-up
               </Button>
+
+              <Separator />
+
+              <SpendCapFields />
             </PanelBody>
           </Panel>
         )}

@@ -2,9 +2,11 @@ import { analytics } from "@autonoma/analytics";
 import type { Prisma, PrismaClient } from "@autonoma/db";
 import { type ApplicationArchitecture, CreditTransactionType } from "@autonoma/db";
 import { InsufficientCreditsError, SubscriptionGracePeriodExpiredError } from "@autonoma/errors";
+import { BILLING_TOPUP_SOURCES, type BillingTopupSource } from "@autonoma/types";
 import * as Sentry from "@sentry/node";
 import type { AutoTopUpService } from "./auto-topup.service";
 import type { BillingPricingService } from "./billing-pricing.service";
+import type { BillingTopupPackageService } from "./billing-topup-package.service";
 import {
     computePreviewUsageCost,
     getGenerationCreditCost,
@@ -19,6 +21,7 @@ import type {
 } from "./billing.types";
 import { deductCreditsFloored } from "./credits-deduction";
 import { Service } from "./service";
+import { getCurrentSpendPeriodKey, type SpendCapService } from "./spend-cap.service";
 import type {
     AnalysisCreditsGateResult,
     DeductGenerationContext,
@@ -30,12 +33,22 @@ import type { VercelOverageService } from "./vercel-overage.service";
 type TxClient = Prisma.TransactionClient;
 type RawTxClient = TxClient & Pick<PrismaClient, "$queryRaw" | "$executeRaw">;
 
+/** Package fields are absent for a legacy PaymentIntent priced off the org's pricing row instead. */
+interface ResolvedTopupGrant {
+    creditsGranted: number;
+    priceCents: number;
+    packageId?: string;
+    packageName?: string;
+}
+
 export class CreditsService extends Service {
     constructor(
         private readonly db: PrismaClient,
         private readonly autoTopUpService: AutoTopUpService,
         private readonly pricingService: BillingPricingService,
         private readonly vercelOverageService: VercelOverageService,
+        private readonly packageService: BillingTopupPackageService,
+        private readonly spendCapService: SpendCapService,
     ) {
         super();
     }
@@ -259,7 +272,7 @@ export class CreditsService extends Service {
             });
 
         if (didDeduct) {
-            await this.autoTopUpService.triggerAutoTopUp(organizationId, pricing);
+            await this.autoTopUpService.triggerAutoTopUp(organizationId);
         }
         return didDeduct;
     }
@@ -524,7 +537,7 @@ export class CreditsService extends Service {
             });
 
         if (didDeduct) {
-            await this.autoTopUpService.triggerAutoTopUp(organizationId, pricing);
+            await this.autoTopUpService.triggerAutoTopUp(organizationId);
         }
         return didDeduct;
     }
@@ -583,9 +596,6 @@ export class CreditsService extends Service {
             this.logger,
         );
 
-        if (deducted) {
-            await this.autoTopUpService.triggerAutoTopUp(organizationId, pricing);
-        }
         return deducted;
     }
 
@@ -820,9 +830,25 @@ export class CreditsService extends Service {
             });
     }
 
-    async grantTopupCredits(organizationId: string, stripePaymentIntentId: string, customerEmail?: string) {
-        const pricing = await this.pricingService.getOrCreatePricing(organizationId);
-        const amount = pricing.creditsPerTopup;
+    async grantTopupCredits(
+        organizationId: string,
+        stripePaymentIntentId: string,
+        packageId: string | undefined,
+        source: BillingTopupSource,
+        customerEmail?: string,
+    ) {
+        const grant = await this.resolveTopupGrant(organizationId, stripePaymentIntentId, packageId);
+        if (grant == null) return;
+
+        const amount = grant.creditsGranted;
+        // Auto-top-up already reserved (and recorded) this spend against the cap before the Stripe
+        // call, via AutoTopUpService -> SpendCapService.reserveForAutoTopUp - recording it again here
+        // would double-count. A manual Checkout purchase was never reserved (see SpendCapService's
+        // class doc), so this is the only place its spend gets recorded.
+        const billingPeriodKey =
+            source === BILLING_TOPUP_SOURCES.MANUAL
+                ? await this.spendCapService.recordManualCharge(organizationId, grant.priceCents)
+                : getCurrentSpendPeriodKey();
 
         await this.db
             .$transaction(async (tx) => {
@@ -849,6 +875,8 @@ export class CreditsService extends Service {
                         amount,
                         balanceAfter: newBalance,
                         stripePaymentIntentId,
+                        billingPeriodKey,
+                        topupPackageId: grant.packageId,
                     },
                 });
 
@@ -857,6 +885,8 @@ export class CreditsService extends Service {
                     stripePaymentIntentId,
                     amount,
                     newBalance,
+                    packageId: grant.packageId,
+                    source,
                 });
 
                 this.logger.info("Capturing PostHog billing.topup_purchased event", {
@@ -865,6 +895,10 @@ export class CreditsService extends Service {
                     creditsGranted: amount,
                     newBalance,
                     customerEmail,
+                    packageId: grant.packageId,
+                    packageName: grant.packageName,
+                    priceCents: grant.priceCents,
+                    source,
                 });
                 analytics.capture(organizationId, "billing.topup_purchased", {
                     organizationId,
@@ -872,6 +906,10 @@ export class CreditsService extends Service {
                     creditsGranted: amount,
                     newBalance,
                     customerEmail,
+                    packageId: grant.packageId,
+                    packageName: grant.packageName,
+                    priceCents: grant.priceCents,
+                    source,
                 });
                 return true;
             })
@@ -884,6 +922,54 @@ export class CreditsService extends Service {
             });
     }
 
+    /**
+     * What a top-up PaymentIntent grants. A PI whose metadata names a package is priced by that
+     * package. A PI without one was created before top-up packages shipped - most plausibly one
+     * started against the old single-price Checkout that only settled after the deploy - and falls
+     * back to the org's `creditsPerTopup` / `stripeTopupAmountCents`, exactly what it would have
+     * granted at the moment it was created. Without the fallback the card is charged and no credits
+     * appear, which is the one outcome worth writing extra code to avoid.
+     *
+     * Returns undefined only when metadata names a package that no longer exists: there is no
+     * defensible credit amount to pick, so the grant is left for a human rather than guessed.
+     */
+    private async resolveTopupGrant(
+        organizationId: string,
+        stripePaymentIntentId: string,
+        packageId: string | undefined,
+    ): Promise<ResolvedTopupGrant | undefined> {
+        if (packageId == null) {
+            const pricing = await this.pricingService.getOrCreatePricing(organizationId);
+            this.logger.info("Top-up PaymentIntent names no package, granting at the org's legacy pricing", {
+                organizationId,
+                stripePaymentIntentId,
+                creditsGranted: pricing.creditsPerTopup,
+                priceCents: pricing.stripeTopupAmountCents,
+            });
+            return {
+                creditsGranted: pricing.creditsPerTopup,
+                priceCents: pricing.stripeTopupAmountCents,
+            };
+        }
+
+        const topupPackage = await this.packageService.findById(packageId);
+        if (topupPackage == null) {
+            this.logger.warn("Skipping top-up grant: package not found", {
+                organizationId,
+                stripePaymentIntentId,
+                packageId,
+            });
+            return undefined;
+        }
+
+        return {
+            creditsGranted: topupPackage.creditsGranted,
+            priceCents: topupPackage.priceCents,
+            packageId: topupPackage.id,
+            packageName: topupPackage.name,
+        };
+    }
+
     async revokeTopupCredits(
         organizationId: string,
         stripeRefundId: string,
@@ -891,8 +977,8 @@ export class CreditsService extends Service {
         refundedAmountCents: number,
         originalChargedAmountCents: number,
     ) {
-        await this.db
-            .$transaction(async (tx) => {
+        const revokedPeriodKey = await this.db
+            .$transaction(async (tx): Promise<string | null | undefined> => {
                 const rawTx = this.asRawTx(tx);
                 const customer = await tx.billingCustomer.findUnique({
                     where: { organizationId },
@@ -908,7 +994,7 @@ export class CreditsService extends Service {
 
                 const purchase = await tx.creditTransaction.findUnique({
                     where: { stripePaymentIntentId },
-                    select: { amount: true },
+                    select: { amount: true, billingPeriodKey: true },
                 });
                 if (purchase == null) {
                     this.logger.warn("No top-up purchase found for refund revoke", {
@@ -1029,14 +1115,19 @@ export class CreditsService extends Service {
                     requestedAmount: amount,
                     newBalance,
                 });
+                return purchase.billingPeriodKey;
             })
             .catch((error: unknown) => {
                 if (isUniqueConstraintError(error)) {
                     this.logger.info("Top-up refund already processed, skipping", { stripeRefundId });
-                    return;
+                    return undefined;
                 }
                 throw error;
             });
+
+        if (revokedPeriodKey != null) {
+            await this.spendCapService.recordRefund(organizationId, revokedPeriodKey, refundedAmountCents);
+        }
     }
 
     private asRawTx(tx: TxClient): RawTxClient {

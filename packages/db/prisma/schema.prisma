@@ -125,45 +125,46 @@ model Organization {
   /// internal org, are stamped at creation and never prompt.
   nameConfirmedAt DateTime? @map("name_confirmed_at")
 
-  members                 Member[]
-  lastChosenByUsers       User[]                   @relation("lastOrganization")
-  invitations             Invitation[]
-  apiKeys                 ApiKey[]
-  applications            Application[]
-  branchDeployments       BranchDeployment[]
-  webDeployments          WebDeployment[]
-  mobileDeployments       MobileDeployment[]
-  folders                 Folder[]
-  branches                Branch[]
-  testCases               TestCase[]
-  testPlans               TestPlan[]
-  testGenerations         TestGeneration[]
-  stepInputLists          StepInputList[]
-  stepInputs              StepInput[]
-  stepOutputLists         StepOutputList[]
-  stepOutputs             StepOutput[]
-  stepAttempts            StepAttempt[]
-  tags                    Tag[]
-  scenarios               Scenario[]
-  scenarioRecipeVersions  ScenarioRecipeVersion[]
-  scenarioRecipeEdits     ScenarioRecipeEdit[]
-  scenarioInstances       ScenarioInstance[]
-  githubInstallation      GitHubInstallation?
-  billingPricing          BillingPricing?
-  settings                OrganizationSettings?
-  promoRedemptions        BillingPromoRedemption[]
-  billingCustomer         BillingCustomer?
-  applicationSetups       ApplicationSetup[]
-  signupHookStates        SignupHookState[]
-  previewkitEnvironments  PreviewkitEnvironment[]
-  analysisJobs            AnalysisJob[]
-  analysisReports         AnalysisReport[]
-  analysisFindings        AnalysisFinding[]
-  analysisClassifications AnalysisClassification[]
-  analysisIssues          AnalysisIssue[]
-  analysisIssueVersions   AnalysisIssueVersion[]
-  analysisEvents          AnalysisEvent[]
-  vercelInstallations     VercelInstallation[]
+  members                  Member[]
+  lastChosenByUsers        User[]                    @relation("lastOrganization")
+  invitations              Invitation[]
+  apiKeys                  ApiKey[]
+  applications             Application[]
+  branchDeployments        BranchDeployment[]
+  webDeployments           WebDeployment[]
+  mobileDeployments        MobileDeployment[]
+  folders                  Folder[]
+  branches                 Branch[]
+  testCases                TestCase[]
+  testPlans                TestPlan[]
+  testGenerations          TestGeneration[]
+  stepInputLists           StepInputList[]
+  stepInputs               StepInput[]
+  stepOutputLists          StepOutputList[]
+  stepOutputs              StepOutput[]
+  stepAttempts             StepAttempt[]
+  tags                     Tag[]
+  scenarios                Scenario[]
+  scenarioRecipeVersions   ScenarioRecipeVersion[]
+  scenarioRecipeEdits      ScenarioRecipeEdit[]
+  scenarioInstances        ScenarioInstance[]
+  githubInstallation       GitHubInstallation?
+  billingPricing           BillingPricing?
+  settings                 OrganizationSettings?
+  promoRedemptions         BillingPromoRedemption[]
+  billingCustomer          BillingCustomer?
+  billingTopupSpendPeriods BillingTopupSpendPeriod[]
+  applicationSetups        ApplicationSetup[]
+  signupHookStates         SignupHookState[]
+  previewkitEnvironments   PreviewkitEnvironment[]
+  analysisJobs             AnalysisJob[]
+  analysisReports          AnalysisReport[]
+  analysisFindings         AnalysisFinding[]
+  analysisClassifications  AnalysisClassification[]
+  analysisIssues           AnalysisIssue[]
+  analysisIssueVersions    AnalysisIssueVersion[]
+  analysisEvents           AnalysisEvent[]
+  vercelInstallations      VercelInstallation[]
 
   @@map("organization")
 }
@@ -1561,6 +1562,16 @@ model BillingCustomer {
   subscriptionCreditBalance Int     @default(0) @map("subscription_credit_balance")
   autoTopUpEnabled          Boolean @default(false) @map("auto_top_up_enabled")
   autoTopUpThreshold        Int     @default(0) @map("auto_top_up_threshold")
+  // Which package auto-recharges when the balance drops below autoTopUpThreshold - required
+  // whenever autoTopUpEnabled is true. Nullable because a package can be deactivated out from
+  // under an org (onDelete: SetNull is defensive only; packages are soft-deleted via isActive,
+  // never hard-deleted).
+  autoTopUpPackageId        String? @map("auto_top_up_package_id")
+  // Self-serve, per-calendar-month USD ceiling on top-up spend (manual purchases + auto-top-up
+  // combined) - see BillingTopupSpendPeriod. Null means uncapped, today's behavior for every org.
+  // Distinct from autoTopUpThreshold (a floor that triggers a recharge): this is a ceiling on how
+  // much may be charged, a concept that doesn't exist anywhere else on this model.
+  spendCapAmountCents       Int?    @map("spend_cap_amount_cents")
   // How far below zero this org's balance may go before new previewkit deploys/PR analysis runs
   // are blocked - an in-flight PR's jobs (AI calls, builds, running compute) always deduct and
   // never get half-billed, floor-clamped here instead of at a hard zero. Defaults to 0 (today's
@@ -1578,8 +1589,9 @@ model BillingCustomer {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  transactions CreditTransaction[]
+  organization     Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  transactions     CreditTransaction[]
+  autoTopUpPackage BillingTopupPackage? @relation(fields: [autoTopUpPackageId], references: [id], onDelete: SetNull)
 
   @@map("billing_customer")
 }
@@ -1718,15 +1730,21 @@ model CreditTransaction {
   amount         Int
   balanceAfter   Int                   @map("balance_after")
 
-  generationId          String? @map("generation_id")
-  runId                 String? @unique @map("run_id")
-  stripePaymentIntentId String? @unique @map("stripe_payment_intent_id")
-  stripeInvoiceId       String? @unique @map("stripe_invoice_id")
-  stripeRefundId        String? @unique @map("stripe_refund_id")
-  promoRedemptionId     String? @unique @map("promo_redemption_id")
-  usageWindowId         String? @unique @map("usage_window_id")
-  aiCostRecordId        String? @unique @map("ai_cost_record_id")
-  previewkitAppBuildId  String? @unique @map("previewkit_app_build_id")
+  generationId          String?              @map("generation_id")
+  runId                 String?              @unique @map("run_id")
+  stripePaymentIntentId String?              @unique @map("stripe_payment_intent_id")
+  stripeInvoiceId       String?              @unique @map("stripe_invoice_id")
+  stripeRefundId        String?              @unique @map("stripe_refund_id")
+  // Set only on TOPUP_PURCHASE rows. billingPeriodKey is read back by the refund path so a refund
+  // decrements the *original* charge's BillingTopupSpendPeriod, even if the org has since rolled
+  // into a new calendar month.
+  billingPeriodKey      String?              @map("billing_period_key")
+  topupPackageId        String?              @map("topup_package_id")
+  topupPackage          BillingTopupPackage? @relation(fields: [topupPackageId], references: [id], onDelete: SetNull)
+  promoRedemptionId     String?              @unique @map("promo_redemption_id")
+  usageWindowId         String?              @unique @map("usage_window_id")
+  aiCostRecordId        String?              @unique @map("ai_cost_record_id")
+  previewkitAppBuildId  String?              @unique @map("previewkit_app_build_id")
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -1737,6 +1755,62 @@ model CreditTransaction {
   // Backs the per-type aggregate in getBillingStatus (e.g. all-time LLM_PROXY_CONSUMPTION).
   @@index([organizationId, type])
   @@map("credit_transaction")
+}
+
+// Admin-curated, global (not org-scoped) catalog of purchasable top-up sizes - several tiers
+// instead of the one fixed $100/150,000-credit size BillingPricing.stripeTopupAmountCents used to
+// be the only option. Mirrors VercelBillingPlan's shape (a small named menu everyone picks from),
+// not BillingPricing's per-org-row shape - there is no per-org custom pricing here.
+model BillingTopupPackage {
+  id             String  @id @default(cuid())
+  name           String
+  stripePriceId  String  @unique @map("stripe_price_id")
+  // Must equal the Stripe Price's unit_amount. Kept as a plain number here (not re-derived from
+  // Stripe at charge time) because auto-top-up charges this amount directly via a raw off-session
+  // PaymentIntent - it never has a Stripe Price to read a canonical amount from.
+  priceCents     Int     @map("price_cents")
+  creditsGranted Int     @map("credits_granted")
+  sortOrder      Int     @default(0) @map("sort_order")
+  // Deactivated packages are hidden from pickers but never deleted - they stay a valid history
+  // target for past CreditTransaction rows and for any org still pointed at them via
+  // autoTopUpPackageId (see the defensive null-out there).
+  isActive       Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  autoTopUpCustomers BillingCustomer[]
+  creditTransactions CreditTransaction[]
+
+  @@map("billing_topup_package")
+}
+
+// Per-org, per-UTC-calendar-month running total of top-up spend (manual purchases + auto-top-up
+// combined), enforcing BillingCustomer.spendCapAmountCents. Calendar month rather than a rolling
+// window or a subscription-billing-cycle anchor: a pay-as-you-go org may have no subscription at
+// all (BillingCustomer.currentPeriodStart/End null), so there is no natural anchor to key a
+// rolling window off - every org is unambiguously in exactly one calendar month, with no rollover
+// job needed (a new month is just a new row, upserted lazily on first charge).
+model BillingTopupSpendPeriod {
+  id                     String   @id @default(cuid())
+  organizationId         String   @map("organization_id")
+  periodKey              String   @map("period_key") // UTC calendar month, e.g. "2026-08"
+  startDate              DateTime @map("start_date")
+  endDate                DateTime @map("end_date")
+  amountChargedCents     Int      @default(0) @map("amount_charged_cents")
+  // 50 | 80 | 100 - the highest spend-cap alert threshold already sent this period, so a repeat
+  // charge under the same threshold doesn't re-notify. Resets for free every calendar month since
+  // a new month is a new row, not a rollover of this one.
+  lastAlertThresholdSent Int?     @map("last_alert_threshold_sent")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, periodKey])
+  @@index([organizationId])
+  @@map("billing_topup_spend_period")
 }
 
 model BillingPromoCode {

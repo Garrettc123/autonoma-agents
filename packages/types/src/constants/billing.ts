@@ -11,6 +11,14 @@ export const BILLING_PAYMENT_INTENT_TYPES = {
 
 export type BillingPaymentIntentType = (typeof BILLING_PAYMENT_INTENT_TYPES)[keyof typeof BILLING_PAYMENT_INTENT_TYPES];
 
+/** Which path created a top-up PaymentIntent - a manually-purchased Checkout, or an off-session auto-top-up charge. */
+export const BILLING_TOPUP_SOURCES = {
+    MANUAL: "manual",
+    AUTO: "auto",
+} as const;
+
+export type BillingTopupSource = (typeof BILLING_TOPUP_SOURCES)[keyof typeof BILLING_TOPUP_SOURCES];
+
 export const BILLING_STRIPE_SUBSCRIPTION_SYNC_EVENT_TYPES = [
     "customer.subscription.created",
     "customer.subscription.updated",

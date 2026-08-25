@@ -3,22 +3,31 @@ import type { BillingCheckoutType } from "@autonoma/types";
 import { BillingCustomerService } from "./billing-customer.service";
 import { BillingPricingService } from "./billing-pricing.service";
 import { BillingPromoService } from "./billing-promo.service";
+import { BillingTopupPackageService } from "./billing-topup-package.service";
+import { LoggingBillingAlertNotifier } from "./logging-billing-alert-notifier";
+import { SpendCapService } from "./spend-cap.service";
 import type {
     AnalysisCreditsGateResult,
     BillingService,
+    CreateTopupPackageInput,
     DeductGenerationContext,
     LlmProxyGateResult,
     PreviewDeployGateResult,
+    UpdateTopupPackageInput,
 } from "./types";
 
 export class DisabledBillingService implements BillingService {
     private readonly billingCustomerService: BillingCustomerService;
     private readonly billingPricingService: BillingPricingService;
     private readonly billingPromoService: BillingPromoService;
+    private readonly topupPackageService: BillingTopupPackageService;
+    private readonly spendCapService: SpendCapService;
 
     constructor(db: PrismaClient) {
         this.billingPricingService = new BillingPricingService(db);
-        this.billingCustomerService = new BillingCustomerService(db);
+        this.topupPackageService = new BillingTopupPackageService(db);
+        this.spendCapService = new SpendCapService(db, new LoggingBillingAlertNotifier());
+        this.billingCustomerService = new BillingCustomerService(db, this.topupPackageService, this.spendCapService);
         this.billingPromoService = new BillingPromoService(db);
     }
 
@@ -36,8 +45,8 @@ export class DisabledBillingService implements BillingService {
         return Promise.resolve();
     }
 
-    createCheckoutSession(organizationId: string, type: BillingCheckoutType, returnPath?: string) {
-        return this.billingCustomerService.createCheckoutSession(organizationId, type, returnPath);
+    createCheckoutSession(organizationId: string, type: BillingCheckoutType, returnPath?: string, packageId?: string) {
+        return this.billingCustomerService.createCheckoutSession(organizationId, type, returnPath, packageId);
     }
 
     createPortalSession(organizationId: string, returnPath?: string) {
@@ -48,8 +57,8 @@ export class DisabledBillingService implements BillingService {
         return this.billingCustomerService.getBillingStatus(organizationId);
     }
 
-    updateAutoTopUp(organizationId: string, enabled: boolean, threshold: number) {
-        return this.billingCustomerService.updateAutoTopUp(organizationId, enabled, threshold);
+    updateAutoTopUp(organizationId: string, enabled: boolean, threshold: number, packageId?: string) {
+        return this.billingCustomerService.updateAutoTopUp(organizationId, enabled, threshold, packageId);
     }
 
     checkCreditsGate(_organizationId: string, _runCount: number, _architecture: ApplicationArchitecture) {
@@ -131,6 +140,10 @@ export class DisabledBillingService implements BillingService {
         return Promise.resolve();
     }
 
+    getPricing(organizationId: string) {
+        return this.billingPricingService.getOrCreatePricing(organizationId);
+    }
+
     updateComputePricing(
         organizationId: string,
         rates: { creditsPerVcpuHour: number; creditsPerGbMemoryHour: number },
@@ -142,7 +155,31 @@ export class DisabledBillingService implements BillingService {
         return this.billingPricingService.getComputePricingReferences();
     }
 
-    getPricing(organizationId: string) {
-        return this.billingPricingService.getOrCreatePricing(organizationId);
+    listActiveTopupPackages() {
+        return this.topupPackageService.listActive();
+    }
+
+    listAllTopupPackages() {
+        return this.topupPackageService.listAll();
+    }
+
+    createTopupPackage(input: CreateTopupPackageInput) {
+        return this.topupPackageService.create(input);
+    }
+
+    updateTopupPackage(packageId: string, input: UpdateTopupPackageInput) {
+        return this.topupPackageService.update(packageId, input);
+    }
+
+    setTopupPackageActive(packageId: string, isActive: boolean) {
+        return this.topupPackageService.setActive(packageId, isActive);
+    }
+
+    getSpendCapStatus(organizationId: string) {
+        return this.spendCapService.getStatus(organizationId);
+    }
+
+    updateSpendCap(organizationId: string, capAmountCents: number | undefined) {
+        return this.spendCapService.updateCap(organizationId, capAmountCents);
     }
 }

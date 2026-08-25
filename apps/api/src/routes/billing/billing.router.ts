@@ -22,10 +22,11 @@ const billingRouterImpl = router({
             z.object({
                 type: z.enum([BILLING_CHECKOUT_TYPES.SUBSCRIPTION, BILLING_CHECKOUT_TYPES.TOPUP]),
                 returnPath: z.string().max(500).optional(),
+                packageId: z.string().min(1).optional(),
             }),
         )
         .mutation(({ ctx: { services, organizationId }, input }) =>
-            services.billing.createCheckoutSession(organizationId, input.type, input.returnPath),
+            services.billing.createCheckoutSession(organizationId, input.type, input.returnPath, input.packageId),
         ),
     createPortalSession: writeProcedure
         .input(
@@ -41,10 +42,24 @@ const billingRouterImpl = router({
             z.object({
                 enabled: z.boolean(),
                 threshold: z.number().int().min(0),
+                packageId: z.string().min(1).optional(),
             }),
         )
         .mutation(({ ctx: { services, organizationId }, input }) =>
-            services.billing.updateAutoTopUp(organizationId, input.enabled, input.threshold),
+            services.billing.updateAutoTopUp(organizationId, input.enabled, input.threshold, input.packageId),
+        ),
+    listTopupPackages: protectedProcedure.query(({ ctx: { services } }) => services.billing.listActiveTopupPackages()),
+    getSpendCapStatus: protectedProcedure.query(({ ctx: { services, organizationId } }) =>
+        services.billing.getSpendCapStatus(organizationId),
+    ),
+    updateSpendCap: writeProcedure
+        .input(
+            z.object({
+                capAmountCents: z.number().int().positive().max(100_000_00).optional(),
+            }),
+        )
+        .mutation(({ ctx: { services, organizationId }, input }) =>
+            services.billing.updateSpendCap(organizationId, input.capAmountCents),
         ),
     redeemPromoCode: writeProcedure
         .input(

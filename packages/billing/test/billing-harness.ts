@@ -3,7 +3,10 @@ import { createTestDatabase, type IntegrationHarness } from "@autonoma/integrati
 import { AutoTopUpService } from "../src/auto-topup.service";
 import { EnabledBillingService } from "../src/billing-enabled.service";
 import { BillingPricingService } from "../src/billing-pricing.service";
+import { BillingTopupPackageService } from "../src/billing-topup-package.service";
 import { CreditsService } from "../src/credits.service";
+import { LoggingBillingAlertNotifier } from "../src/logging-billing-alert-notifier";
+import { SpendCapService } from "../src/spend-cap.service";
 import type { BillingService } from "../src/types";
 import { VercelOverageService } from "../src/vercel-overage.service";
 
@@ -35,17 +38,27 @@ export class BillingTestHarness implements IntegrationHarness {
     public readonly db: PrismaClient;
     public readonly creditsService: CreditsService;
     public readonly billingService: BillingService;
+    /** Direct access to reservation/refund internals not exposed on the `BillingService` facade. */
+    public readonly spendCapService: SpendCapService;
+    public readonly topupPackageService: BillingTopupPackageService;
+    public readonly pricingService: BillingPricingService;
 
     private previewkitEnvironmentSeq = 0;
     private previewkitAppSeq = 0;
 
     constructor(db: PrismaClient) {
         this.db = db;
+        const alertNotifier = new LoggingBillingAlertNotifier();
+        this.spendCapService = new SpendCapService(db, alertNotifier);
+        this.topupPackageService = new BillingTopupPackageService(db);
+        this.pricingService = new BillingPricingService(db);
         this.creditsService = new CreditsService(
             db,
-            new AutoTopUpService(db),
-            new BillingPricingService(db),
+            new AutoTopUpService(db, this.topupPackageService, this.spendCapService),
+            this.pricingService,
             new VercelOverageService(db),
+            this.topupPackageService,
+            this.spendCapService,
         );
         this.billingService = new EnabledBillingService(db);
     }

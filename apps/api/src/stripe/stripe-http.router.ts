@@ -5,9 +5,12 @@ import { BILLING_STRIPE_WEBHOOK_EVENT_TYPES, type BillingStripeWebhookEventType 
 import { Hono } from "hono";
 import type Stripe from "stripe";
 import { z } from "zod";
+import { buildBillingAlertNotifier } from "../email/billing-alert-notifier";
 import { env } from "../env.ts";
 
 export const stripeHttpRouter = new Hono();
+
+const billingAlertNotifier = buildBillingAlertNotifier(db);
 
 const runFailedSchema = z.object({
     generationId: z.string(),
@@ -40,7 +43,7 @@ stripeHttpRouter.post("/webhook", async (c) => {
 
     logger.info("Dispatching Stripe webhook event", { eventType: event.type, eventId: event.id });
 
-    void processWebhookEvent(event).catch((err) => {
+    void processWebhookEvent(event, { alertNotifier: billingAlertNotifier }).catch((err) => {
         logger.fatal("Error processing Stripe webhook event", {
             eventId: event.id,
             eventType: event.type,

@@ -7,6 +7,7 @@ import {
     InsufficientPreviewCreditsError,
     InternalError,
     NotFoundError,
+    SpendCapExceededError,
     SubscriptionGracePeriodExpiredError,
     TooManyRequestsError,
 } from "@autonoma/errors";
@@ -63,6 +64,7 @@ const apiErrorToTrpcCode: Array<{ ctor: APIErrorCtor; code: TRPCErrorCode }> = [
     { ctor: InsufficientCreditsError, code: "PRECONDITION_FAILED" },
     { ctor: InsufficientPreviewCreditsError, code: "PRECONDITION_FAILED" },
     { ctor: InsufficientAnalysisCreditsError, code: "PRECONDITION_FAILED" },
+    { ctor: SpendCapExceededError, code: "PRECONDITION_FAILED" },
     { ctor: SubscriptionGracePeriodExpiredError, code: "PRECONDITION_FAILED" },
     { ctor: TooManyRequestsError, code: "TOO_MANY_REQUESTS" },
 ];

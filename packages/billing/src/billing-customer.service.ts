@@ -1,16 +1,27 @@
 import type { PrismaClient } from "@autonoma/db";
 import { CreditTransactionType } from "@autonoma/db";
-import { NotFoundError } from "@autonoma/errors";
-import { BILLING_CHECKOUT_TYPES, BILLING_PAYMENT_INTENT_TYPES, type BillingCheckoutType } from "@autonoma/types";
+import { BadRequestError, NotFoundError, SpendCapExceededError } from "@autonoma/errors";
+import {
+    BILLING_CHECKOUT_TYPES,
+    BILLING_PAYMENT_INTENT_TYPES,
+    BILLING_TOPUP_SOURCES,
+    type BillingCheckoutType,
+} from "@autonoma/types";
 import { ensureBillingProvisioning } from "./billing-provisioning";
+import type { BillingTopupPackageService } from "./billing-topup-package.service";
 import { buildCustomerCreateIdempotencyKey, isUniqueConstraintError } from "./billing-utils";
 import { env } from "./env";
 import { Service } from "./service";
+import type { SpendCapService } from "./spend-cap.service";
 import { getStripe } from "./stripe-client";
 import { syncStripeDataToDb } from "./stripe-sync";
 
 export class BillingCustomerService extends Service {
-    constructor(private readonly db: PrismaClient) {
+    constructor(
+        private readonly db: PrismaClient,
+        private readonly packageService: BillingTopupPackageService,
+        private readonly spendCapService: SpendCapService,
+    ) {
         super();
     }
 
@@ -85,7 +96,12 @@ export class BillingCustomerService extends Service {
         }
     }
 
-    async createCheckoutSession(organizationId: string, type: BillingCheckoutType, returnPath?: string) {
+    async createCheckoutSession(
+        organizationId: string,
+        type: BillingCheckoutType,
+        returnPath?: string,
+        packageId?: string,
+    ) {
         const org = await this.db.organization.findUnique({
             where: { id: organizationId },
             select: { name: true },
@@ -119,23 +135,45 @@ export class BillingCustomerService extends Service {
             return { url: session.url };
         }
 
-        if (env.STRIPE_TOPUP_PRICE_ID == null) {
-            throw new Error("STRIPE_TOPUP_PRICE_ID is not configured");
+        if (packageId == null) throw new BadRequestError("A top-up package must be selected");
+
+        const topupPackage = await this.packageService.findById(packageId);
+        if (topupPackage == null || !topupPackage.isActive) {
+            throw new BadRequestError("Selected top-up package is not available");
+        }
+
+        const eligibility = await this.spendCapService.checkCheckoutEligibility(
+            organizationId,
+            topupPackage.priceCents,
+        );
+        if (!eligibility.allowed) {
+            throw new SpendCapExceededError(
+                "This purchase would exceed your organization's spend cap for this period.",
+            );
         }
 
         const session = await stripe.checkout.sessions.create({
             mode: "payment",
             customer: customer.stripeCustomerId,
-            line_items: [{ price: env.STRIPE_TOPUP_PRICE_ID, quantity: 1 }],
+            line_items: [{ price: topupPackage.stripePriceId, quantity: 1 }],
             payment_intent_data: {
                 setup_future_usage: "off_session",
-                metadata: { type: BILLING_PAYMENT_INTENT_TYPES.TOPUP, organizationId },
+                metadata: {
+                    type: BILLING_PAYMENT_INTENT_TYPES.TOPUP,
+                    organizationId,
+                    packageId: topupPackage.id,
+                    source: BILLING_TOPUP_SOURCES.MANUAL,
+                },
             },
             success_url: successUrl,
             cancel_url: cancelUrl,
         });
 
-        this.logger.info("Created topup checkout session", { organizationId, sessionId: session.id });
+        this.logger.info("Created topup checkout session", {
+            organizationId,
+            sessionId: session.id,
+            packageId: topupPackage.id,
+        });
         return { url: session.url };
     }
 
@@ -180,6 +218,7 @@ export class BillingCustomerService extends Service {
                     gracePeriodEndsAt: true,
                     autoTopUpEnabled: true,
                     autoTopUpThreshold: true,
+                    autoTopUpPackageId: true,
                     transactions: {
                         orderBy: { createdAt: "desc" },
                         take: 20,
@@ -206,6 +245,7 @@ export class BillingCustomerService extends Service {
                 gracePeriodEndsAt: undefined,
                 autoTopUpEnabled: false,
                 autoTopUpThreshold: 0,
+                autoTopUpPackageId: undefined,
                 cliCreditsSpent: 0,
                 transactions: [],
             };
@@ -224,6 +264,7 @@ export class BillingCustomerService extends Service {
             gracePeriodEndsAt: customer.gracePeriodEndsAt ?? undefined,
             autoTopUpEnabled: customer.autoTopUpEnabled,
             autoTopUpThreshold: customer.autoTopUpThreshold,
+            autoTopUpPackageId: customer.autoTopUpPackageId ?? undefined,
             cliCreditsSpent,
             transactions: customer.transactions,
         };
@@ -264,21 +305,32 @@ export class BillingCustomerService extends Service {
         this.logger.info("Cleared billing grace period", { stripeCustomerId, updatedCustomers: result.count });
     }
 
-    async updateAutoTopUp(organizationId: string, enabled: boolean, threshold: number) {
+    async updateAutoTopUp(organizationId: string, enabled: boolean, threshold: number, packageId?: string) {
         const org = await this.db.organization.findUnique({
             where: { id: organizationId },
             select: { name: true },
         });
         if (org == null) throw new NotFoundError("Organization not found");
 
+        if (enabled && packageId == null) {
+            throw new BadRequestError("A top-up package must be selected to enable auto top-up");
+        }
+
+        if (packageId != null) {
+            const topupPackage = await this.packageService.findById(packageId);
+            if (topupPackage == null || !topupPackage.isActive) {
+                throw new BadRequestError("Selected top-up package is not available");
+            }
+        }
+
         await this.getOrCreateCustomer(organizationId, org.name ?? organizationId);
 
         await this.db.billingCustomer.update({
             where: { organizationId },
-            data: { autoTopUpEnabled: enabled, autoTopUpThreshold: threshold },
+            data: { autoTopUpEnabled: enabled, autoTopUpThreshold: threshold, autoTopUpPackageId: packageId },
         });
 
-        this.logger.info("Updated auto top-up settings", { organizationId, enabled, threshold });
+        this.logger.info("Updated auto top-up settings", { organizationId, enabled, threshold, packageId });
     }
 
     async syncFromStripe(stripeCustomerId: string) {

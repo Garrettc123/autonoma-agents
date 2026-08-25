@@ -9,6 +9,7 @@ export {
     InsufficientAnalysisCreditsError,
     InsufficientCreditsError,
     InsufficientPreviewCreditsError,
+    SpendCapExceededError,
     SubscriptionGracePeriodExpiredError,
     TooManyRequestsError,
     ThirdPartyError,

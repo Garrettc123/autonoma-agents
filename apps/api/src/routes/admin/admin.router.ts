@@ -260,6 +260,44 @@ export const adminRouter = router({
             .mutation(({ ctx: { services }, input }) =>
                 services.billing.updateCreditFloor(input.organizationId, input.creditFloor),
             ),
+        /** The admin catalog view - every top-up package, active or deactivated. */
+        listTopupPackagesAdmin: internalProcedure.query(({ ctx: { services } }) =>
+            services.billing.listAllTopupPackages(),
+        ),
+        createTopupPackage: internalProcedure
+            .input(
+                z.object({
+                    name: z.string().min(1).max(100),
+                    stripePriceId: z.string().min(1),
+                    priceCents: z.number().int().positive(),
+                    creditsGranted: z.number().int().positive(),
+                    sortOrder: z.number().int().optional(),
+                }),
+            )
+            .mutation(({ ctx: { services }, input }) => services.billing.createTopupPackage(input)),
+        updateTopupPackage: internalProcedure
+            .input(
+                z.object({
+                    packageId: z.string().min(1),
+                    name: z.string().min(1).max(100).optional(),
+                    priceCents: z.number().int().positive().optional(),
+                    creditsGranted: z.number().int().positive().optional(),
+                    sortOrder: z.number().int().optional(),
+                }),
+            )
+            .mutation(({ ctx: { services }, input: { packageId, ...input } }) =>
+                services.billing.updateTopupPackage(packageId, input),
+            ),
+        setTopupPackageActive: internalProcedure
+            .input(
+                z.object({
+                    packageId: z.string().min(1),
+                    isActive: z.boolean(),
+                }),
+            )
+            .mutation(({ ctx: { services }, input }) =>
+                services.billing.setTopupPackageActive(input.packageId, input.isActive),
+            ),
         /**
          * Zero-tolerance credit enforcement: when true, a deduction that crosses this org's floor
          * kills whatever job caused it (a PR analysis run, a previewkit build/deploy) instead of
