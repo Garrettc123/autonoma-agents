@@ -907,15 +907,14 @@ export function registerOnboardingTools(server: McpServer, deps: OnboardingToolD
                     // Capture the client on a polled call too, in case the pair request
                     // didn't carry the handshake. No-op once the client is already known.
                     await captureAgentClient(applicationId);
-                    // Beat the heartbeat first so the freshly-read view reflects it, then
-                    // fetch the view and the deploy readiness together - independent reads.
+                    // Ordered, not parallel: reading readiness is what STAMPS a preview
+                    // that has come up, so a view read alongside it returns the step and
+                    // verification status from before that write - which is how one payload
+                    // came to carry `step: previewkit_deploying` next to `status: ready`.
+                    // The heartbeat leads for the same reason: the view has to reflect it.
                     await session.heartbeatIfAgentHeld(applicationId);
-                    const [view, readiness] = await Promise.all([
-                        session.getForUi(applicationId, organizationId),
-                        services.onboarding.getPreviewReadiness(applicationId, organizationId),
-                    ]);
-                    // Needs readiness.diagnostics (status + the log-stream handle), so it
-                    // can't join the parallel read above.
+                    const readiness = await services.onboarding.getPreviewReadiness(applicationId, organizationId);
+                    const view = await session.getForUi(applicationId, organizationId);
                     const recentLogs = await tailPhaseLogs(organizationId, readiness.diagnostics);
                     return jsonResult({
                         standDown: view?.holder === "human",

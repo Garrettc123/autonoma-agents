@@ -653,7 +653,11 @@ export class OnboardingManager {
             extra: { force: options.force === true },
         });
         await this.ensureApplicationHasRepository(applicationId, organizationId);
-        await this.ensureStateAtOrAfter(applicationId, "previewkit_configuring", "trigger PreviewKit deploy");
+        const step = await this.ensureStateAtOrAfter(
+            applicationId,
+            "previewkit_configuring",
+            "trigger PreviewKit deploy",
+        );
 
         if (options.force !== true) {
             const current = await this.getPreviewReadiness(applicationId, organizationId);
@@ -696,10 +700,16 @@ export class OnboardingManager {
         // cannot name its run is undiagnosable without cluster access nobody here has.
         const receipt = await previewkitClient.deployApplicationMain(applicationId, organizationId);
 
+        // Only roll the step forward from the deploy phase, never back into it. Nothing
+        // re-advances an app to `completed`, so demoting one that already verified its
+        // preview silently stops its pull requests being reviewed - and a redeploy is
+        // exactly what a coding agent does to an app that is already live. Same guard
+        // `writePreviewUrl` and `buildPreviewkitReadiness` apply to the same field.
+        const stillInDeployPhase = !isStepAtOrPast(step, "preview_verified");
         await this.db.onboardingState.update({
             where: { applicationId },
             data: {
-                step: "previewkit_deploying",
+                ...(stillInDeployPhase ? { step: "previewkit_deploying" } : {}),
                 previewEnvironmentMode: "previewkit",
                 previewVerificationStatus: "building",
                 previewDeployRequestedAt: new Date(),
@@ -1622,11 +1632,12 @@ export class OnboardingManager {
         return service;
     }
 
+    /** Returns the step it read, so a caller that also has to branch on it does not read twice. */
     private async ensureStateAtOrAfter(
         applicationId: string,
         minimumStep: OnboardingState["step"],
         action: string,
-    ): Promise<void> {
+    ): Promise<OnboardingStep> {
         const row = await this.db.onboardingState.upsert({
             where: { applicationId },
             create: { applicationId, step: INITIAL_STEP },
@@ -1637,6 +1648,8 @@ export class OnboardingManager {
         if (!isStepAtOrPast(row.step, minimumStep)) {
             throw new ConflictError(`Cannot ${action} during "${row.step}" step`);
         }
+
+        return row.step;
     }
 
     /**

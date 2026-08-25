@@ -3,7 +3,7 @@ import type { PrismaClient } from "@autonoma/db";
 import { NotFoundError } from "@autonoma/errors";
 import { integrationTestSuite } from "@autonoma/integration-test";
 import { EncryptionHelper, ScenarioManager } from "@autonoma/scenario";
-import type { DiscoverResponse } from "@autonoma/types";
+import { type DiscoverResponse, LIVE_STEP } from "@autonoma/types";
 import { expect, vi } from "vitest";
 import { DryRunSubject } from "../../src/routes/onboarding/dry-run-subject";
 import { OnboardingManager } from "../../src/routes/onboarding/onboarding-manager";
@@ -485,6 +485,49 @@ integrationTestSuite({
 
             expect(retried.started).toBe(true);
             expect(previewkitClient.deployApplicationMain).toHaveBeenCalledWith(appId, orgId);
+        });
+
+        // Nothing re-advances an app to `completed`, so a redeploy that demoted the step
+        // would silently stop the app's pull requests being reviewed - and redeploying a
+        // live app is exactly what a coding agent does while fixing its SDK handler.
+        test("triggerPreviewkitMainDeploy leaves a live app live", async ({
+            harness,
+            seedResult: { orgId, createApp },
+        }) => {
+            const appId = await createApp();
+            await linkRepository(harness, appId, 91_044);
+            const previewkitClient = {
+                deployApplicationMain: vi.fn(async () => ({
+                    repoFullName: "acme/web",
+                    branch: "main",
+                    headSha: "c0ffee",
+                    prNumber: 0,
+                })),
+                redeploy: vi.fn(async () => undefined),
+                startRunForPullRequest: vi.fn(async () => undefined),
+            };
+            const manager = new OnboardingManager(harness.db, fakeScenarioManager, fakeEncryption, {
+                previewkitClient,
+            });
+            await harness.db.onboardingState.upsert({
+                where: { applicationId: appId },
+                create: { applicationId: appId, step: "preview_environment" },
+                update: { step: "preview_environment" },
+            });
+            await manager.selectPreviewEnvironmentMode(appId, orgId, "previewkit");
+            await manager.savePreviewkitConfig(appId, orgId, validPreviewkitConfig());
+            await harness.db.onboardingState.update({
+                where: { applicationId: appId },
+                data: { step: LIVE_STEP, previewVerificationStatus: "ready", completedAt: new Date() },
+            });
+
+            await manager.triggerPreviewkitMainDeploy(appId, orgId);
+
+            const state = await manager.getState(appId);
+            expect(state.step).toBe(LIVE_STEP);
+            // The deploy IS in flight, and that is what the in-flight guard and the
+            // readiness shim read - only the step is held.
+            expect(state.previewVerificationStatus).toBe("building");
         });
 
         test("getPreviewReadiness fails a stale PreviewKit deploy request with no environment", async ({

@@ -1,7 +1,7 @@
+import { hasGoneLive } from "@autonoma/types";
 import { debugLog } from "./debug";
 import { runDryRunPhase, type DryRunPhaseOutcome, type DryRunReader, type DryRunTiming } from "./dry-run-phase";
 import { captureLog } from "./logs";
-import { isStepAtOrPast, LIVE_STEP } from "./onboarding-phase";
 import type { SdkRepairOutcome } from "./sdk-repair-phase";
 
 /**
@@ -41,6 +41,7 @@ export interface FinishPhaseDeps {
 }
 
 export interface FinishPhaseResult {
+    /** Where the dry run stands now - after the repair phase, when one ran. */
     dryRun: DryRunPhaseOutcome;
     /** Where the app stood once the dry run was done with it. */
     state: FinishState;
@@ -59,7 +60,7 @@ export interface FinishPhaseResult {
  * the preview phase already learned not to make.
  */
 export async function runFinishPhase(deps: FinishPhaseDeps): Promise<FinishPhaseResult> {
-    const dryRun = await runDryRunPhase({
+    const attempt = await runDryRunPhase({
         client: deps.client,
         applicationId: deps.applicationId,
         checkedOutBranch: deps.checkedOutBranch,
@@ -70,10 +71,11 @@ export async function runFinishPhase(deps: FinishPhaseDeps): Promise<FinishPhase
     // with no preview, a handler that 404s, a recipe resolving to nothing - which is
     // exactly what the calls above cannot do and a coding agent can. Reporting the
     // failure and stopping leaves a finished run and an app that cannot run a test.
-    const repair = dryRun.kind === "passed" ? undefined : await deps.repair?.(dryRun);
+    const repair = attempt.kind === "passed" ? undefined : await deps.repair?.(attempt);
 
+    const dryRun = await resolveDryRun(deps, attempt, repair);
     const state = await deps.client.getOnboardingState(deps.applicationId);
-    const live = isStepAtOrPast(state.step, LIVE_STEP);
+    const live = hasGoneLive(state.step);
 
     debugLog("Finish phase complete", { dryRun: dryRun.kind, repair: repair?.kind, step: state.step, live });
     captureLog("info", "Front-door run finished", {
@@ -88,6 +90,25 @@ export async function runFinishPhase(deps: FinishPhaseDeps): Promise<FinishPhase
     });
 
     return { dryRun, state, live };
+}
+
+/**
+ * Where the dry run stands once the repair phase is done with it.
+ *
+ * A repair only ends in `passed` when the platform itself reports the scenarios
+ * provisioning, which means it re-ran the dry run against its own fix - so that is
+ * the current result and the attempt that triggered the repair is history. Reporting
+ * the attempt tells the user to go and fix something that already works, and records
+ * a self-healed run as a failure.
+ */
+async function resolveDryRun(
+    deps: FinishPhaseDeps,
+    attempt: DryRunPhaseOutcome,
+    repair: SdkRepairOutcome | undefined,
+): Promise<DryRunPhaseOutcome> {
+    if (repair?.kind !== "passed") return attempt;
+    const scenarios = await deps.client.listScenarios(deps.applicationId);
+    return { kind: "passed", scenarios: scenarios.length };
 }
 
 /**

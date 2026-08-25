@@ -74,6 +74,32 @@ describe("runFinishPhase", () => {
         expect(outcome.live).toBe(false);
     });
 
+    // The repair only ends in `passed` when the platform reports the scenarios
+    // provisioning, so the attempt that triggered it is history. Reporting that attempt
+    // tells the user to fix something that already works and records a self-healed run
+    // as a failure.
+    test("reports the repaired dry run, not the attempt that triggered the repair", async () => {
+        const outcome = await runFinishPhase({
+            client: fakeClient(liveState(), false),
+            applicationId: APP_ID,
+            repair: () => Promise.resolve({ kind: "passed" }),
+            timing: TIMING,
+        });
+
+        expect(outcome.dryRun).toEqual({ kind: "passed", scenarios: 1 });
+    });
+
+    test("keeps the failed attempt when the repair ended with work outstanding", async () => {
+        const outcome = await runFinishPhase({
+            client: fakeClient(liveState({ dryRunPassed: false }), false),
+            applicationId: APP_ID,
+            repair: () => Promise.resolve({ kind: "incomplete", sdkConfigured: true, dryRunPassed: false }),
+            timing: TIMING,
+        });
+
+        expect(outcome.dryRun.kind).toBe("failed");
+    });
+
     test("still reads the state back when the dry run fails", async () => {
         const outcome = await runFinishPhase({
             client: fakeClient(liveState({ dryRunPassed: false }), false),

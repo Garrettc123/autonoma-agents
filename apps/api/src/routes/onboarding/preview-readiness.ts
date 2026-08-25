@@ -165,7 +165,9 @@ function shouldPersistPreviewVerificationStatus(
 ): boolean {
     if (nextStatus !== previousStatus) return true;
     if (nextStatus !== "building") return false;
-    return step !== "previewkit_deploying";
+    // An unchanged `building` is only worth re-writing when the same update still has a
+    // step to demote - otherwise every readiness poll writes the row for nothing.
+    return !isStepAtOrPast(step, "previewkit_deploying");
 }
 
 export function idleReadiness(mode?: OnboardingPreviewEnvironmentMode): PreviewReadiness {
@@ -734,6 +736,11 @@ export async function writePreviewUrl(
         // `preview_verified` back down - a signal firing for a `diff_trigger` (or
         // `completed`) app must not demote it to `preview_verified` and strand it
         // short of go-live. Only stamp the verified transition when still before it.
+        //
+        // The verification status is not guarded the same way: this is only reached
+        // with a preview that is answering right now, so it recovers a `building` or
+        // `failed` status left behind by a redeploy of an app that was already
+        // verified - which nothing else clears.
         const step = application?.onboardingState?.step ?? "github";
         const alreadyAtOrPastVerified = isStepAtOrPast(step, "preview_verified");
         await tx.onboardingState.update({
@@ -741,13 +748,9 @@ export async function writePreviewUrl(
             data: {
                 previewUrl,
                 productionUrl: previewUrl,
-                ...(alreadyAtOrPastVerified
-                    ? {}
-                    : {
-                          step: "preview_verified",
-                          previewVerificationStatus: "ready",
-                          previewVerificationError: null,
-                      }),
+                previewVerificationStatus: "ready",
+                previewVerificationError: null,
+                ...(alreadyAtOrPastVerified ? {} : { step: "preview_verified" }),
             },
         });
 
