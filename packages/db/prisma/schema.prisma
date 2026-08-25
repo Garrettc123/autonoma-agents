@@ -1568,6 +1568,13 @@ model BillingCustomer {
   // (admin.billing.updateCreditFloor), same as BillingPricing's compute rates.
   creditFloor               Int     @default(0) @map("credit_floor")
 
+  // Zero-tolerance policy, orthogonal to creditFloor: when true, a deduction that pushes this org's
+  // balance from above its floor to at-or-below it kills whatever job caused it (a PR analysis run,
+  // a previewkit build/deploy) instead of letting it run to completion floor-clamped. Defaults to
+  // false (today's "let it finish" behavior, unchanged) for every org; enabled only via a deliberate
+  // admin action (admin.billing.updateKillJobsOnCreditExhaustion), same rollout shape as creditFloor.
+  killJobsOnCreditExhaustion Boolean @default(false) @map("kill_jobs_on_credit_exhaustion")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

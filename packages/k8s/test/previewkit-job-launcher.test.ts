@@ -37,6 +37,8 @@ class FakeJobsApi implements PreviewJobsApi {
     readonly readCalls: Array<{ name: string; namespace: string }> = [];
     /** When set, every delete throws it - the hook for a Job that is already gone. */
     deleteError?: unknown;
+    /** When set, the list throws it instead of answering from `existingJobs`. */
+    listError?: unknown;
     /** When set, the read throws it instead of answering from `existingJobs`. */
     readError?: unknown;
     /** Stands in for the API server's generateName suffix, so every created Job gets a distinct name. */
@@ -44,6 +46,7 @@ class FakeJobsApi implements PreviewJobsApi {
 
     async listNamespacedJob(params: { namespace: string; labelSelector?: string }): Promise<{ items: V1Job[] }> {
         this.listCalls.push(params);
+        if (this.listError != null) throw this.listError;
         return { items: this.existingJobs };
     }
     async readNamespacedJob(params: { name: string; namespace: string }): Promise<V1Job> {
@@ -276,6 +279,102 @@ describe("PreviewkitJobLauncher.cancelDeploy", () => {
         api.deleteError = new ApiException(404, "not found", undefined, {});
 
         await expect(launcher(api).cancelDeploy("pk-deploy-gone")).resolves.toBeUndefined();
+    });
+});
+
+describe("PreviewkitJobLauncher.cancelJobsForEnvironments", () => {
+    const envKey = previewEnvKey(target.repoFullName, target.prNumber);
+    const otherEnvKey = previewEnvKey("acme/gadgets", 7);
+
+    function deployJob(name: string, jobEnvKey: string): V1Job {
+        return { metadata: { name, labels: { "previewkit.dev/env": jobEnvKey, "previewkit.dev/type": "deploy" } } };
+    }
+
+    // One List for the whole sweep, filtered in memory: the sweep runs every minute over an
+    // exhausted org's whole fleet, so a per-env List would scale with the fleet for no gain.
+    it("lists the deploy family once and deletes only the Jobs whose env is in the set", async () => {
+        const api = new FakeJobsApi();
+        api.existingJobs = [
+            deployJob("pk-deploy-acme-widgets-42-abc", envKey),
+            deployJob("pk-redeploy-app-acme-widgets-42-def", envKey),
+            deployJob("pk-deploy-acme-gadgets-7-ghi", otherEnvKey),
+        ];
+
+        const cancelled = await launcher(api).cancelJobsForEnvironments(new Set([envKey]));
+
+        expect(api.listCalls).toEqual([
+            { namespace: JOB_NAMESPACE, labelSelector: "previewkit.dev/type in (deploy,redeploy-app)" },
+        ]);
+        expect(api.deleteCalls).toEqual([
+            { name: "pk-deploy-acme-widgets-42-abc", namespace: JOB_NAMESPACE, propagationPolicy: "Background" },
+            { name: "pk-redeploy-app-acme-widgets-42-def", namespace: JOB_NAMESPACE, propagationPolicy: "Background" },
+        ]);
+        expect(cancelled).toEqual({ deleted: 2, failed: 0 });
+    });
+
+    // Teardown frees resources rather than spending credits, so it is left to finish - and the label
+    // selector is what excludes it, since a real API server filters the List.
+    it("never asks for teardown Jobs", async () => {
+        const api = new FakeJobsApi();
+
+        await launcher(api).cancelJobsForEnvironments(new Set([envKey]));
+
+        expect(api.listCalls[0]?.labelSelector).not.toContain("teardown");
+    });
+
+    it("does not touch the cluster when no env is exhausted", async () => {
+        const api = new FakeJobsApi();
+
+        const cancelled = await launcher(api).cancelJobsForEnvironments(new Set());
+
+        expect(api.listCalls).toHaveLength(0);
+        expect(cancelled).toEqual({ deleted: 0, failed: 0 });
+    });
+
+    // The caller drives this off the live Jobs every tick, so a survivor is retried a minute later -
+    // but it must be reported, not swallowed, or the runner keeps spending unnoticed.
+    it("reports a Job it could not delete instead of throwing", async () => {
+        const api = new FakeJobsApi();
+        api.existingJobs = [deployJob("pk-deploy-acme-widgets-42-abc", envKey)];
+        api.deleteError = new ApiException(500, "internal error", undefined, {});
+
+        const cancelled = await launcher(api).cancelJobsForEnvironments(new Set([envKey]));
+
+        expect(cancelled).toEqual({ deleted: 0, failed: 1 });
+    });
+
+    // Already gone is the state we wanted, so it counts as neither killed nor survived.
+    it("treats an already-gone Job as nothing to kill", async () => {
+        const api = new FakeJobsApi();
+        api.existingJobs = [deployJob("pk-deploy-gone", envKey)];
+        api.deleteError = new ApiException(404, "not found", undefined, {});
+
+        const cancelled = await launcher(api).cancelJobsForEnvironments(new Set([envKey]));
+
+        expect(cancelled).toEqual({ deleted: 0, failed: 0 });
+    });
+
+    // A List failure is different in kind from a delete failure: nothing was enumerated, so the
+    // caller must be able to tell "swept, some deletes failed" from "never swept".
+    it("throws when it cannot enumerate the deploy family at all", async () => {
+        const api = new FakeJobsApi();
+        api.listError = new Error("api server unavailable");
+
+        await expect(launcher(api).cancelJobsForEnvironments(new Set([envKey]))).rejects.toThrow(
+            "api server unavailable",
+        );
+    });
+});
+
+describe("PreviewkitJobLauncher supersede", () => {
+    // Supersede keeps the opposite contract to the credit-exhaustion sweep: newest-wins ownership in
+    // the DB tolerates the old runner overlapping, so a cluster it cannot read must not fail a launch.
+    it("launches even when the in-flight deploy family cannot be listed", async () => {
+        const api = new FakeJobsApi();
+        api.listError = new Error("api server unavailable");
+
+        await expect(launcher(api).launchDeploy(target)).resolves.toBeDefined();
+        expect(api.createdJobs).toHaveLength(1);
     });
 });
 

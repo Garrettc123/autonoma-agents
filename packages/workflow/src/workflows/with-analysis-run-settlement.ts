@@ -3,8 +3,11 @@ import { type AnalysisRunOutcome, CANCELLED_RUN_REASON } from "@autonoma/types";
 import { CancellationScope, isCancellation, log, proxyActivities } from "@temporalio/workflow";
 import type { AnalysisActivities } from "../activities";
 import { isApplicationUnlinkedFailure } from "../application-unlinked-failure";
+import { isCreditsExhaustedFailure } from "../is-credits-exhausted-failure";
 import { rootFailureMessage } from "../root-failure-message";
 import { TaskQueue } from "../task-queues";
+
+const CREDITS_EXHAUSTED_REASON = "Insufficient credits - analysis stopped mid-run";
 
 const analysis = proxyActivities<Pick<AnalysisActivities, "settleAnalysisRun">>({
     startToCloseTimeout: "20m",
@@ -56,6 +59,8 @@ export async function withAnalysisRunSettlement(
  *   so the workflow ends in the honest `Cancelled` state.
  * - An application-unlinked failure (the containment safety net for the race the cancel could not close) settles
  *   `cancelled` and does NOT rethrow: the run is over, and rethrowing would surface it as a hard failure.
+ * - A credits-exhausted failure (a zero-tolerance org crossing its floor mid-run, see `CreditsExhaustedError`)
+ *   settles `failed` with a fixed reason and rethrows, same as any other genuine failure.
  * - Anything else is a genuine failure: settle `failed` and rethrow so it surfaces.
  */
 function settlementForFailure(
@@ -73,6 +78,7 @@ function settlementForFailure(
         return { outcome: { kind: "cancelled", reason }, rethrow: false };
     }
 
-    log.error("Analysis run failed", { ...ids, extra: { failureReason: reason } });
-    return { outcome: { kind: "failed", reason }, rethrow: true };
+    const failureReason = isCreditsExhaustedFailure(error) ? CREDITS_EXHAUSTED_REASON : reason;
+    log.error("Analysis run failed", { ...ids, extra: { failureReason } });
+    return { outcome: { kind: "failed", reason: failureReason }, rethrow: true };
 }

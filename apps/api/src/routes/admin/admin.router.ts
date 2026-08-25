@@ -260,6 +260,24 @@ export const adminRouter = router({
             .mutation(({ ctx: { services }, input }) =>
                 services.billing.updateCreditFloor(input.organizationId, input.creditFloor),
             ),
+        /**
+         * Zero-tolerance credit enforcement: when true, a deduction that crosses this org's floor
+         * kills whatever job caused it (a PR analysis run, a previewkit build/deploy) instead of
+         * letting it finish floor-clamped. Deliberate and admin-only, same as `updateCreditFloor`.
+         */
+        updateKillJobsOnCreditExhaustion: internalProcedure
+            .input(
+                z.object({
+                    organizationId: z.string().min(1),
+                    killJobsOnCreditExhaustion: z.boolean(),
+                }),
+            )
+            .mutation(({ ctx: { services }, input }) =>
+                services.billing.updateKillJobsOnCreditExhaustion(
+                    input.organizationId,
+                    input.killJobsOnCreditExhaustion,
+                ),
+            ),
     }),
     usage: router({
         /**

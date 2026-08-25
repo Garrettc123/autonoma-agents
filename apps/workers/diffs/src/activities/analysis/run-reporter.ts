@@ -22,6 +22,7 @@ import { resolveRunTarget } from "../../codebase/run-target";
 import { type SnapshotContext, withSnapshotContext } from "../../codebase/snapshot-context";
 import { createModelSession, getAnalysisStore, getStorage } from "../../services";
 import { uploadConversation } from "../../upload-conversation";
+import { rethrowIfCreditsExhausted } from "../rethrow-credits-exhausted";
 import { loadBranchTests } from "./branch-tests";
 
 /** How much of an existing issue's narrative to show as its cross-time matching summary. */
@@ -156,7 +157,10 @@ async function produceReporterResult(input: RunReporterInput): Promise<ReporterR
                 session.costCollector.getRecords(),
                 { investigationSnapshotId: snapshotId },
                 logger,
-            ).catch((error) => logger.warn("Failed to persist reporter costs", { err: error })),
+            ).catch((error: unknown) => {
+                rethrowIfCreditsExhausted(error);
+                logger.warn("Failed to persist reporter costs", { err: error });
+            }),
             uploadReporterInput(snapshotId, reporterInput, logger.child({ name: "uploadReporterInput" })).catch(
                 (error) => logger.warn("Failed to upload reporter input snapshot", { err: error }),
             ),

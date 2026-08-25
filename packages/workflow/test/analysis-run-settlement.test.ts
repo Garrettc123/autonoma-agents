@@ -4,6 +4,7 @@ import type { TestWorkflowEnvironment } from "@temporalio/testing";
 import { Worker } from "@temporalio/worker";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { AnalysisActivities, PreviewkitActivities } from "../src/activities";
+import { CREDITS_EXHAUSTED_FAILURE_TYPE } from "../src/credits-exhausted-failure";
 import { TaskQueue } from "../src/task-queues";
 import { analysisRunWorkflow } from "../src/workflows/analysis-run.workflow";
 import { teardownTestWorkflowEnvironment } from "./fixtures/teardown-test-workflow-environment";
@@ -154,6 +155,16 @@ describe("analysisRunWorkflow settlement (no preview)", () => {
         // replace it with a settlement failure.
         await expect(runWorkflow()).rejects.toThrow("Workflow execution failed");
         expect(settlements).toEqual([{ kind: "failed", reason: "impact exploded" }]);
+    });
+
+    it("settles with the distinct credits-exhausted reason when that failure type is thrown", async () => {
+        impactFailure = ApplicationFailure.nonRetryable(
+            "Organization ran out of credits mid-run",
+            CREDITS_EXHAUSTED_FAILURE_TYPE,
+        );
+
+        await expect(runWorkflow()).rejects.toThrow("Workflow execution failed");
+        expect(settlements).toEqual([{ kind: "failed", reason: "Insufficient credits - analysis stopped mid-run" }]);
     });
 
     it("settles a cancelled run as cancelled through the non-cancellable scope", async () => {

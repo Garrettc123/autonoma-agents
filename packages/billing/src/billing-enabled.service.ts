@@ -88,6 +88,10 @@ export class EnabledBillingService implements BillingService, StripeBillingServi
         return this.creditsService.updateCreditFloor(organizationId, creditFloor);
     }
 
+    updateKillJobsOnCreditExhaustion(organizationId: string, killJobsOnCreditExhaustion: boolean) {
+        return this.creditsService.updateKillJobsOnCreditExhaustion(organizationId, killJobsOnCreditExhaustion);
+    }
+
     refundCreditsForGeneration(generationId: string) {
         return this.creditsService.refundCreditsForGeneration(generationId);
     }

@@ -8,8 +8,11 @@ type RawTxClient = TxClient & Pick<PrismaClient, "$queryRaw">;
 
 type DeductCreditsFlooredResultRow = {
     inserted_count: bigint;
+    old_balance: number | null;
     new_balance: number | null;
     new_subscription_balance: number | null;
+    kill_jobs_on_credit_exhaustion: boolean | null;
+    credit_floor: number | null;
 };
 
 /** Which extra column on `credit_transaction` links this deduction back to the exact row it charges for. */
@@ -29,6 +32,14 @@ export interface DeductCreditsFlooredParams {
 export interface DeductCreditsFlooredResult {
     deducted: boolean;
     newBalance?: number;
+    /**
+     * True when this deduction just pushed a zero-tolerance org (`killJobsOnCreditExhaustion`) from
+     * above its floor to at-or-below it - the signal callers use to kill whatever job caused it,
+     * instead of the default "let it finish, floor-clamped" behavior. Always false for an org that
+     * hasn't opted into kill-mode, or one that was already at/below its floor before this deduction
+     * (no *new* crossing to react to).
+     */
+    crossedIntoExhaustion: boolean;
 }
 
 /**
@@ -43,6 +54,7 @@ export interface DeductCreditsFlooredResult {
  * `subscription_credit_balance` consumption (which still floors at 0 - only the combined
  * `credit_balance` gets the org's configurable floor). `fkColumn` is one of a small, code-controlled
  * set of column names, safe to splice as a raw identifier since it's never user input.
+
  */
 export async function deductCreditsFloored(
     db: PrismaClient,
@@ -57,7 +69,12 @@ export async function deductCreditsFloored(
             const fkColumnIdentifier = Prisma.raw(fkColumn.name);
             const [result] = await rawTx.$queryRaw<Array<DeductCreditsFlooredResultRow>>`
                 WITH customer AS (
-                    SELECT organization_id, credit_balance, subscription_credit_balance, credit_floor
+                    SELECT
+                        organization_id,
+                        credit_balance,
+                        subscription_credit_balance,
+                        credit_floor,
+                        kill_jobs_on_credit_exhaustion
                     FROM billing_customer
                     WHERE organization_id = ${organizationId}
                     FOR UPDATE
@@ -68,6 +85,7 @@ export async function deductCreditsFloored(
                         credit_balance,
                         subscription_credit_balance,
                         credit_floor,
+                        kill_jobs_on_credit_exhaustion,
                         LEAST(subscription_credit_balance, ${cost}) AS subscription_consumed
                     FROM customer
                 ),
@@ -104,19 +122,30 @@ export async function deductCreditsFloored(
                 )
                 SELECT
                     (SELECT COUNT(*)::bigint FROM inserted) AS inserted_count,
+                    (SELECT credit_balance FROM eligible LIMIT 1) AS old_balance,
                     (SELECT credit_balance FROM updated LIMIT 1) AS new_balance,
-                    (SELECT subscription_credit_balance FROM updated LIMIT 1) AS new_subscription_balance
+                    (SELECT subscription_credit_balance FROM updated LIMIT 1) AS new_subscription_balance,
+                    (SELECT kill_jobs_on_credit_exhaustion FROM eligible LIMIT 1) AS kill_jobs_on_credit_exhaustion,
+                    (SELECT credit_floor FROM eligible LIMIT 1) AS credit_floor
             `;
 
             if (result == null) {
                 logger.warn("Floored deduction query returned no result row", { organizationId, transactionId });
-                return { deducted: false };
+                return { deducted: false, crossedIntoExhaustion: false };
             }
 
             if (result.inserted_count === 0n) {
                 logger.info("Floored deduction already recorded, skipping", { organizationId, transactionId });
-                return { deducted: false };
+                return { deducted: false, crossedIntoExhaustion: false };
             }
+
+            const crossedIntoExhaustion =
+                result.kill_jobs_on_credit_exhaustion === true &&
+                result.old_balance != null &&
+                result.new_balance != null &&
+                result.credit_floor != null &&
+                result.old_balance > result.credit_floor &&
+                result.new_balance <= result.credit_floor;
 
             logger.info("Deducted credits (floored)", {
                 organizationId,
@@ -124,13 +153,14 @@ export async function deductCreditsFloored(
                 transactionType,
                 cost,
                 newBalance: result.new_balance,
+                crossedIntoExhaustion,
             });
-            return { deducted: true, newBalance: result.new_balance ?? undefined };
+            return { deducted: true, newBalance: result.new_balance ?? undefined, crossedIntoExhaustion };
         })
         .catch((error: unknown) => {
             if (isUniqueConstraintError(error)) {
                 logger.info("Floored deduction already recorded, skipping", { organizationId, transactionId });
-                return { deducted: false };
+                return { deducted: false, crossedIntoExhaustion: false };
             }
             throw error;
         });

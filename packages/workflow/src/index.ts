@@ -14,3 +14,4 @@ export { getTemporalClient, resetTemporalClient } from "./client";
 export { TaskQueue } from "./task-queues";
 export type { WorkflowRef } from "./types";
 export { loadSnapshotObservabilityContext } from "./observability";
+export { CREDITS_EXHAUSTED_FAILURE_TYPE } from "./credits-exhausted-failure";

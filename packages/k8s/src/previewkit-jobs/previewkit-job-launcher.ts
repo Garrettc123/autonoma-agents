@@ -51,6 +51,12 @@ type JobType = "deploy" | "teardown" | "redeploy-app";
 /** Whether a launched Job can still write anything. `gone` is a 404: superseded, cancelled, or TTL-collected. */
 export type PreviewDeployJobState = "running" | "succeeded" | "failed" | "gone";
 
+/** What one cancellation sweep achieved. A `failed` Job was NOT stopped, so its runner may still be spending. */
+export interface CancelledJobs {
+    deleted: number;
+    failed: number;
+}
+
 // The "deploy family" - deploy and per-app redeploy share the per-environment
 // mutex (the Temporal workflows shared one workflowId), so launching either
 // supersedes any in-flight one. Teardown is excluded: a running teardown is
@@ -264,19 +270,70 @@ export class PreviewkitJobLauncher {
      * tolerates a brief overlap.
      */
     private async supersedeDeployFamily(envKey: string): Promise<void> {
-        const { jobNamespace } = this.options;
-        const labelSelector = `${LABEL_ENV}=${envKey},${DEPLOY_FAMILY_SELECTOR}`;
-        let jobs;
+        let jobs: V1Job[];
         try {
-            jobs = await this.batchApi.listNamespacedJob({ namespace: jobNamespace, labelSelector });
+            jobs = await this.listDeployFamilyJobs(envKey);
         } catch (err) {
-            this.logger.warn("Failed to list in-flight preview jobs to supersede; proceeding to create the new one", {
-                extra: { envKey, err },
-            });
+            this.logger.warn("Failed to list in-flight preview jobs to supersede", { extra: { envKey, err } });
             return;
         }
-        for (const job of jobs.items) {
+        await this.deleteJobs(jobs, "Superseded in-flight preview deploy job");
+    }
+
+    /**
+     * Kills every in-flight deploy-family Job (deploy + redeploy-app) belonging to one of `envKeys` - used when
+     * zero-tolerance orgs' credit balances cross their floor mid-build/deploy, to stop compute spend immediately
+     * rather than letting the build run to completion. Teardown is excluded: it frees resources rather than spending
+     * credits, so there is nothing to stop.
+     *
+     * Takes the whole set at once, and reports what it could not delete rather than throwing on it, because the
+     * caller (the `previewkit-credits-watcher` watcher) re-drives this off the cluster's live Jobs every sweep: one
+     * List then covers an exhausted org's whole fleet, and a Job that survives a failed delete is killed on the
+     * next sweep. Failing to List is different in kind - nothing was even enumerated - so that throws, letting the
+     * caller tell "swept, some deletes failed" from "never swept".
+     *
+     * This only guarantees the runner is SIGTERMed, not that it has exited by the time this resolves - callers must
+     * write the environment's terminal DB state BEFORE calling this, so the record is correct regardless of whether
+     * the runner's own drain wins the race.
+     */
+    async cancelJobsForEnvironments(envKeys: ReadonlySet<string>): Promise<CancelledJobs> {
+        if (envKeys.size === 0) return { deleted: 0, failed: 0 };
+
+        const jobs = await this.listDeployFamilyJobs();
+        const owned = jobs.filter((job) => {
+            const envKey = job.metadata?.labels?.[LABEL_ENV];
+            return envKey != null && envKeys.has(envKey);
+        });
+        this.logger.info("Cancelling in-flight preview jobs for credit exhaustion", {
+            extra: { envKeyCount: envKeys.size, deployFamilyJobCount: jobs.length, jobCount: owned.length },
+        });
+        return await this.deleteJobs(owned, "Killed in-flight preview job for credit exhaustion");
+    }
+
+    /**
+     * Lists deploy-family Jobs - for one env, or for every env in the shared Job namespace when `envKey` is omitted.
+     * Throws, so each caller decides for itself what a cluster it cannot read means.
+     */
+    private async listDeployFamilyJobs(envKey?: string): Promise<V1Job[]> {
+        const { jobNamespace } = this.options;
+        const labelSelector =
+            envKey != null ? `${LABEL_ENV}=${envKey},${DEPLOY_FAMILY_SELECTOR}` : DEPLOY_FAMILY_SELECTOR;
+        const { items } = await this.batchApi.listNamespacedJob({ namespace: jobNamespace, labelSelector });
+        return items;
+    }
+
+    /**
+     * Deletes each Job with `Background` propagation, so the pod goes away gracefully and the runner gets its
+     * SIGTERM. Never throws: an undeletable Job is counted, not raised, so one bad delete cannot strand the rest of
+     * the batch. A 404 is neither - the Job already finished or was superseded, which is the state we wanted.
+     */
+    private async deleteJobs(jobs: readonly V1Job[], deletedLogMessage: string): Promise<CancelledJobs> {
+        const { jobNamespace } = this.options;
+        let deleted = 0;
+        let failed = 0;
+        for (const job of jobs) {
             const name = job.metadata?.name;
+            const envKey = job.metadata?.labels?.[LABEL_ENV];
             if (name == null) continue;
             try {
                 await this.batchApi.deleteNamespacedJob({
@@ -284,14 +341,15 @@ export class PreviewkitJobLauncher {
                     namespace: jobNamespace,
                     propagationPolicy: "Background",
                 });
-                this.logger.info("Superseded in-flight preview deploy job", { extra: { envKey, supersededJob: name } });
+                deleted += 1;
+                this.logger.info(deletedLogMessage, { extra: { envKey, job: name } });
             } catch (err) {
                 if (isNotFound(err)) continue;
-                this.logger.warn("Failed to delete superseded preview job; relying on newest-wins ownership", {
-                    extra: { envKey, supersededJob: name, err },
-                });
+                failed += 1;
+                this.logger.warn("Failed to delete in-flight preview job", { extra: { envKey, job: name, err } });
             }
         }
+        return { deleted, failed };
     }
 
     /** Returns the name the server assigns from `generateName`. */

@@ -1,3 +1,4 @@
+import { readdirSync } from "node:fs";
 import { builtinModules } from "node:module";
 import { defineConfig } from "rolldown";
 
@@ -6,14 +7,33 @@ import { defineConfig } from "rolldown";
 // `node_modules` + tsx. Only node builtins stay external.
 const nodeBuiltins = [...builtinModules, ...builtinModules.map((m) => `node:${m}`)];
 
+const SCRIPTS_DIR = "scripts";
+
+// `dist/<name>.js` for the three jobs whose bundle name predates their directory name; every
+// CronJob manifest's `command:` names the bundle, so renaming these would break the deployed jobs.
+const BUNDLE_NAME_OVERRIDES: Record<string, string> = {
+    "vercel-billing-invoicer": "billing-invoicer",
+    "vercel-usage-reporter": "usage-reporter",
+    "preview-usage-meter": "usage-meter",
+};
+
+/**
+ * Every `scripts/<job>/index.ts`, discovered rather than hand-listed: a job whose entry is missing
+ * here builds into an image that silently lacks it, and its CronJob then crashloops on a `dist/`
+ * file that was never produced. Adding the directory is enough.
+ */
+function jobEntrypoints(): Record<string, string> {
+    const entries = readdirSync(SCRIPTS_DIR, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => {
+            const bundleName = BUNDLE_NAME_OVERRIDES[entry.name] ?? entry.name;
+            return [bundleName, `${SCRIPTS_DIR}/${entry.name}/index.ts`] as const;
+        });
+    return Object.fromEntries(entries);
+}
+
 export default defineConfig({
-    input: {
-        "billing-invoicer": "scripts/vercel-billing-invoicer/index.ts",
-        "usage-reporter": "scripts/vercel-usage-reporter/index.ts",
-        "usage-meter": "scripts/preview-usage-meter/index.ts",
-        "aws-compute-pricing-drift": "scripts/aws-compute-pricing-drift/index.ts",
-        "preview-environment-reaper": "scripts/preview-environment-reaper/index.ts",
-    },
+    input: jobEntrypoints(),
     output: {
         dir: "dist",
         format: "esm",

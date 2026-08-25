@@ -118,6 +118,7 @@ export interface BillingService {
     checkPreviewDeployCreditsGate(organizationId: string): Promise<PreviewDeployGateResult>;
     checkAnalysisCreditsGate(organizationId: string): Promise<AnalysisCreditsGateResult>;
     updateCreditFloor(organizationId: string, creditFloor: number): Promise<void>;
+    updateKillJobsOnCreditExhaustion(organizationId: string, killJobsOnCreditExhaustion: boolean): Promise<void>;
     refundCreditsForGeneration(generationId: string): Promise<void>;
     redeemPromoCode(organizationId: string, code: string): Promise<RedeemPromoCodeResult>;
     listPromoCodes(input?: ListPromoCodesInput): Promise<ListPromoCodesResult>;

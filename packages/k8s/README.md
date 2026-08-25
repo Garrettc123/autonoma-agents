@@ -78,6 +78,14 @@ stops that one Job. The pairing matters: the `previewkit.dev/env` label is per
 newer commit had already launched. A build is superseded by label and cancelled
 by name.
 
+`cancelJobsForEnvironments(envKeys)` is the third cancellation shape, for the
+`previewkit-credits-watcher` watcher: one List of the whole deploy family, then a
+delete for every Job whose `previewkit.dev/env` label is in the set. It reports
+`{ deleted, failed }` rather than throwing on a delete it could not make, because
+the watcher re-drives it off the cluster's live Jobs every sweep - a survivor is
+killed on the next one. Failing to List does throw: nothing was enumerated, and
+"never swept" has to be distinguishable from "swept, some deletes failed".
+
 `getDeployJobState(jobName)` answers whether that Job can still write anything. The
 runner exits 0 for every outcome it HANDLES, declining to deploy included, and a
 decline writes no database row at all - so the Job object is the only thing that

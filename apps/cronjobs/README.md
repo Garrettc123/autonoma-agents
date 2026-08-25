@@ -27,6 +27,7 @@ pnpm billing-invoicer
 pnpm usage-reporter
 pnpm usage-meter
 pnpm aws-compute-pricing-drift
+pnpm preview-environment-reaper
 ```
 
 ## Environment Variables
@@ -59,7 +60,12 @@ bundles each script with Rolldown (`rolldown.config.ts`) into a self-contained
 (Node 24 Alpine, with OpenSSL installed for Prisma's query engine) ships only
 `dist/` - no `node_modules`, no tsx - running as the unprivileged `node` user. The
 image has no default job - the CronJob manifest's `command:` must select the
-bundled script to run:
+bundled script to run.
+
+Rolldown discovers the entrypoints by scanning `scripts/*/index.ts`, so a new
+directory ships in the image with no config change. The bundle takes the
+directory's name, except for the three in `BUNDLE_NAME_OVERRIDES` whose deployed
+manifests predate it. Add the matching `pnpm` script here too, for local runs:
 
 ```yaml
 apiVersion: batch/v1

@@ -11,6 +11,7 @@ import {
 import type { ModelSession } from "@autonoma/diffs/analysis";
 import { type Logger, logger as rootLogger } from "@autonoma/logger";
 import type { ModelMessage } from "ai";
+import { rethrowIfCreditsExhausted } from "../activities/rethrow-credits-exhausted";
 import { createModelSession, getStorage } from "../services";
 import { uploadConversation } from "../upload-conversation";
 
@@ -76,7 +77,10 @@ async function recordRunArtifacts({
     const [conversationUrl] = await Promise.all([
         uploadAnalysisConversation({ snapshotId, conversation, logger }),
         persistAiCosts(db, session.costCollector.getRecords(), { investigationSnapshotId: snapshotId }, logger).catch(
-            (error) => logger.warn("Failed to persist the analysis costs", { err: error }),
+            (error: unknown) => {
+                rethrowIfCreditsExhausted(error);
+                logger.warn("Failed to persist the analysis costs", { err: error });
+            },
         ),
     ]);
     return conversationUrl;

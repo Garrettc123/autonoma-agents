@@ -64,3 +64,5 @@ export { persistAiCosts } from "./ai-cost-persister.service";
 export type { AiCostAnchor } from "./ai-cost-persister.service";
 export { deductCreditsForBuildUsage } from "./deduct-credits-for-build-usage";
 export { clearBranchTriggerBlock, recordBranchTriggerBlocked } from "./trigger-block";
+export { CreditsExhaustedError } from "./credits-exhausted-error";
+export { killEnvironmentForCreditExhaustion } from "./kill-environment-for-credits";

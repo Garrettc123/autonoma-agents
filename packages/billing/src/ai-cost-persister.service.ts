@@ -4,6 +4,7 @@ import { getObservabilityContext, type Logger } from "@autonoma/logger";
 import { BillingPricingService } from "./billing-pricing.service";
 import { usdToCreditCost } from "./billing-utils";
 import { deductCreditsFloored } from "./credits-deduction";
+import { CreditsExhaustedError } from "./credits-exhausted-error";
 
 const MICRODOLLARS_PER_USD = 1_000_000;
 
@@ -78,6 +79,11 @@ export async function persistAiCosts(
  * exact call. It deliberately does NOT key off the anchor (`generationId`/`investigationSnapshotId`):
  * a Temporal retry re-runs the AI calls and really does spend the money again, so its fresh batch is
  * new spend to charge, not a duplicate of the previous attempt to suppress.
+ *
+ * Best-effort covers deduction *failures* only. A deduction that SUCCEEDS and in doing so crosses a
+ * zero-tolerance org's floor throws {@link CreditsExhaustedError}, deliberately outside the
+ * try/catch: that is a business signal, not a billing hiccup, and the calling activity rethrows it
+ * (wrapped as an `ApplicationFailure`) so the workflow can kill the run rather than let it finish.
  */
 async function deductCreditsForAiCost(
     db: PrismaClient,
@@ -90,6 +96,7 @@ async function deductCreditsForAiCost(
     const [firstId] = [...aiCostRecordIds].sort();
     if (firstId == null) return;
 
+    let crossedIntoExhaustion = false;
     try {
         const pricing = await new BillingPricingService(db).getOrCreatePricing(organizationId);
         const cost = usdToCreditCost(costMicrodollars / MICRODOLLARS_PER_USD, pricing);
@@ -105,7 +112,7 @@ async function deductCreditsForAiCost(
             return;
         }
 
-        await deductCreditsFloored(
+        const result = await deductCreditsFloored(
             db,
             {
                 organizationId,
@@ -116,9 +123,18 @@ async function deductCreditsForAiCost(
             },
             logger,
         );
+        crossedIntoExhaustion = result.crossedIntoExhaustion;
     } catch (err) {
         logger.warn("Failed to deduct AI cost credits, continuing without deduction", {
             extra: { organizationId, aiCostRecordIds, costMicrodollars, err },
         });
+        return;
+    }
+
+    if (crossedIntoExhaustion) {
+        logger.warn("Organization crossed its zero-tolerance credit floor mid-run", {
+            extra: { organizationId, aiCostRecordIds },
+        });
+        throw new CreditsExhaustedError("Organization ran out of credits mid-run", organizationId);
     }
 }

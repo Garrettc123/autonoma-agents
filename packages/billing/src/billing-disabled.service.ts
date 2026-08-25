@@ -93,6 +93,10 @@ export class DisabledBillingService implements BillingService {
         return Promise.resolve();
     }
 
+    updateKillJobsOnCreditExhaustion(_organizationId: string, _killJobsOnCreditExhaustion: boolean) {
+        return Promise.resolve();
+    }
+
     refundCreditsForGeneration(_generationId: string) {
         return Promise.resolve();
     }

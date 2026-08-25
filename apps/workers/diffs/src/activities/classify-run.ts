@@ -36,6 +36,7 @@ import { webmToGif } from "../media/webm-to-gif";
 import { previewSecrets } from "../preview-secrets";
 import { createModelSession, getAnalysisStore, getStorage } from "../services";
 import { uploadConversation } from "../upload-conversation";
+import { rethrowIfCreditsExhausted } from "./rethrow-credits-exhausted";
 import { buildStepTrace } from "./step-trace";
 
 /** The preview facts the classifier's backend tools need: where to read logs, and what the pod's env holds. */
@@ -241,7 +242,10 @@ export async function classifyInvestigationRun(input: ClassifyInvestigationRunIn
                 session.costCollector.getRecords(),
                 { investigationSnapshotId: snapshotId },
                 logger,
-            ).catch((error) => logger.warn("Failed to persist classification costs", { err: error })),
+            ).catch((error: unknown) => {
+                rethrowIfCreditsExhausted(error);
+                logger.warn("Failed to persist classification costs", { err: error });
+            }),
         ]);
 
         // The report features the frame the classifier judged most descriptive (verdict.keyStepIndex), not

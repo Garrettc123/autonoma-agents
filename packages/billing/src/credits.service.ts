@@ -387,6 +387,22 @@ export class CreditsService extends Service {
     }
 
     /**
+     * Opts an org into (or out of) zero-tolerance credit enforcement: once true, a deduction that
+     * pushes this org's balance from above its floor to at-or-below it kills whatever job caused it
+     * (a PR analysis run, a previewkit build/deploy) instead of letting it run to completion
+     * floor-clamped like every other org. Deliberate and admin-only, same rollout shape as
+     * `updateCreditFloor` - defaults to false for every org.
+     */
+    async updateKillJobsOnCreditExhaustion(organizationId: string, killJobsOnCreditExhaustion: boolean): Promise<void> {
+        this.logger.info("Updating kill-jobs-on-credit-exhaustion", { organizationId, killJobsOnCreditExhaustion });
+        await this.db.billingCustomer.upsert({
+            where: { organizationId },
+            create: { organizationId, killJobsOnCreditExhaustion },
+            update: { killJobsOnCreditExhaustion },
+        });
+    }
+
+    /**
      * Deduct credits for a single managed LLM proxy request. `costUsd` is the
      * dollar amount OpenRouter charged us (from the response's usage accounting).
      * We convert to credits at the same rate top-ups are priced
