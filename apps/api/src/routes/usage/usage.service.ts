@@ -1,6 +1,6 @@
 import type { BillingService } from "@autonoma/billing";
 import { computePreviewUsageCost } from "@autonoma/billing";
-import type { Prisma, PrismaClient } from "@autonoma/db";
+import { Prisma, type PrismaClient } from "@autonoma/db";
 import { Service } from "../service";
 
 export interface BranchAiCostTag {
@@ -57,6 +57,40 @@ export interface EnvironmentComputeUsage {
      */
     organizationId: string;
     organizationName: string;
+    creditsPerVcpuHour: number;
+    creditsPerGbMemoryHour: number;
+}
+
+/** One org's measured compute over the window, repriced at the rates being considered. */
+export interface ComputeBillingProjectionRow {
+    organizationId: string;
+    organizationName: string;
+    buildCredits: number;
+    runningCredits: number;
+    totalCredits: number;
+    creditBalance: number;
+    creditFloor: number;
+    /** Where the balance would land. Below `creditFloor`, so deliberately allowed to go negative. */
+    balanceAfter: number;
+    /**
+     * True when this charge is what CROSSES the org's floor - which blocks it from starting new
+     * analysis runs, not just new previews (`checkAnalysisCreditsGate` has no feature flag). These
+     * are the orgs to top up before a rate is set, not after.
+     *
+     * An org already at or below its floor is excluded: it is blocked either way, so counting it
+     * would overstate the rate's blast radius. Those rows are still visible - `creditBalance` is
+     * already at or under `creditFloor` on them.
+     */
+    goesUnderwater: boolean;
+}
+
+export interface ComputeBillingProjection {
+    rows: ComputeBillingProjectionRow[];
+    organizationsCharged: number;
+    organizationsUnderwater: number;
+    totalCredits: number;
+    since: Date;
+    until: Date;
     creditsPerVcpuHour: number;
     creditsPerGbMemoryHour: number;
 }
@@ -172,5 +206,154 @@ export class UsageService extends Service {
             creditsPerVcpuHour: pricing.creditsPerVcpuHour,
             creditsPerGbMemoryHour: pricing.creditsPerGbMemoryHour,
         };
+    }
+
+    /**
+     * What every org WOULD have been charged for compute over a window, at rates that are passed
+     * in rather than read from `BillingPricing`. Compute is metered unconditionally today and only
+     * priced at 0, so this is how a rate is chosen and its blast radius measured before it is set -
+     * the deductions themselves have no dry-run mode and no feature flag in front of them.
+     *
+     * Reads only. The per-org credit totals come from `creditsByOrg`, which reprices in SQL rather
+     * than through `computePreviewUsageCost` - see the note there, and the test that pins the two
+     * formulas together. `balanceAfter` is deliberately NOT clamped the way the real deduction
+     * clamps at `creditFloor`, so it shows how far past the floor a rate would reach.
+     */
+    async computeBillingProjection(input: {
+        creditsPerVcpuHour: number;
+        creditsPerGbMemoryHour: number;
+        since: Date;
+        until: Date;
+    }): Promise<ComputeBillingProjection> {
+        const { creditsPerVcpuHour, creditsPerGbMemoryHour, since, until } = input;
+        this.logger.info("Projecting compute billing", {
+            extra: { creditsPerVcpuHour, creditsPerGbMemoryHour, since, until },
+        });
+
+        const [buildRows, runningRows] = await Promise.all([
+            this.creditsByOrg("previewkit_app_build_usage", input),
+            this.creditsByOrg("previewkit_usage_window", input),
+        ]);
+
+        const organizationIds = [...new Set([...buildRows, ...runningRows].map((row) => row.organizationId))];
+        if (organizationIds.length === 0) {
+            this.logger.info("Projected compute billing - no measured usage in window");
+            return {
+                rows: [],
+                organizationsCharged: 0,
+                organizationsUnderwater: 0,
+                totalCredits: 0,
+                since,
+                until,
+                creditsPerVcpuHour,
+                creditsPerGbMemoryHour,
+            };
+        }
+
+        const [organizations, customers] = await Promise.all([
+            this.db.organization.findMany({
+                where: { id: { in: organizationIds } },
+                select: { id: true, name: true },
+            }),
+            this.db.billingCustomer.findMany({
+                where: { organizationId: { in: organizationIds } },
+                select: { organizationId: true, creditBalance: true, creditFloor: true },
+            }),
+        ]);
+
+        const nameByOrg = new Map(organizations.map((org) => [org.id, org.name]));
+        const customerByOrg = new Map(customers.map((customer) => [customer.organizationId, customer]));
+        const buildCreditsByOrg = new Map(buildRows.map((row) => [row.organizationId, row.credits]));
+        const runningCreditsByOrg = new Map(runningRows.map((row) => [row.organizationId, row.credits]));
+
+        const rows: ComputeBillingProjectionRow[] = organizationIds.map((organizationId) => {
+            const buildCredits = buildCreditsByOrg.get(organizationId) ?? 0;
+            const runningCredits = runningCreditsByOrg.get(organizationId) ?? 0;
+            const totalCredits = buildCredits + runningCredits;
+            const customer = customerByOrg.get(organizationId);
+            const creditBalance = customer?.creditBalance ?? 0;
+            const creditFloor = customer?.creditFloor ?? 0;
+            const balanceAfter = creditBalance - totalCredits;
+            const wasAboveFloor = creditBalance > creditFloor;
+
+            return {
+                organizationId,
+                organizationName: nameByOrg.get(organizationId) ?? organizationId,
+                buildCredits,
+                runningCredits,
+                totalCredits,
+                creditBalance,
+                creditFloor,
+                balanceAfter,
+                goesUnderwater: totalCredits > 0 && wasAboveFloor && balanceAfter <= creditFloor,
+            };
+        });
+
+        rows.sort((a, b) => b.totalCredits - a.totalCredits);
+        const charged = rows.filter((row) => row.totalCredits > 0);
+        const projection: ComputeBillingProjection = {
+            rows,
+            organizationsCharged: charged.length,
+            organizationsUnderwater: rows.filter((row) => row.goesUnderwater).length,
+            totalCredits: rows.reduce((sum, row) => sum + row.totalCredits, 0),
+            since,
+            until,
+            creditsPerVcpuHour,
+            creditsPerGbMemoryHour,
+        };
+
+        this.logger.info("Projected compute billing", {
+            extra: {
+                organizationsCharged: projection.organizationsCharged,
+                organizationsUnderwater: projection.organizationsUnderwater,
+                totalCredits: projection.totalCredits,
+            },
+        });
+        return projection;
+    }
+
+    /**
+     * Per-org credits for one usage table, rounded the way the real deduction rounds.
+     *
+     * The rounding is why this is raw SQL and not a `groupBy` with `_sum`. Each row is charged
+     * `max(1, ceil(cost))` INDIVIDUALLY, so an org with hundreds of near-idle 15-minute windows
+     * pays one credit for each of them - summing the seconds first and rounding once reports a
+     * fraction of the real bill, which would defeat the point of projecting it. Rows costing
+     * nothing are skipped here exactly as `deductCreditsForPreviewUsage` skips them.
+     *
+     * That makes the cost expression below a hand-maintained copy of `computePreviewUsageCost` -
+     * SQL cannot call it. `admin-compute-billing-projection.test.ts` pins the two together over a
+     * fixture set, so changing one without the other fails rather than silently reporting a bill
+     * the deduction would never charge.
+     *
+     * Neither table indexes `created_at` (both only index `organizationId`), so a wide window is a
+     * sequential scan that grows with the table. Acceptable for an on-demand admin projection; add
+     * the index if this ever runs on a schedule.
+     */
+    private async creditsByOrg(
+        table: "previewkit_app_build_usage" | "previewkit_usage_window",
+        rate: { creditsPerVcpuHour: number; creditsPerGbMemoryHour: number; since: Date; until: Date },
+    ): Promise<Array<{ organizationId: string; credits: number }>> {
+        const cost = Prisma.sql`
+            (vcpu_seconds / 3600.0) * ${rate.creditsPerVcpuHour}
+                + (gb_seconds / 3600.0) * ${rate.creditsPerGbMemoryHour}
+        `;
+        // The table name cannot be a bind parameter, and the union type above is the only thing
+        // that reaches this - no caller-supplied string ever becomes an identifier here.
+        const from =
+            table === "previewkit_app_build_usage"
+                ? Prisma.sql`previewkit_app_build_usage`
+                : Prisma.sql`previewkit_usage_window`;
+
+        const rows = await this.db.$queryRaw<Array<{ organization_id: string; credits: bigint }>>`
+            SELECT organization_id, SUM(GREATEST(1, CEIL(${cost})))::bigint AS credits
+            FROM ${from}
+            WHERE created_at >= ${rate.since}
+              AND created_at <= ${rate.until}
+              AND ${cost} > 0
+            GROUP BY organization_id
+        `;
+
+        return rows.map((row) => ({ organizationId: row.organization_id, credits: Number(row.credits) }));
     }
 }

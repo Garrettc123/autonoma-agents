@@ -278,5 +278,21 @@ export const adminRouter = router({
         environmentComputeUsage: internalProcedure
             .input(z.object({ environmentId: z.string().min(1) }))
             .query(({ ctx: { services }, input }) => services.usage.environmentComputeUsage(input.environmentId)),
+        /**
+         * What every org WOULD be charged for compute at the given rates over the given window.
+         * Read-only: compute is metered unconditionally but priced at 0, and the deductions have
+         * no dry-run mode, so this is the only way to size a rate - and find the orgs it would
+         * push below their floor - before setting one.
+         */
+        computeBillingProjection: internalProcedure
+            .input(
+                z.object({
+                    creditsPerVcpuHour: z.number().int().min(0),
+                    creditsPerGbMemoryHour: z.number().int().min(0),
+                    since: z.date(),
+                    until: z.date(),
+                }),
+            )
+            .query(({ ctx: { services }, input }) => services.usage.computeBillingProjection(input)),
     }),
 });
