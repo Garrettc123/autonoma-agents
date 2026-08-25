@@ -33,6 +33,7 @@ import { Route as BlacklightauthChooseOrganizationRouteImport } from './routes/_
 import { Route as BlacklightauthLoginRouteRouteImport } from './routes/_blacklight/(auth)/login/route'
 import { Route as BlacklightAppShellAdminIndexRouteImport } from './routes/_blacklight/_app-shell/admin/index'
 import { Route as BlacklightauthLoginIndexRouteImport } from './routes/_blacklight/(auth)/login/index'
+import { Route as BlacklightAppShellAdminComputeBillingRouteImport } from './routes/_blacklight/_app-shell/admin/compute-billing'
 import { Route as BlacklightauthLoginTestAccountRouteImport } from './routes/_blacklight/(auth)/login/test-account'
 import { Route as BlacklightAppShellAppAppSlugRouteRouteImport } from './routes/_blacklight/_app-shell/app.$appSlug/route'
 import { Route as BlacklightAppShellAppAppSlugIndexRouteImport } from './routes/_blacklight/_app-shell/app.$appSlug/index'
@@ -209,6 +210,12 @@ const BlacklightauthLoginIndexRoute =
     id: '/',
     path: '/',
     getParentRoute: () => BlacklightauthLoginRouteRoute,
+  } as any)
+const BlacklightAppShellAdminComputeBillingRoute =
+  BlacklightAppShellAdminComputeBillingRouteImport.update({
+    id: '/admin/compute-billing',
+    path: '/admin/compute-billing',
+    getParentRoute: () => BlacklightAppShellRouteRoute,
   } as any)
 const BlacklightauthLoginTestAccountRoute =
   BlacklightauthLoginTestAccountRouteImport.update({
@@ -542,6 +549,7 @@ export interface FileRoutesByFullPath {
   '/onboarding/previewkit-config': typeof BlacklightOnboardingPreviewkitConfigRoute
   '/app/$appSlug': typeof BlacklightAppShellAppAppSlugRouteRouteWithChildren
   '/login/test-account': typeof BlacklightauthLoginTestAccountRoute
+  '/admin/compute-billing': typeof BlacklightAppShellAdminComputeBillingRoute
   '/login/': typeof BlacklightauthLoginIndexRoute
   '/admin/': typeof BlacklightAppShellAdminIndexRoute
   '/app/$appSlug/admin': typeof BlacklightAppShellAppAppSlugAdminRouteRouteWithChildren
@@ -608,6 +616,7 @@ export interface FileRoutesByTo {
   '/onboarding/preview-environment': typeof BlacklightOnboardingPreviewEnvironmentRoute
   '/onboarding/previewkit-config': typeof BlacklightOnboardingPreviewkitConfigRoute
   '/login/test-account': typeof BlacklightauthLoginTestAccountRoute
+  '/admin/compute-billing': typeof BlacklightAppShellAdminComputeBillingRoute
   '/login': typeof BlacklightauthLoginIndexRoute
   '/admin': typeof BlacklightAppShellAdminIndexRoute
   '/admin/previewkit': typeof BlacklightAppShellAdminPreviewkitIndexRoute
@@ -673,6 +682,7 @@ export interface FileRoutesById {
   '/_blacklight/_app-shell/': typeof BlacklightAppShellIndexRoute
   '/_blacklight/_app-shell/app/$appSlug': typeof BlacklightAppShellAppAppSlugRouteRouteWithChildren
   '/_blacklight/(auth)/login/test-account': typeof BlacklightauthLoginTestAccountRoute
+  '/_blacklight/_app-shell/admin/compute-billing': typeof BlacklightAppShellAdminComputeBillingRoute
   '/_blacklight/(auth)/login/': typeof BlacklightauthLoginIndexRoute
   '/_blacklight/_app-shell/admin/': typeof BlacklightAppShellAdminIndexRoute
   '/_blacklight/_app-shell/app/$appSlug/admin': typeof BlacklightAppShellAppAppSlugAdminRouteRouteWithChildren
@@ -744,6 +754,7 @@ export interface FileRouteTypes {
     | '/onboarding/previewkit-config'
     | '/app/$appSlug'
     | '/login/test-account'
+    | '/admin/compute-billing'
     | '/login/'
     | '/admin/'
     | '/app/$appSlug/admin'
@@ -810,6 +821,7 @@ export interface FileRouteTypes {
     | '/onboarding/preview-environment'
     | '/onboarding/previewkit-config'
     | '/login/test-account'
+    | '/admin/compute-billing'
     | '/login'
     | '/admin'
     | '/admin/previewkit'
@@ -874,6 +886,7 @@ export interface FileRouteTypes {
     | '/_blacklight/_app-shell/'
     | '/_blacklight/_app-shell/app/$appSlug'
     | '/_blacklight/(auth)/login/test-account'
+    | '/_blacklight/_app-shell/admin/compute-billing'
     | '/_blacklight/(auth)/login/'
     | '/_blacklight/_app-shell/admin/'
     | '/_blacklight/_app-shell/app/$appSlug/admin'
@@ -1100,6 +1113,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/login/'
       preLoaderRoute: typeof BlacklightauthLoginIndexRouteImport
       parentRoute: typeof BlacklightauthLoginRouteRoute
+    }
+    '/_blacklight/_app-shell/admin/compute-billing': {
+      id: '/_blacklight/_app-shell/admin/compute-billing'
+      path: '/admin/compute-billing'
+      fullPath: '/admin/compute-billing'
+      preLoaderRoute: typeof BlacklightAppShellAdminComputeBillingRouteImport
+      parentRoute: typeof BlacklightAppShellRouteRoute
     }
     '/_blacklight/(auth)/login/test-account': {
       id: '/_blacklight/(auth)/login/test-account'
@@ -1668,6 +1688,7 @@ const BlacklightAppShellAppAppSlugRouteRouteWithChildren =
 interface BlacklightAppShellRouteRouteChildren {
   BlacklightAppShellIndexRoute: typeof BlacklightAppShellIndexRoute
   BlacklightAppShellAppAppSlugRouteRoute: typeof BlacklightAppShellAppAppSlugRouteRouteWithChildren
+  BlacklightAppShellAdminComputeBillingRoute: typeof BlacklightAppShellAdminComputeBillingRoute
   BlacklightAppShellAdminIndexRoute: typeof BlacklightAppShellAdminIndexRoute
   BlacklightAppShellAdminPreviewkitIndexRoute: typeof BlacklightAppShellAdminPreviewkitIndexRoute
 }
@@ -1677,6 +1698,8 @@ const BlacklightAppShellRouteRouteChildren: BlacklightAppShellRouteRouteChildren
     BlacklightAppShellIndexRoute: BlacklightAppShellIndexRoute,
     BlacklightAppShellAppAppSlugRouteRoute:
       BlacklightAppShellAppAppSlugRouteRouteWithChildren,
+    BlacklightAppShellAdminComputeBillingRoute:
+      BlacklightAppShellAdminComputeBillingRoute,
     BlacklightAppShellAdminIndexRoute: BlacklightAppShellAdminIndexRoute,
     BlacklightAppShellAdminPreviewkitIndexRoute:
       BlacklightAppShellAdminPreviewkitIndexRoute,

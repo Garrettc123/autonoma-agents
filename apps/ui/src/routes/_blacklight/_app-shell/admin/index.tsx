@@ -21,6 +21,7 @@ import { CheckIcon } from "@phosphor-icons/react/Check";
 import { CheckCircleIcon } from "@phosphor-icons/react/CheckCircle";
 import { ClockIcon } from "@phosphor-icons/react/Clock";
 import { CubeTransparentIcon } from "@phosphor-icons/react/CubeTransparent";
+import { CurrencyDollarIcon } from "@phosphor-icons/react/CurrencyDollar";
 import { DownloadSimpleIcon } from "@phosphor-icons/react/DownloadSimple";
 import { GiftIcon } from "@phosphor-icons/react/Gift";
 import { GithubLogoIcon } from "@phosphor-icons/react/GithubLogo";
@@ -915,6 +916,10 @@ function AdminContent() {
             <Button variant="outline" size="sm" render={<Link to="/admin/previewkit" />}>
               <CubeTransparentIcon size={14} />
               Preview environments
+            </Button>
+            <Button variant="outline" size="sm" render={<Link to="/admin/compute-billing" />}>
+              <CurrencyDollarIcon size={14} />
+              Compute billing
             </Button>
             <Button variant="outline" size="sm" onClick={() => setCreateOpen(true)}>
               <PlusIcon size={14} />

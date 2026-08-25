@@ -7,6 +7,7 @@ import { trpc } from "lib/trpc";
 type RouterInputs = inferRouterInputs<AppRouter>;
 export type AdminOrganizationsInput = RouterInputs["admin"]["listOrganizations"];
 export type AdminPromoCodesInput = RouterInputs["admin"]["billing"]["listPromoCodes"];
+export type ComputeBillingProjectionInput = RouterInputs["admin"]["usage"]["computeBillingProjection"];
 
 export function useAdminOrganizations(input: AdminOrganizationsInput) {
     return useSuspenseQuery(trpc.admin.listOrganizations.queryOptions(input));
@@ -229,6 +230,20 @@ export function useAdminComputePricingReference(enabled: boolean) {
     return useQuery({
         ...trpc.admin.billing.getComputePricingReference.queryOptions(),
         enabled,
+    });
+}
+
+/**
+ * What every org WOULD be charged for compute at the given rates over the given window. Read-only
+ * and never billed - `enabled` is false until an admin explicitly asks, because this is a
+ * what-if, not a page load.
+ */
+export function useComputeBillingProjection(input: ComputeBillingProjectionInput | undefined) {
+    return useQuery({
+        ...trpc.admin.usage.computeBillingProjection.queryOptions(
+            input ?? { creditsPerVcpuHour: 0, creditsPerGbMemoryHour: 0, since: new Date(0), until: new Date(0) },
+        ),
+        enabled: input != null,
     });
 }
 
