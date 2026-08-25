@@ -7,6 +7,7 @@ import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { oAuthDiscoveryMetadata, oAuthProtectedResourceMetadata } from "better-auth/plugins";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { analysisHttpRouter } from "./analysis/analysis-http.router";
 import { applicationSetupHttpRouter } from "./application-setup/application-setup-http.router";
 import { MCP_RESOURCE_URL } from "./auth";
 import { autonomaSdkHttpRouter } from "./autonoma-sdk/autonoma-sdk-http.router";
@@ -166,6 +167,10 @@ export function createApiApp() {
     // ─── Diffs ─────────────────────────────────────────────────────
 
     app.route("/v1/diffs", diffsHttpRouter);
+
+    // ─── Analysis (agent-authored messages) ────────────────────────
+
+    app.route("/v1/analysis", analysisHttpRouter);
 
     // ─── GitHub ───────────────────────────────────────────────────────
 

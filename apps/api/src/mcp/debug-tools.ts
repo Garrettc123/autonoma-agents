@@ -9,6 +9,10 @@ import {
 } from "@autonoma/types";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import type {
+    DeliverUserPromptDeferralReason,
+    DeliverUserPromptRefusal,
+} from "../analysis/deliver-user-prompt.service";
 import type { MergeGateService } from "../github/merge-gate.service";
 import { type DeployFreshness, deployFreshness } from "../previewkit/deploy-freshness";
 import { MAX_WAIT_SECONDS } from "../previewkit/previewkit-environments.service";
@@ -129,6 +133,27 @@ const targetPrInput = {
         ),
 };
 
+const sendMessageInput = {
+    ...targetInputFields,
+    prNumber: z
+        .number()
+        .int()
+        .min(1)
+        .describe(
+            "The pull request's number. This needs a real pull request - the base environment (0) has no PR " +
+                "branch to direct.",
+        ),
+    message: z
+        .string()
+        .min(1)
+        .describe(
+            "The natural-language instruction for Autonoma's next run of this PR. One-shot with all its context " +
+                "baked in - there is no thread and no reply. Say what to focus the re-analysis on (a flow, a risk, " +
+                "a file). Today Autonoma can only RE-ANALYZE with your instruction; it cannot edit the test suite, " +
+                "so ask for coverage of something, not for a test to be written or changed.",
+        ),
+};
+
 /**
  * The `unavailable` result for a PR whose LIVE preview environment is gone
  * (never deployed, or - far more often - torn down after Autonoma finished
@@ -173,6 +198,33 @@ function noLinkedRepositoryMessage(repoFullName: string): string {
         `${repoFullName} is not linked to a GitHub repository Autonoma can read, so there is no pull request to ` +
         `analyze. Link the repository first.`
     );
+}
+
+function deferredMessageText(repoFullName: string, prNumber: number, reason: DeliverUserPromptDeferralReason): string {
+    const tail = `It will be addressed by the next analysis run of ${repoFullName} PR ${prNumber}.`;
+    switch (reason) {
+        case "activation_gated":
+            return (
+                `Recorded your message, but this organization runs analysis only on an explicit request, so no run ` +
+                `started now. ${tail}`
+            );
+        case "out_of_credits":
+            return `Recorded your message, but the organization is out of analysis credits, so no run started. ${tail}`;
+    }
+}
+
+function refusedMessageText(repoFullName: string, prNumber: number, reason: DeliverUserPromptRefusal): string {
+    switch (reason) {
+        case "pr_closed":
+            return `${repoFullName} PR ${prNumber} is closed, so its branch will not run again. Nothing was enqueued.`;
+        case "pr_merged":
+            return `${repoFullName} PR ${prNumber} is merged, so its branch will not run again. Nothing was enqueued.`;
+        case "not_onboarded":
+            return (
+                `${repoFullName} has not finished onboarding, so there is no test suite for Autonoma to direct. ` +
+                `Finish setup first, then send the message.`
+            );
+    }
 }
 
 /** The `unavailable` result for a PR Autonoma has not analyzed. */
@@ -487,6 +539,62 @@ export function registerDebugTools(server: McpServer, deps: DebugToolDeps): void
                             `gate or activation is not enabled, this was a no-op. Call get_analysis to read the ` +
                             `result.`,
                     });
+                } catch (err) {
+                    return toToolResult(err);
+                }
+            }),
+    );
+
+    server.registerTool(
+        "send_analysis_message",
+        {
+            title: "Send Autonoma a message directing its analysis of a PR",
+            description:
+                "Hand Autonoma a natural-language instruction for its next analysis run of this PR - the same " +
+                "inbox a reviewer's comment feeds. Use it to STEER the re-analysis: focus it on a flow you just " +
+                "fixed, a risk you are worried about, or a file you changed. If a run is already in flight it " +
+                "picks the message up before it finishes; if the branch is idle, delivering the message starts a " +
+                "run. The run addresses your message in its report. Today this can only direct RE-ANALYSIS - it " +
+                "cannot edit the test suite, so a message asking for a test to be written or changed is answered " +
+                "honestly as out of scope, not acted on. Names the app by repoFullName ('owner/repo') or " +
+                "applicationId, plus the PR number. It is refused (nothing enqueued) for a closed or merged PR, or " +
+                "an app that has not finished onboarding.",
+            inputSchema: sendMessageInput,
+            annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+        },
+        async (input) =>
+            analytics.track("send_analysis_message", async () => {
+                const { prNumber, message } = input;
+                logger.info("send_analysis_message", { extra: { target: describeTarget(input), prNumber } });
+                try {
+                    const { organizationId, githubRepositoryId, repoFullName } = await resolveTarget(input);
+                    if (githubRepositoryId == null) return errorResult(noLinkedRepositoryMessage(repoFullName));
+                    const receipt = await services.deliverUserPrompt.deliverUserPrompt({
+                        organizationId,
+                        repoId: githubRepositoryId,
+                        prNumber,
+                        text: message,
+                        author: MCP_ACTOR_LOGIN,
+                        source: "mcp",
+                    });
+                    switch (receipt.status) {
+                        case "started":
+                            return jsonResult({
+                                status: "started",
+                                message:
+                                    `Delivered your message to ${repoFullName} PR ${prNumber} and started/updated ` +
+                                    `its analysis run. The run addresses your message in its report - call ` +
+                                    `get_analysis once it finishes.`,
+                            });
+                        case "deferred":
+                            return jsonResult({
+                                status: "deferred",
+                                reason: receipt.reason,
+                                message: deferredMessageText(repoFullName, prNumber, receipt.reason),
+                            });
+                        case "refused":
+                            return errorResult(refusedMessageText(repoFullName, prNumber, receipt.reason));
+                    }
                 } catch (err) {
                     return toToolResult(err);
                 }

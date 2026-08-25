@@ -37,5 +37,7 @@ function resolveRecord(record: AnalysisEventRecord): ResolvedAnalysisEvent {
     switch (record.type) {
         case "commits_pushed":
             return { type: record.type, payload: record.payload, source: record.source, createdAt: record.createdAt };
+        case "user_prompt":
+            return { type: record.type, payload: record.payload, source: record.source, createdAt: record.createdAt };
     }
 }

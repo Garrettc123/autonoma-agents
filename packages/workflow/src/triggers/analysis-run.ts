@@ -5,6 +5,7 @@ import { getTemporalClient } from "../client";
 import { getWorkflowSearchAttributes } from "../search-attributes";
 import { TaskQueue } from "../task-queues";
 import { WORKFLOW_TYPE } from "../workflow-types";
+import { analysisInboxSignal } from "../workflows/analysis-run-signals";
 import type { AnalysisRunWorkflowInput } from "../workflows/analysis-run.workflow";
 
 /**
@@ -43,6 +44,34 @@ export async function triggerAnalysisRun(input: AnalysisRunWorkflowInput): Promi
         // request that cannot name the workflow it started is undiagnosable later: the
         // only alternative is cluster access, and the person who needs the answer is
         // usually an agent that has none.
+        return workflowId;
+    });
+}
+
+/**
+ * Deliver a pending-inbox nudge to a branch's analysis run, starting the run if none is in flight. Unlike
+ * {@link triggerAnalysisRun}, this does NOT terminate an existing run: an event landing mid-run must reach the run
+ * already working the branch, not replace it. `signalWithStart` signals a running one or starts an idle one.
+ */
+export async function signalWithStartAnalysisRun(input: AnalysisRunWorkflowInput): Promise<string> {
+    return await withObservabilityContext({ branch: { branchId: input.branchId } }, async () => {
+        const client = await getTemporalClient();
+        const workflowId = analysisRunWorkflowId(input.branchId);
+        logger.info("Signalling analysis run inbox (start if idle)", {
+            extra: { workflowId, headSha: input.headSha },
+        });
+
+        await client.workflow.signalWithStart(WORKFLOW_TYPE.ANALYSIS_RUN, {
+            workflowId,
+            taskQueue: TaskQueue.GENERAL,
+            workflowExecutionTimeout: ANALYSIS_RUN_EXECUTION_TIMEOUT,
+            searchAttributes: getWorkflowSearchAttributes(),
+            args: [input],
+            signal: analysisInboxSignal,
+            signalArgs: [],
+        });
+
+        logger.info("Analysis run inbox signalled", { extra: { workflowId } });
         return workflowId;
     });
 }

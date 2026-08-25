@@ -10,7 +10,9 @@ and `analysis_report`, and never touches an assignment (the suite is `@autonoma/
 write sets are disjoint).
 
 It also owns the **analysis inbox** (`analysis_event`): the transactional queue producers enqueue occurrences into
-and a run drains. `AnalysisEventStore` is its sole reader and writer - see the interface below.
+and a run drains. `AnalysisEventStore` is its sole reader and writer - see the interface below. Event kinds:
+`commits_pushed` (a real push, carrying the head/base to analyze) and `user_prompt` (a one-shot natural-language
+instruction for the claiming run, carrying `{ text, author }`).
 
 ## Interface
 

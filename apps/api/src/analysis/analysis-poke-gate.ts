@@ -3,11 +3,14 @@ import type { PrismaClient } from "@autonoma/db";
 import { isActivationGated } from "./is-activation-gated";
 
 /**
- * Whether a push may wake the analysis workflow now, or must persist as a pending event and wait:
+ * Why the gate declined to poke now:
  * - `activation_gated`: the org runs only on an explicit request; the event waits for that request to claim it.
- * - `out_of_credits`: the org is at its credit floor; the event waits for a top-up to re-poke it.
+ * - `out_of_credits`: the org is at its credit floor; the event waits until its balance clears the floor.
  */
-export type AnalysisPokeDecision = { poke: true } | { poke: false; reason: "activation_gated" | "out_of_credits" };
+export type AnalysisPokeDeferralReason = "activation_gated" | "out_of_credits";
+
+/** Whether a push may wake the analysis workflow now, or must persist as a pending event and wait. */
+export type AnalysisPokeDecision = { poke: true } | { poke: false; reason: AnalysisPokeDeferralReason };
 
 export interface AnalysisPokeGateDeps {
     db: PrismaClient;

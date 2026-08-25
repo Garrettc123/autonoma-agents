@@ -82,6 +82,7 @@ Hono HTTP server
   ├── /v1/github/**        - GitHub webhooks and API endpoints
   ├── /v1/previewkit/**    - Previewkit environments + secrets (secrets/status/schema native; deploy/teardown/redeploy forwarded to Previewkit)
   ├── /v1/setup/**         - test planner setup (API key): setups, events, artifacts, scenario-recipe-versions
+  ├── /v1/analysis/**      - agent-authored analysis messages (API key): POST /messages delivers a user_prompt to a PR's run
   ├── /v1/llm-proxy/**     - managed LLM proxy for the planner CLI (API key): chat/completions
   ├── /v1/mcp              - MCP server for coding agents (OAuth or API key); /v1/mcp/debug and /v1/mcp/onboarding are aliases
   └── /v1/trpc/*           - tRPC fetch adapter
@@ -288,6 +289,22 @@ billing `onCreditsGranted` hook.)
 Each producer threads its `source`
 (`webhook`/`label`/`comment`/`ui`/`vercel`/`ci`/`onboarding`/`mcp`/`admin`/`http`) down to the seam; the merge-gate
 maps its activation `ANALYSIS_RUN_SOURCE` onto that enum.
+
+### Agent-authored messages (`user_prompt` events)
+
+An agent (a conversation agent in the app, a Claude Code plugin, the planner's smoke tests) can direct a PR's
+analysis in natural language. `DeliverUserPromptService` (`src/analysis/deliver-user-prompt.service.ts`) is the one
+seam - shaped like the future `AnalysisTrigger.deliver` adapter: it resolves and authorizes the branch, refuses a
+message that could never be claimed (a closed/merged PR, an un-onboarded app - with nothing enqueued), pokes the
+gate **requested-like** (bypasses activation, respects the credit floor), enqueues a `user_prompt` event, then
+`signalWithStartAnalysisRun`s the run (start if idle, signal if mid-run - never terminate). It returns a
+receipt (`started | deferred | refused`). Two thin transports share it, holding no decision logic:
+
+- **HTTP** (`POST /v1/analysis/messages`, API key) - `{ repo_id, pr_number, message, author? }`.
+- **MCP** - the `send_analysis_message` debug tool a coding agent calls from the editor.
+
+v1 is directed re-analysis only: a message asking for suite EDITS is answered honestly as out of scope, not acted
+on (the addressing lives in the diffs pipeline).
 
 ### Explicit deploy requests are not refusable
 

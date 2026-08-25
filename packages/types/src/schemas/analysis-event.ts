@@ -5,7 +5,7 @@ import { z } from "zod";
  * regardless of kind, so this is a single flat enum rather than a table per type. New kinds (a user prompt, a
  * previewkit-config change) are added here on demand, never speculatively.
  */
-export const analysisEventTypeSchema = z.enum(["commits_pushed"]);
+export const analysisEventTypeSchema = z.enum(["commits_pushed", "user_prompt"]);
 export type AnalysisEventType = z.infer<typeof analysisEventTypeSchema>;
 
 /** Which producer path an event came in through. */
@@ -31,6 +31,13 @@ export const commitsPushedPayloadSchema = z.object({
 });
 export type CommitsPushedPayload = z.infer<typeof commitsPushedPayloadSchema>;
 
+/** A `user_prompt` event's payload: a one-shot natural-language instruction for the run that claims it, and who wrote it. */
+export const userPromptPayloadSchema = z.object({
+    text: z.string().min(1),
+    author: z.string().min(1),
+});
+export type UserPromptPayload = z.infer<typeof userPromptPayloadSchema>;
+
 /**
  * A whole analysis event - its `type` tag paired with the payload that tag implies. The store validates a raw
  * `{ type, payload }` pair against this at the read/write boundary, so a row's JSONB payload can never disagree
@@ -38,6 +45,7 @@ export type CommitsPushedPayload = z.infer<typeof commitsPushedPayloadSchema>;
  */
 export const analysisEventBodySchema = z.discriminatedUnion("type", [
     z.object({ type: z.literal("commits_pushed"), payload: commitsPushedPayloadSchema }),
+    z.object({ type: z.literal("user_prompt"), payload: userPromptPayloadSchema }),
 ]);
 export type AnalysisEventBody = z.infer<typeof analysisEventBodySchema>;
 

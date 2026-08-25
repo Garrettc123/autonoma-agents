@@ -215,6 +215,8 @@ function renderEvent(event: ResolvedAnalysisEvent): string {
             const base = event.payload.baseSha != null ? `, base \`${event.payload.baseSha}\`` : "";
             return `- ${event.createdAt.toISOString()} [${event.source}] commits pushed: head \`${event.payload.headSha}\`${base}`;
         }
+        case "user_prompt":
+            return `- ${event.createdAt.toISOString()} [${event.source}] message from ${event.payload.author}: ${event.payload.text}`;
     }
 }
 

@@ -3,7 +3,7 @@ import { createBillingService } from "@autonoma/billing";
 import { db } from "@autonoma/db";
 import { EncryptionHelper, ScenarioManager } from "@autonoma/scenario";
 import { S3Storage } from "@autonoma/storage";
-import { triggerBatchGeneration } from "@autonoma/workflow";
+import { signalWithStartAnalysisRun, triggerBatchGeneration } from "@autonoma/workflow";
 import type { Context as HonoContext } from "hono";
 import type { AuthSession, AuthUser } from "./auth";
 import { buildAuth } from "./auth";
@@ -67,6 +67,7 @@ export function createServiceContext() {
             getVercelEncryptionHelper,
             githubApp,
             startAnalysisRun: previewkitTriggers.startAnalysisRun,
+            signalWithStartAnalysisRun,
             startGenerationBatch: triggerBatchGeneration,
             startPreviewBuild: previewkitTriggers.startPreviewBuild,
             triggerPreviewTeardown: previewkitTriggers.teardown,

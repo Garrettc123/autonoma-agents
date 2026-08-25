@@ -766,6 +766,7 @@ enum TriggerSource {
 
 enum AnalysisEventType {
   commits_pushed
+  user_prompt
 
   @@map("analysis_event_type")
 }

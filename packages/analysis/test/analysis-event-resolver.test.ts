@@ -63,5 +63,32 @@ analysisSuite({
 
             expect(await resolver.resolveForSnapshot(run.snapshotId)).toEqual([]);
         });
+
+        test("resolves a claimed user_prompt event to its recorded instruction", async ({ harness }) => {
+            const run = await harness.seedAnalysis();
+            const resolver = new AnalysisEventResolver(harness.eventStore);
+            const { id } = await harness.eventStore.enqueue({
+                branchId: run.branchId,
+                organizationId: run.organizationId,
+                source: "mcp",
+                event: { type: "user_prompt", payload: { text: "Re-check the checkout flow.", author: "agent" } },
+            });
+            await harness.db.analysisEvent.update({
+                where: { id },
+                data: { createdAt: new Date("2026-01-03T00:00:00Z") },
+            });
+
+            const snapshotId = await harness.addSnapshotWithStatus(run.branchId, "processing");
+            await claim(harness, run.branchId, snapshotId);
+
+            expect(await resolver.resolveForSnapshot(snapshotId)).toEqual([
+                {
+                    type: "user_prompt",
+                    payload: { text: "Re-check the checkout flow.", author: "agent" },
+                    source: "mcp",
+                    createdAt: new Date("2026-01-03T00:00:00Z"),
+                },
+            ]);
+        });
     },
 });

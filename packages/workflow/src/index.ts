@@ -3,7 +3,7 @@ export {
     type TriggerBatchGenerationParams,
     triggerBatchGeneration,
 } from "./triggers/batch-generation";
-export { triggerAnalysisRun } from "./triggers/analysis-run";
+export { signalWithStartAnalysisRun, triggerAnalysisRun } from "./triggers/analysis-run";
 export { cancelAnalysisRun } from "./triggers/cancel-analysis-run";
 export { isApplicationUnlinkedFailure } from "./application-unlinked-failure";
 export type { AnalysisRunWorkflowInput } from "./workflows/analysis-run.workflow";

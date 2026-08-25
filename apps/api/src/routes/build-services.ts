@@ -14,6 +14,7 @@ import type {
     WorkflowRef,
 } from "@autonoma/workflow";
 import type Redis from "ioredis";
+import { DeliverUserPromptService } from "../analysis/deliver-user-prompt.service";
 import { ApplicationSetupService } from "../application-setup/application-setup.service";
 import type { Auth } from "../auth";
 import { DemoEntrySourceStore } from "../demo/demo-entry-source.store";
@@ -98,6 +99,7 @@ export interface Services {
     billing: BillingService;
     applicationSetups: ApplicationSetupsService;
     diffsTrigger: DiffsTriggerService;
+    deliverUserPrompt: DeliverUserPromptService;
     previewkitTrigger: PreviewkitTriggerService;
     previewkitWrite: PreviewkitWriteService;
     previewkitEnvironments: PreviewkitEnvironmentsService;
@@ -120,6 +122,7 @@ export interface ServicesParams {
     /** Required, not optional: production and tests must exercise the same seam. */
     /** Returns the Temporal workflow id, so a deploy request can name what it queued. */
     startAnalysisRun: (input: AnalysisRunWorkflowInput) => Promise<string>;
+    signalWithStartAnalysisRun: (input: AnalysisRunWorkflowInput) => Promise<string>;
     startGenerationBatch: (params: TriggerBatchGenerationParams) => Promise<WorkflowRef>;
     startPreviewBuild: (input: PreviewBuildWorkflowInput) => Promise<void>;
     triggerPreviewTeardown: (target: PreviewTeardownTarget) => Promise<void>;
@@ -141,6 +144,7 @@ export function buildServices({
     getVercelEncryptionHelper,
     githubApp,
     startAnalysisRun,
+    signalWithStartAnalysisRun,
     startGenerationBatch,
     startPreviewBuild,
     triggerPreviewTeardown,
@@ -178,6 +182,13 @@ export function buildServices({
         githubService,
         billingService,
         startAnalysisRun,
+        analysisEvents,
+    );
+    const deliverUserPromptService = new DeliverUserPromptService(
+        conn,
+        githubService,
+        billingService,
+        signalWithStartAnalysisRun,
         analysisEvents,
     );
     const onboardingOptions = {
@@ -282,6 +293,7 @@ export function buildServices({
         billing: billingService,
         applicationSetups: new ApplicationSetupsService(conn, applicationSetupService, apiKeysService),
         diffsTrigger: diffsTriggerService,
+        deliverUserPrompt: deliverUserPromptService,
         previewkitTrigger,
         previewkitWrite,
         previewkitEnvironments: previewkitEnvironmentsService,

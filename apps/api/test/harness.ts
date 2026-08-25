@@ -49,6 +49,8 @@ export class APITestHarness implements IntegrationHarness {
      * the workflow, so this is the only place the API's decision is observable.
      */
     public startAnalysisRun = vi.fn().mockResolvedValue(undefined);
+    /** Spy on the message-delivery poke (start-if-idle / signal-if-mid-run), so a test can assert a delivered message. */
+    public signalWithStartAnalysisRun = vi.fn().mockResolvedValue(undefined);
     /** Spy on the generation-batch dispatch, so a test can assert which runs the editor handed to the fleet. */
     public startGenerationBatch = fakeStartGenerationBatch();
     public readonly services: Services;
@@ -124,6 +126,7 @@ export class APITestHarness implements IntegrationHarness {
 
         const triggerWorkflow = vi.fn().mockResolvedValue(undefined);
         const startAnalysisRun = vi.fn().mockResolvedValue(undefined);
+        const signalWithStartAnalysisRun = vi.fn().mockResolvedValue(undefined);
         const startGenerationBatch = fakeStartGenerationBatch();
 
         const storage: StorageProvider = new S3Storage({
@@ -147,6 +150,7 @@ export class APITestHarness implements IntegrationHarness {
             getVercelEncryptionHelper: () => encryptionHelper,
             githubApp,
             startAnalysisRun,
+            signalWithStartAnalysisRun,
             startGenerationBatch,
             startPreviewBuild: triggerWorkflow,
             triggerPreviewTeardown: triggerWorkflow,
@@ -157,6 +161,7 @@ export class APITestHarness implements IntegrationHarness {
         const harness = new APITestHarness(db, services, redisClient, githubApp, emailSender, auth, scenarioManager);
         harness.triggerWorkflow = triggerWorkflow as typeof harness.triggerWorkflow;
         harness.startAnalysisRun = startAnalysisRun;
+        harness.signalWithStartAnalysisRun = signalWithStartAnalysisRun;
         harness.startGenerationBatch = startGenerationBatch;
         return harness;
     }
