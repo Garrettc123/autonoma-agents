@@ -270,19 +270,20 @@ seams live in `src/analysis/`:
 - `enqueueAnalysisEvent` - enqueue **without** poking, for a real event we cannot act on yet.
 
 `analysisPokeGate` (`src/analysis/analysis-poke-gate.ts`) is the one poke-eligibility predicate - activation +
-analysis credits - shared by both producers and the credit-top-up sweeper, so "wake the workflow" and "may the
-run proceed" cannot disagree. It decides:
+analysis credits - shared by every producer, so "wake the workflow" and "may the run proceed" cannot disagree. It
+decides:
 
 - **Not a real analyzable event** (app not live, base not trunk, draft, already-analyzed) -> nothing is inserted.
 - **Real but deferred** -> the event persists without a poke. An activation-gated push waits for its explicit
-  request to claim it; an out-of-credits push waits for a top-up (the credits comment + refusal are unchanged, the
-  event just also persists).
+  request to claim it; an out-of-credits push waits for the next natural trigger (a later push, or an explicit
+  `/start analysis` / message request), which claims it when it opens its snapshot (the credits comment + refusal
+  are unchanged, the event just also persists).
 - **Otherwise** -> enqueue and poke.
 
-A credit grant fires the billing service's `onCreditsGranted` hook, wired in the Stripe/Vercel webhook routes to
-`AnalysisCreditTopUpRepoker.repokeOrganization` (`src/analysis/credit-topup-repoker.ts`), which starts one run per
-branch with a pending event - but only when `analysisPokeGate` now allows it, so an activation-gated org's deferred
-events are never poked by a top-up.
+A deferred event is **not** re-poked automatically on a credit top-up: forcing a burst of runs the moment a user
+tops up is worse UX than letting the deferred work ride the next real trigger. The event is the durable record;
+whatever run starts next claims it. (This is a deliberate reversal of the earlier top-up sweeper, removed with its
+billing `onCreditsGranted` hook.)
 
 Each producer threads its `source`
 (`webhook`/`label`/`comment`/`ui`/`vercel`/`ci`/`onboarding`/`mcp`/`admin`/`http`) down to the seam; the merge-gate

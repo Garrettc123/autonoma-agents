@@ -3,18 +3,13 @@ import { logger } from "@autonoma/logger";
 import { BillingPricingService } from "./billing-pricing.service";
 import { createBillingService } from "./billing.service";
 import { env } from "./env";
-import type { BillingServiceHooks } from "./types";
 
 export async function syncVercelPlanPricing(organizationId: string, creditsPerCycle: number): Promise<void> {
     const pricingService = new BillingPricingService(db);
     await pricingService.updateCreditsPerSubscription(organizationId, creditsPerCycle);
 }
 
-export async function processVercelInvoicePaid(
-    installationId: string,
-    invoiceId: string,
-    hooks?: BillingServiceHooks,
-): Promise<void> {
+export async function processVercelInvoicePaid(installationId: string, invoiceId: string): Promise<void> {
     logger.info("Processing Vercel invoice paid", { installationId, invoiceId });
 
     const installation = await db.vercelInstallation.findUnique({
@@ -32,7 +27,7 @@ export async function processVercelInvoicePaid(
         data: { status: "paid", paidAt: new Date() },
     });
 
-    const billingService = createBillingService(db, hooks);
+    const billingService = createBillingService(db);
     await billingService.grantSubscriptionCredits(installation.organizationId, invoiceId);
 
     logger.info("Credits granted for Vercel invoice payment", {

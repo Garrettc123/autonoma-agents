@@ -18,11 +18,9 @@ import type {
     TopupRefundResultRow,
 } from "./billing.types";
 import { deductCreditsFloored } from "./credits-deduction";
-import { fireCreditsGrantedHook } from "./fire-credits-granted-hook";
 import { Service } from "./service";
 import type {
     AnalysisCreditsGateResult,
-    CreditsGrantedHook,
     DeductGenerationContext,
     LlmProxyGateResult,
     PreviewDeployGateResult,
@@ -38,14 +36,8 @@ export class CreditsService extends Service {
         private readonly autoTopUpService: AutoTopUpService,
         private readonly pricingService: BillingPricingService,
         private readonly vercelOverageService: VercelOverageService,
-        private readonly onCreditsGranted?: CreditsGrantedHook,
     ) {
         super();
-    }
-
-    /** Fire the credits-granted hook off the grant path - best-effort, so a re-poke failure never fails the grant. */
-    private fireCreditsGranted(organizationId: string): Promise<void> {
-        return fireCreditsGrantedHook(this.onCreditsGranted, organizationId, this.logger);
     }
 
     async checkCreditsGate(organizationId: string, runCount: number, architecture: ApplicationArchitecture) {
@@ -722,7 +714,7 @@ export class CreditsService extends Service {
         const pricing = await this.pricingService.getOrCreatePricing(organizationId);
         const creditAmount = pricing.creditsPerSubscription;
 
-        const granted = await this.db
+        await this.db
             .$transaction(async (tx) => {
                 const rawTx = this.asRawTx(tx);
                 const [customer] = await rawTx.$queryRaw<Array<SubscriptionGrantCustomerRow>>`
@@ -810,15 +802,13 @@ export class CreditsService extends Service {
                 }
                 throw error;
             });
-
-        if (granted) await this.fireCreditsGranted(organizationId);
     }
 
     async grantTopupCredits(organizationId: string, stripePaymentIntentId: string, customerEmail?: string) {
         const pricing = await this.pricingService.getOrCreatePricing(organizationId);
         const amount = pricing.creditsPerTopup;
 
-        const granted = await this.db
+        await this.db
             .$transaction(async (tx) => {
                 const customer = await tx.billingCustomer.findUnique({
                     where: { organizationId },
@@ -876,8 +866,6 @@ export class CreditsService extends Service {
                 }
                 throw error;
             });
-
-        if (granted) await this.fireCreditsGranted(organizationId);
     }
 
     async revokeTopupCredits(

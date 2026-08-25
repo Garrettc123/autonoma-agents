@@ -161,57 +161,6 @@ analysisSuite({
             });
         }
 
-        test("listPendingBranchHeads returns the newest pending head per branch in the org", async ({ harness }) => {
-            const run = await harness.seedAnalysis();
-            const branch2 = await harness.db.branch.create({
-                data: { name: "feature/two", applicationId: run.applicationId, organizationId: run.organizationId },
-                select: { id: true },
-            });
-            const run2 = { ...run, branchId: branch2.id };
-
-            const older = await enqueueCommits(harness, run, "sha-old", { baseSha: "base-old" });
-            const newer = await enqueueCommits(harness, run, "sha-new", { baseSha: "base-new" });
-            await stampCreatedAt(harness, older, new Date("2026-01-01T00:00:00Z"));
-            await stampCreatedAt(harness, newer, new Date("2026-01-02T00:00:00Z"));
-            await enqueueCommits(harness, run2, "sha-two");
-
-            const heads = await harness.eventStore.listPendingBranchHeads(run.organizationId);
-            const byBranch = new Map(heads.map((head) => [head.branchId, head]));
-            expect(byBranch.size).toBe(2);
-            expect(byBranch.get(run.branchId)).toMatchObject({ headSha: "sha-new", baseSha: "base-new" });
-            expect(byBranch.get(branch2.id)).toMatchObject({ headSha: "sha-two" });
-        });
-
-        test("listPendingBranchHeads omits a branch whose events are all claimed by a live run", async ({
-            harness,
-        }) => {
-            const run = await harness.seedAnalysis();
-            await enqueueCommits(harness, run, "sha-a");
-            const live = await harness.addSnapshotWithStatus(run.branchId, "processing");
-            await claim(harness, run.branchId, live);
-
-            expect(await harness.eventStore.listPendingBranchHeads(run.organizationId)).toHaveLength(0);
-        });
-
-        test("listPendingBranchHeads skips a branch whose PR closed, keeps open, cold-cache and PR-less ones", async ({
-            harness,
-        }) => {
-            const run = await harness.seedAnalysis();
-            const openBranch = await createPrBranch(harness, run, 7, "open");
-            const closedBranch = await createPrBranch(harness, run, 8, "closed");
-            const coldCacheBranch = await createPrBranch(harness, run, 12);
-
-            await enqueueCommits(harness, run, "sha-main");
-            await enqueueCommits(harness, { ...run, branchId: openBranch }, "sha-open");
-            await enqueueCommits(harness, { ...run, branchId: closedBranch }, "sha-closed");
-            await enqueueCommits(harness, { ...run, branchId: coldCacheBranch }, "sha-cold");
-
-            const heads = await harness.eventStore.listPendingBranchHeads(run.organizationId);
-            expect(new Set(heads.map((head) => head.branchId))).toEqual(
-                new Set([run.branchId, openBranch, coldCacheBranch]),
-            );
-        });
-
         // A pending event on a terminally closed PR must not read as a standing reason to run, or it would hold
         // the already-analyzed skip open forever on a branch that can never run again.
         test("hasPending ignores events on a closed PR but sees open, cold-cache and PR-less ones", async ({

@@ -5,7 +5,6 @@ import {
     analysisEventBodySchema,
     type AnalysisEventSource,
     analysisEventSourceSchema,
-    analysisEventTypeSchema,
 } from "@autonoma/types";
 
 /**
@@ -29,13 +28,6 @@ const RECLAIMABLE_CLAIM_STATUSES: SnapshotStatus[] = Object.values(SnapshotStatu
  * fails open, so only these two terminal states exclude a branch.
  */
 const TERMINAL_PR_STATES: PullRequestCacheState[] = [PullRequestCacheState.closed, PullRequestCacheState.merged];
-
-/** The head a credit top-up should re-poke a branch on: the newest pending commit event's. */
-export interface PendingBranchHead {
-    branchId: string;
-    headSha: string;
-    baseSha?: string;
-}
 
 export interface EnqueueAnalysisEventInput {
     branchId: string;
@@ -128,41 +120,6 @@ export class AnalysisEventStore {
             select: { id: true },
         });
         return row != null;
-    }
-
-    /**
-     * The newest pending commit head for each of the org's branches that has one AND whose PR is still live - what a
-     * credit top-up re-pokes. A branch with no pending commit event is absent, so a caller pokes only branches that
-     * have deferred work; a branch whose PR has closed/merged is excluded, so a dead PR is not re-poked forever.
-     */
-    public async listPendingBranchHeads(organizationId: string): Promise<PendingBranchHead[]> {
-        this.logger.info("Listing pending branch heads for organization", { organization: { organizationId } });
-        const rows = await this.db.analysisEvent.findMany({
-            where: {
-                organizationId,
-                type: analysisEventTypeSchema.enum.commits_pushed,
-                OR: this.pendingClause(),
-                branch: this.liveBranchWhere(),
-            },
-            // DISTINCT ON (branch_id): the newest pending event per branch, so the result is bounded by the branch
-            // count rather than the ever-growing event history. `branchId` leads the orderBy so Postgres pushes the
-            // dedup into the query; `id` breaks a same-millisecond `createdAt` tie deterministically (cuids are
-            // time-ordered - the larger id is the later insert).
-            orderBy: [{ branchId: "asc" }, { createdAt: "desc" }, { id: "desc" }],
-            distinct: ["branchId"],
-        });
-
-        const heads: PendingBranchHead[] = [];
-        for (const row of rows) {
-            const record = this.toRecord(row);
-            if (record.type !== "commits_pushed") continue;
-            heads.push({ branchId: record.branchId, headSha: record.payload.headSha, baseSha: record.payload.baseSha });
-        }
-        this.logger.info("Pending branch heads listed", {
-            organization: { organizationId },
-            extra: { branchCount: heads.length },
-        });
-        return heads;
     }
 
     /**

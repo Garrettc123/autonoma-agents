@@ -6,7 +6,6 @@ import { type StripeBillingService, createBillingServices } from "./billing.serv
 import { env } from "./env";
 import { getStripe } from "./stripe-client";
 import { syncStripeDataToDb } from "./stripe-sync";
-import type { BillingServiceHooks } from "./types";
 
 type StripeWebhookHandler = (event: Stripe.Event, billingService: StripeBillingService) => Promise<void>;
 const STRIPE_INVOICE_PARENT_TYPE_SUBSCRIPTION_DETAILS = "subscription_details" as const;
@@ -24,8 +23,8 @@ for (const eventType of BILLING_STRIPE_SUBSCRIPTION_SYNC_EVENT_TYPES) {
     webhookHandlers[eventType] = handleSubscriptionSync;
 }
 
-export async function processWebhookEvent(event: Stripe.Event, hooks?: BillingServiceHooks): Promise<void> {
-    const { stripeBillingService: billingService } = createBillingServices(db, hooks);
+export async function processWebhookEvent(event: Stripe.Event): Promise<void> {
+    const { stripeBillingService: billingService } = createBillingServices(db);
     if (billingService == null) {
         logger.info("Ignoring Stripe webhook event because STRIPE_ENABLED=false", {
             type: event.type,
