@@ -30,6 +30,7 @@ const activities: Pick<
     | "listInvestigationTargets"
     | "runReporter"
     | "settleAnalysisRun"
+    | "hasPendingAnalysisEvents"
 > = {
     async openAnalysisRun() {
         return { skipped: false, snapshotId };
@@ -65,6 +66,9 @@ const activities: Pick<
     async settleAnalysisRun(input) {
         settlements.push(input.outcome);
         return { settled: true, discardedChangeCount: 0 };
+    },
+    async hasPendingAnalysisEvents() {
+        return { hasPending: false };
     },
 };
 

@@ -18,6 +18,7 @@ import type {
 import { previewBuildWorkflowId } from "../src/preview-build-id";
 import { warrantsBuild } from "../src/rules/build-warrant";
 import { TaskQueue } from "../src/task-queues";
+import { analysisInboxSignal } from "../src/workflows/analysis-run-signals";
 import { analysisRunWorkflow } from "../src/workflows/analysis-run.workflow";
 import { teardownTestWorkflowEnvironment } from "./fixtures/teardown-test-workflow-environment";
 import { terminateAbandonedExecutions } from "./fixtures/terminate-abandoned-executions";
@@ -72,6 +73,13 @@ interface Harness {
     webRuns: string[];
     events: string[];
 
+    /** Successive answers `hasPendingAnalysisEvents` returns, one per call; defaults to false once drained. */
+    pendingInboxAnswers: boolean[];
+    /** How many times the drain loop checked the inbox - proof of how many passes it took. */
+    inboxChecks: number;
+    /** When set, the FIRST inbox check awaits this before answering - the hook to buffer a nudge mid-check. */
+    inboxCheckGate?: Promise<void>;
+
     /**
      * Resolves when the build's launch activity has actually run. A run that skips analysis returns without
      * awaiting its build child, so the parent completing says nothing about whether `build:launch` was recorded
@@ -102,6 +110,8 @@ const harness: Harness = {
     attachedUrls: [],
     webRuns: [],
     events: [],
+    pendingInboxAnswers: [],
+    inboxChecks: 0,
     buildLaunched: Promise.resolve(),
     notifyBuildLaunched: () => undefined,
     impactStarted: Promise.resolve(),
@@ -207,6 +217,7 @@ const analysisActivities: Pick<
     | "listInvestigationTargets"
     | "runReporter"
     | "settleAnalysisRun"
+    | "hasPendingAnalysisEvents"
 > = {
     async openAnalysisRun(input) {
         harness.analyzedHeads.push(input.headSha);
@@ -246,6 +257,14 @@ const analysisActivities: Pick<
         harness.settlements.push(input.outcome);
         harness.events.push(`settle:${input.outcome.kind}`);
         return { settled: true, discardedChangeCount: 0 };
+    },
+    async hasPendingAnalysisEvents() {
+        const check = harness.inboxChecks;
+        harness.inboxChecks += 1;
+        // Not pushed onto `events` like the other activities: the existing exact-sequence assertions must not see
+        // the orthogonal drain check.
+        if (check === 0 && harness.inboxCheckGate != null) await harness.inboxCheckGate;
+        return { hasPending: harness.pendingInboxAnswers.shift() ?? false };
     },
 };
 
@@ -395,6 +414,9 @@ beforeEach(() => {
     harness.attachedUrls = [];
     harness.webRuns = [];
     harness.events = [];
+    harness.pendingInboxAnswers = [];
+    harness.inboxChecks = 0;
+    harness.inboxCheckGate = undefined;
     harness.buildLaunched = new Promise((resolve) => {
         harness.notifyBuildLaunched = resolve;
     });
@@ -742,3 +764,87 @@ async function startCustomerDeployedRun(): Promise<void> {
     });
     await handle.result();
 }
+
+interface Deferred {
+    promise: Promise<void>;
+    resolve: () => void;
+}
+
+function deferred(): Deferred {
+    let resolve: () => void = () => undefined;
+    const promise = new Promise<void>((r) => {
+        resolve = r;
+    });
+    return { promise, resolve };
+}
+
+/** Poll shared harness state in the test's own (real) time - the workflow clock is what the env skips, not this. */
+async function waitUntil(predicate: () => boolean, timeoutMs = 10_000): Promise<void> {
+    const start = Date.now();
+    while (!predicate()) {
+        if (Date.now() - start > timeoutMs) throw new Error("waitUntil timed out");
+        await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+}
+
+// Each drain test runs at least two full pipeline passes in the time-skipping env; the no-build path (empty
+// selection) keeps them off the slow build+investigator legs, so this ceiling is headroom.
+const DRAIN_TEST_TIMEOUT_MS = 240_000;
+
+describe("analysisRunWorkflow inbox drain", () => {
+    it(
+        "continues as new to drain a message that landed mid-run",
+        async () => {
+            harness.pendingInboxAnswers = [true];
+
+            await runToCompletion();
+
+            expect(harness.reporterRuns).toBe(2);
+            expect(harness.analyzedHeads).toHaveLength(2);
+            expect(harness.inboxChecks).toBe(2);
+            expect(harness.settlements).toEqual([{ kind: "succeeded" }, { kind: "succeeded" }]);
+        },
+        DRAIN_TEST_TIMEOUT_MS,
+    );
+
+    it("exits after one pass when the inbox is empty", async () => {
+        await runToCompletion();
+
+        expect(harness.reporterRuns).toBe(1);
+        expect(harness.inboxChecks).toBe(1);
+        expect(harness.settlements).toEqual([{ kind: "succeeded" }]);
+    });
+
+    it(
+        "re-checks and drains a nudge that raced the final inbox check",
+        async () => {
+            // First check reads empty (the message's row commits during it); the nudge forces a second check, which
+            // sees the now-committed event.
+            harness.pendingInboxAnswers = [false, true];
+            const gate = deferred();
+            harness.inboxCheckGate = gate.promise;
+
+            const handle = await startRun();
+            // Hold the first check open, deliver the nudge while it is in flight (so it is buffered against the
+            // run's exit), then let the check resolve empty.
+            await waitUntil(() => harness.inboxChecks >= 1, DRAIN_TEST_TIMEOUT_MS);
+            await handle.signal(analysisInboxSignal);
+            gate.resolve();
+            await handle.result();
+
+            expect(harness.reporterRuns).toBe(2);
+            expect(harness.inboxChecks).toBe(3);
+        },
+        DRAIN_TEST_TIMEOUT_MS,
+    );
+
+    it("does not drain a pass with nothing to analyze", async () => {
+        harness.hasRecordedPreview = false;
+        harness.pendingInboxAnswers = [true];
+
+        await startCustomerDeployedRun();
+
+        expect(harness.inboxChecks).toBe(0);
+        expect(harness.settlements).toEqual([]);
+    });
+});

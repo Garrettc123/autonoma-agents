@@ -6,6 +6,7 @@ import { heartbeat } from "@temporalio/activity";
 export { openAnalysisRun } from "./analysis/open-analysis-run";
 
 import { deleteAnalysisTest as deleteAnalysisTestImpl } from "./analysis/delete-test";
+import { hasPendingAnalysisEvents as hasPendingAnalysisEventsImpl } from "./analysis/has-pending-analysis-events";
 import { listInvestigationTargets as listInvestigationTargetsImpl } from "./analysis/list-investigation-targets";
 import { openAnalysisRun } from "./analysis/open-analysis-run";
 import { openMergeGate as openMergeGateImpl } from "./analysis/open-merge-gate";
@@ -69,6 +70,8 @@ export const persistAnalysisClassification = withHeartbeat(persistAnalysisClassi
 export const recordAnalysisContainment = withHeartbeat(recordAnalysisContainmentImpl);
 // A fast DB read of the run's selection - like openAnalysisRun, nothing long-running to heartbeat.
 export const listInvestigationTargets = listInvestigationTargetsImpl;
+// A fast indexed inbox read for the drain loop - nothing long-running to heartbeat.
+export const hasPendingAnalysisEvents = hasPendingAnalysisEventsImpl;
 
 // Compile-time check: this worker implements the whole DIFFS-queue contract - the run's stages, the per-test
 // classify, and the Investigator's row-local writes.
@@ -87,4 +90,5 @@ export const listInvestigationTargets = listInvestigationTargetsImpl;
     recordAnalysisContainment,
     runReporter,
     settleAnalysisRun,
+    hasPendingAnalysisEvents,
 }) satisfies AnalysisActivities;

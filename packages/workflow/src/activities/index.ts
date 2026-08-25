@@ -46,6 +46,8 @@ export type {
     OpenAnalysisRunInput,
     OpenAnalysisRunOutput,
     OpenAnalysisSkipReason,
+    HasPendingAnalysisEventsInput,
+    HasPendingAnalysisEventsOutput,
     OpenMergeGateInput,
     OpenMergeGateOutput,
     PostAnalyzingPrCommentInput,

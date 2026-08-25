@@ -30,7 +30,8 @@ src/
 │   └── mobile-activities.ts             # Mobile worker
 ├── workflows/                            # Everything that runs INSIDE the workflow sandbox, and nothing else
 │   ├── index.ts                          # The bundle entry point (workflowsPath resolves here)
-│   ├── analysis-run.workflow.ts          # A branch's analysis run; owns the preview build warrant
+│   ├── analysis-run.workflow.ts          # A branch's analysis run; owns the preview build warrant + inbox drain
+│   ├── analysis-run-signals.ts           # The analysisInbox nudge signal (shared: trigger raises, workflow handles)
 │   ├── preview-build.workflow.ts         # One commit's preview build (launch -> poll -> URLs)
 │   ├── report-build-warrant.ts           # The one place a build warrant is recorded
 │   ├── run-analysis-stages.ts            # Investigators -> Reporter, shared past the selection
@@ -40,7 +41,7 @@ src/
 │   ├── batch-generation.workflow.ts      # Parallel generation
 │   └── single-generation.workflow.ts
 ├── triggers/                             # Functions to start workflows via the Temporal client
-│   ├── analysis-run.ts                   # triggerAnalysisRun
+│   ├── analysis-run.ts                   # triggerAnalysisRun + signalWithStartAnalysisRun
 │   ├── preview-build.ts                  # triggerPreviewBuild
 │   └── batch-generation.ts               # triggerBatchGeneration
 └── worker/
@@ -107,7 +108,16 @@ snapshot and run state before applying GitHub effects, so a failed or cancelled 
 snapshot or an in-progress merge gate.
 
 One workflow runs that pipeline: `analysisRunWorkflow`, keyed on the branch with a terminate-existing policy so the
-newest commit displaces whatever was in flight. The head it analyzes is resolved at open time from the source of
+newest commit (via `triggerAnalysisRun`) displaces whatever was in flight. A `user_prompt` message instead reaches
+the branch through `signalWithStartAnalysisRun` - the same workflow id, but `signalWithStart` rather than
+terminate, so a message joins the run already working the branch instead of killing it. After a pass settles, the
+workflow **drains**: it re-checks the inbox (`hasPendingAnalysisEvents`) and, if a message or push landed after
+this pass claimed its batch, continues-as-new to a successor that claims it; it exits only when the inbox is empty.
+A registered `analysisInbox` signal handler plus a nudge-flag loop close the completion-window race (Temporal
+invalidates a completion command when a signal is buffered, forcing the re-check on replay). The drain only runs
+from a pass that could make progress - one that opened a snapshot, or skipped a genuinely already-analyzed head;
+a pass that could open no snapshot at all (nothing to analyze, onboarding incomplete, an unsupportable app) exits
+without draining, so it cannot spin forever on an event it can never claim. The head it analyzes is resolved at open time from the source of
 truth, not taken from its input: `resolvePreviewTarget` reads the live PR/branch head for a previewkit app (which
 the run then builds) or the recorded deployment's sha for a customer-hosted one, and `openAnalysisRun` claims every
 pending inbox event in the transaction that opens the snapshot. The `{ headSha, baseSha? }` in its input are only a

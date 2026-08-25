@@ -2,10 +2,12 @@ import type { ObservabilityContext } from "@autonoma/logger";
 import type { PreviewDeployTarget } from "@autonoma/types";
 import {
     type ChildWorkflowHandle,
+    continueAsNew,
     isCancellation,
     log,
     ParentClosePolicy,
     proxyActivities,
+    setHandler,
     startChild,
 } from "@temporalio/workflow";
 import type {
@@ -27,6 +29,7 @@ import {
 } from "../rules/build-warrant";
 import { TaskQueue } from "../task-queues";
 import { WORKFLOW_TYPE } from "../workflow-types";
+import { analysisInboxSignal } from "./analysis-run-signals";
 import type { PreviewBuildWorkflowInput, PreviewBuildWorkflowOutput } from "./preview-build.workflow";
 import { reportBuildWarrant } from "./report-build-warrant";
 import { runAnalysisStages } from "./run-analysis-stages";
@@ -38,6 +41,14 @@ const analysis = proxyActivities<
     startToCloseTimeout: "20m",
     heartbeatTimeout: "2m",
     retry: { maximumAttempts: 1 },
+    taskQueue: TaskQueue.DIFFS,
+});
+
+// The drain-loop inbox read: a fast indexed query, so it retries (unlike the run stages, whose retry would repeat
+// expensive, non-idempotent work).
+const analysisReads = proxyActivities<Pick<AnalysisActivities, "hasPendingAnalysisEvents">>({
+    startToCloseTimeout: "1m",
+    retry: { maximumAttempts: 3 },
     taskQueue: TaskQueue.DIFFS,
 });
 
@@ -67,11 +78,54 @@ export interface AnalysisRunWorkflowInput {
     baseSha?: string;
 }
 
+interface RunOnceResult {
+    /**
+     * Whether a fresh pass could claim new pending events. False when this pass could open no snapshot at all
+     * (nothing to analyze, onboarding incomplete, unsupportable): draining would then spin forever on an event it
+     * can never claim, so the run exits and leaves it for a trigger that can serve it.
+     */
+    canDrain: boolean;
+}
+
+/**
+ * The branch's analysis run: registers the inbox-nudge handler, runs ONE pass, then DRAINS - if a message or push
+ * landed after this pass claimed its batch, it continues-as-new to a successor that claims it, exiting only once the
+ * inbox is empty.
+ */
+export async function analysisRunWorkflow(input: AnalysisRunWorkflowInput): Promise<void> {
+    // A nudge arriving between the final inbox check and the workflow's exit must not be lost: the handler flips a
+    // flag the drain loop re-checks. Temporal invalidates a completion command when a signal is buffered, forcing
+    // the extra workflow task this loop needs to re-run the check on replay.
+    let nudged = false;
+    setHandler(analysisInboxSignal, () => {
+        nudged = true;
+    });
+
+    const { canDrain } = await runAnalysisRunOnce(input);
+    if (!canDrain) return;
+
+    while (true) {
+        const { hasPending } = await analysisReads.hasPendingAnalysisEvents({ branchId: input.branchId });
+        if (hasPending) {
+            // Every child this pass owned was already awaited, so the eager preview build (a REQUEST_CANCEL child)
+            // is not a live child this continue-as-new could cancel out from under.
+            log.info("Inbox non-empty after settling; continuing as new to drain it", {
+                branch: { branchId: input.branchId },
+            });
+            await continueAsNew<typeof analysisRunWorkflow>(input);
+        }
+        // Inbox empty: exit unless a nudge raced the check - then re-run it so the event it announced is not
+        // stranded in the completion window.
+        if (!nudged) return;
+        nudged = false;
+    }
+}
+
 /**
  * Impact Analysis is source-only, so it runs FIRST and its selection warrants the build. Every other case builds
  * unconditionally, ahead of opening the run: a customer owed a refresh gets it even if the pipeline fails.
  */
-export async function analysisRunWorkflow(input: AnalysisRunWorkflowInput): Promise<void> {
+async function runAnalysisRunOnce(input: AnalysisRunWorkflowInput): Promise<RunOnceResult> {
     const { branchId } = input;
 
     // Asked first: it names the branch's owner, decides whether there is a build to warrant, AND resolves the head
@@ -88,7 +142,7 @@ export async function analysisRunWorkflow(input: AnalysisRunWorkflowInput): Prom
     // the only thing that can record their preview - would then be dropped as a duplicate, stranding the commit.
     if (target == null && !resolved.hasRecordedPreview) {
         log.info("Nothing to analyze against: the customer owns this preview and none is recorded yet", ids);
-        return;
+        return { canDrain: false };
     }
 
     // An unconditional warrant starts the build here, ahead of opening the run: nothing
@@ -110,13 +164,15 @@ export async function analysisRunWorkflow(input: AnalysisRunWorkflowInput): Prom
         // case it was written for (a newer push terminates the parent and takes the stale build with
         // it); it is a normal RETURN that must not double as a cancellation.
         if (eager != null) await awaitStartedBuild(eager, ids);
-        return;
+        return { canDrain: false };
     }
 
     const run = await analysis.openAnalysisRun({ branchId, headSha, baseSha });
     if (run.skipped) {
         await settleSkippedRun({ target, eager, branchId, ids, skipReason: run.reason });
-        return;
+        // Only an already-analyzed skip can be un-suppressed by a new pending event (the run gate consults the
+        // inbox); an unsupportable application stays unsupportable, so draining it would spin.
+        return { canDrain: run.reason === "already_analyzed" };
     }
 
     const snapshotId = run.snapshotId;
@@ -144,6 +200,10 @@ export async function analysisRunWorkflow(input: AnalysisRunWorkflowInput): Prom
         // The fan-out and Reporter re-read the selection + reasoning from the DB; an empty selection is a no-op.
         await runAnalysisStages(snapshotId, runScopedIds);
     });
+
+    // Settlement has fully completed here (awaited in a non-cancellable scope), so the drain re-opens the inbox only
+    // after this snapshot is promoted/closed, never on a half-settled run.
+    return { canDrain: true };
 }
 
 /** Who and what this run is about, as far as it is known before the snapshot exists. */

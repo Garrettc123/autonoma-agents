@@ -285,6 +285,14 @@ export interface OpenAnalysisRunInput {
     baseSha?: string;
 }
 
+export interface HasPendingAnalysisEventsInput {
+    branchId: string;
+}
+
+export interface HasPendingAnalysisEventsOutput {
+    hasPending: boolean;
+}
+
 /**
  * Why no run was opened.
  *
@@ -451,4 +459,6 @@ export interface AnalysisActivities {
     recordAnalysisContainment(input: RecordAnalysisContainmentInput): Promise<RecordAnalysisContainmentOutput>;
     runReporter(input: RunReporterInput): Promise<RunReporterOutput>;
     settleAnalysisRun(input: SettleAnalysisRunInput): Promise<SettleAnalysisRunOutput>;
+    /** Whether the branch's inbox still holds a pending event on a still-live PR - the drain-loop predicate the run re-checks after settling. */
+    hasPendingAnalysisEvents(input: HasPendingAnalysisEventsInput): Promise<HasPendingAnalysisEventsOutput>;
 }
