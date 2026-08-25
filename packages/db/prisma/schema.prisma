@@ -2526,10 +2526,6 @@ model PreviewkitConfigService {
   /// 1.7Gi postgres, and one ladder was wrong at both ends.
   resourcesTier PreviewkitServiceResourceTier @default(standard) @map("resources_tier")
 
-  s3  Boolean?
-  sqs Boolean?
-  sns Boolean?
-
   setupTasks PreviewkitConfigSetupTask[]
 
   @@unique([configId, position])

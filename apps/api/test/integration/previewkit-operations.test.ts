@@ -143,36 +143,6 @@ apiTestSuite({
             expect((await appRow(harness, applicationId, "web")).id).toBe(api.id);
         });
 
-        /**
-         * The rollback guarantee for the aws-flags fold: service rows are
-         * delete-then-create on save, so a save under this release must keep the
-         * legacy flag columns populated - the previous release reads its flags from
-         * them, and NULLs would make a rollback deploy the aws service with nothing
-         * enabled.
-         */
-        test("saving a config keeps the legacy aws flag columns mirrored from options", async ({ harness }) => {
-            const { applicationId, service } = await setup(harness);
-
-            await service.apply(applicationId, harness.organizationId, [
-                {
-                    op: "replaceConfig",
-                    document: {
-                        version: 2,
-                        apps: [{ name: "web", repository: "acme/web", path: ".", port: 3000 }],
-                        services: [{ name: "aws", recipe: "aws", options: { s3: true, sqs: true } }],
-                    },
-                },
-            ]);
-
-            const stored = await harness.db.previewkitConfigService.findFirstOrThrow({
-                where: { config: { applicationId }, name: "aws" },
-                select: { s3: true, sqs: true, sns: true, options: true },
-            });
-            expect(stored.s3).toBe(true);
-            expect(stored.sqs).toBe(true);
-            expect(stored.sns).toBeNull();
-        });
-
         test("a secret can be set for an app the same call creates", async ({ harness }) => {
             const { applicationId, service, values } = await setup(harness);
 

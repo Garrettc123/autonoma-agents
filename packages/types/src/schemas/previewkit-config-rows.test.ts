@@ -362,47 +362,6 @@ describe("documentFromPreviewkitConfigRows", () => {
     });
 });
 
-describe("legacy aws flag mirror columns", () => {
-    function decomposeService(service: Record<string, unknown>) {
-        const config = trustedPreviewConfigSchema.parse({
-            version: 2,
-            apps: [{ name: "web", repository: "acme/web", port: 3000 }],
-            services: [{ name: "aws", recipe: "aws", ...service }],
-        });
-        return previewkitConfigRowValues(config).services[0]!;
-    }
-
-    /**
-     * Service rows are delete-then-create on save, so these write-only mirrors are
-     * what keeps the columns the PREVIOUS release reads populated across a save. If
-     * this stops emitting them, the first save under the new release nulls the
-     * columns and a rollback deploys the aws service with nothing enabled.
-     */
-    it("mirrors the options flags into the transition columns", () => {
-        const values = decomposeService({ options: { s3: true, sqs: false } });
-
-        expect(values.s3).toBe(true);
-        expect(values.sqs).toBe(false);
-        expect(values.sns).toBeUndefined();
-    });
-
-    it("mirrors a legacy top-level document the same way, through the fold", () => {
-        const values = decomposeService({ s3: true, sns: true });
-
-        expect(values.s3).toBe(true);
-        expect(values.sns).toBe(true);
-        expect(values.options).toEqual({ s3: true, sns: true });
-    });
-
-    it("mirrors nothing for a service that never had the flags", () => {
-        const values = decomposeService({ options: { database: "d" } });
-
-        expect(values.s3).toBeUndefined();
-        expect(values.sqs).toBeUndefined();
-        expect(values.sns).toBeUndefined();
-    });
-});
-
 describe("portless apps", () => {
     /**
      * An absent port must survive as ABSENT, not as a null that a reader's schema
