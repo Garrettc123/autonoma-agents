@@ -115,6 +115,7 @@ export const SIDEBAR_GROUPS: SidebarGroup[] = [
         items: [
             { label: "Execution Agent", slug: "architecture/execution-agent" },
             { label: "AI Package", slug: "architecture/ai-package" },
+            { label: "Billing", slug: "architecture/billing" },
         ],
     },
 ];

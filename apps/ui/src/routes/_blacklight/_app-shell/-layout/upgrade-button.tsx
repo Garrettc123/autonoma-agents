@@ -2,14 +2,9 @@ import { Button } from "@autonoma/blacklight";
 import { CrownSimpleIcon } from "@phosphor-icons/react/CrownSimple";
 import { useQuery } from "@tanstack/react-query";
 import { CHECKOUT_TYPE_SUBSCRIPTION } from "lib/billing/formatters";
+import { isSubscribed } from "lib/billing/is-subscribed";
 import { useCreateCheckoutSession } from "lib/query/billing.queries";
 import { trpc } from "lib/trpc";
-
-const SUBSCRIBED_STATUSES: ReadonlySet<string> = new Set(["active", "trialing"]);
-
-function isSubscribedStatus(status: string | undefined): boolean {
-  return status != null && SUBSCRIBED_STATUSES.has(status);
-}
 
 /**
  * Renders nothing once the organization is paying, so the bar's one solid call to action is only there while
@@ -22,7 +17,7 @@ export function UpgradeButton() {
   const { data } = useQuery(trpc.billing.status.queryOptions());
   const createCheckout = useCreateCheckoutSession();
 
-  if (data == null || isSubscribedStatus(data.subscriptionStatus)) return undefined;
+  if (data == null || isSubscribed(data.subscriptionStatus)) return undefined;
 
   function handleUpgrade() {
     const returnPath = `${window.location.pathname}${window.location.search}`;

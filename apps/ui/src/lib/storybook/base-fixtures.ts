@@ -336,10 +336,6 @@ const baseTrpcFixtures: TrpcFixtures = {
         // The billing page asks this to explain a zero balance, so the baseline answers the ordinary
         // case - entitled, nothing to explain - and a story overrides it to show the notice.
         freeStartEligibility: { eligible: true, blockedBy: [] },
-        // The sidebar's own read, on every page under the shell - so it belongs in the baseline
-        // rather than in each page's fixtures. Subscribed, so the Upgrade button stays out of shots
-        // that are not about billing; a billing story overrides it.
-        subscriptionStatus: { subscriptionStatus: "active" },
         status: {
             creditBalance: 740,
             subscriptionCreditBalance: 500,

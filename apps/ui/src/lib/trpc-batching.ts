@@ -27,7 +27,7 @@ type ProcedurePath = {
  * - `auth.orgStatus` is read only in the app-shell `beforeLoad`, where riding one batched request
  *   with `applications.list` is the point, and nothing observes it after the loader resolves.
  * - `billing.status` and `onboarding.getState` are no longer shell reads - the sidebar takes
- *   `billing.subscriptionStatus` and `onboarding.navState` instead.
+ *   `onboarding.navState` instead.
  *
  * Mutations are absent by nature, not by exception: a batch's cost is a shared response payload, and
  * a mutation fires from a click rather than alongside a page's render.
@@ -44,7 +44,6 @@ const SHELL_WIDE_PROCEDURES = [
     // dialog and so fetches on every page whether or not the dialog is opened. Leaving it batched
     // meant a window refocus past the 30s staleTime could refetch it inside a page's batch.
     "auth.activeOrg",
-    "billing.subscriptionStatus",
     "onboarding.navState",
     "organization.mine",
 ] as const satisfies readonly ProcedurePath[];

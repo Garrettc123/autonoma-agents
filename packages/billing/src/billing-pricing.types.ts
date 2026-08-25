@@ -5,9 +5,6 @@ export type BillingPricingValues = {
     creditsWebGenerationCost: number;
     creditsIosGenerationCost: number;
     creditsAndroidGenerationCost: number;
-    creditsWebRunCost: number;
-    creditsIosRunCost: number;
-    creditsAndroidRunCost: number;
     stripeTopupAmountCents: number;
     creditsPerVcpuHour: number;
     creditsPerGbMemoryHour: number;

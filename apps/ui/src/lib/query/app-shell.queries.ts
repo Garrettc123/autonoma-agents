@@ -33,7 +33,6 @@ const SHELL_READS = {
     "applications.suiteHealthFixPlan": (applicationId: string) =>
         trpc.applications.suiteHealthFixPlan.queryOptions({ applicationId }),
     "auth.activeOrg": () => trpc.auth.activeOrg.queryOptions(),
-    "billing.subscriptionStatus": () => trpc.billing.subscriptionStatus.queryOptions(),
     "onboarding.navState": (applicationId: string) => trpc.onboarding.navState.queryOptions({ applicationId }),
     "organization.mine": () => trpc.organization.mine.queryOptions(),
 } satisfies Record<ShellWideProcedure, ShellRead>;
@@ -90,14 +89,6 @@ export function useShellNavState(applicationId: string) {
  */
 export function ensureShellNavState(queryClient: QueryClient, applicationId: string) {
     return queryClient.ensureQueryData(SHELL_READS["onboarding.navState"](applicationId));
-}
-
-/**
- * Whether the organization is subscribed. Plain `useQuery`: this decides whether to offer an action,
- * and suspending the shell on it would blank a working page.
- */
-export function useShellSubscriptionStatus() {
-    return useQuery(SHELL_READS["billing.subscriptionStatus"]());
 }
 
 /** The organizations this account belongs to, for the switcher. Suspends inside the sidebar's boundary. */

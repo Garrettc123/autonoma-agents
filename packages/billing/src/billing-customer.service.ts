@@ -8,7 +8,6 @@ import { env } from "./env";
 import { Service } from "./service";
 import { getStripe } from "./stripe-client";
 import { syncStripeDataToDb } from "./stripe-sync";
-import type { SubscriptionStatusResult } from "./types";
 
 export class BillingCustomerService extends Service {
     constructor(private readonly db: PrismaClient) {
@@ -162,24 +161,6 @@ export class BillingCustomerService extends Service {
 
         this.logger.info("Created billing portal session", { organizationId });
         return { url: session.url };
-    }
-
-    /**
-     * The organization's subscription status on its own, for the app shell's upgrade button.
-     *
-     * Separate from {@link getBillingStatus} because the shell renders on every page and needs one
-     * enum, not a balance, a lifetime aggregate and the last 20 transactions. Answers with an
-     * object rather than a bare value so a missing billing row is still valid React Query data.
-     */
-    async getSubscriptionStatus(organizationId: string): Promise<SubscriptionStatusResult> {
-        this.logger.info("Reading subscription status", { organization: { organizationId } });
-
-        const customer = await this.db.billingCustomer.findUnique({
-            where: { organizationId },
-            select: { subscriptionStatus: true },
-        });
-
-        return { subscriptionStatus: customer?.subscriptionStatus ?? undefined };
     }
 
     async getBillingStatus(organizationId: string) {

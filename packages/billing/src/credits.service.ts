@@ -394,45 +394,6 @@ export class CreditsService extends Service {
         });
     }
 
-    /** All-time credits consumed through the managed LLM proxy (as a positive number). */
-    private async llmProxyLifetimeSpend(organizationId: string): Promise<number> {
-        const aggregate = await this.db.creditTransaction.aggregate({
-            where: { organizationId, type: CreditTransactionType.LLM_PROXY_CONSUMPTION },
-            _sum: { amount: true },
-        });
-        return Math.abs(aggregate._sum.amount ?? 0);
-    }
-
-    /**
-     * Net credits the org has ever paid for - top-up purchases plus subscription
-     * grants, minus top-up refunds - floored at zero. Feeds the CLI budget so a
-     * paying (or formerly-paying) org can spend what it paid for through the proxy
-     * without the free-tier cap cutting it off. The free-start grant is
-     * deliberately excluded: that's the pool the cap protects. Actual spend is
-     * still bounded by the live `creditBalance` gate, so a generous budget can't
-     * be spent past the wallet.
-     */
-    private async netPaidCreditsGranted(organizationId: string): Promise<number> {
-        const [purchased, subscriptionGranted, refunded] = await Promise.all([
-            this.db.creditTransaction.aggregate({
-                where: { organizationId, type: CreditTransactionType.TOPUP_PURCHASE },
-                _sum: { amount: true },
-            }),
-            this.db.creditTransaction.aggregate({
-                where: { organizationId, type: CreditTransactionType.SUBSCRIPTION_GRANT },
-                _sum: { amount: true },
-            }),
-            this.db.creditTransaction.aggregate({
-                where: { organizationId, type: CreditTransactionType.TOPUP_REFUND },
-                _sum: { amount: true },
-            }),
-        ]);
-        // TOPUP_PURCHASE and SUBSCRIPTION_GRANT amounts are positive; TOPUP_REFUND negative.
-        const gross = (purchased._sum.amount ?? 0) + (subscriptionGranted._sum.amount ?? 0);
-        const refunds = Math.abs(refunded._sum.amount ?? 0);
-        return Math.max(0, gross - refunds);
-    }
-
     /**
      * Deduct credits for a single managed LLM proxy request. `costUsd` is the
      * dollar amount OpenRouter charged us (from the response's usage accounting).
