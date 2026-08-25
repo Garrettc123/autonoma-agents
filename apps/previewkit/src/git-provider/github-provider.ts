@@ -1,7 +1,7 @@
 import { Readable } from "node:stream";
 import { App } from "@octokit/app";
 import { logger } from "../logger";
-import { extractTarballStream } from "./extract-tarball-stream";
+import { downloadRepoTarball } from "./download-repo-tarball";
 import type { GitProvider, GitRepository } from "./git-provider";
 
 function parseRepo(repoFullName: string): { owner: string; repo: string } {
@@ -141,22 +141,24 @@ export class GitHubProvider implements GitProvider {
         const { owner, repo } = parseRepo(repoFullName);
         const octokit = await this.getInstallationOctokit(repoFullName);
 
-        logger.info("Downloading repo tarball", { repoFullName, ref });
-
-        // parseSuccessResponseBody:false tells octokit not to buffer the body,
-        // so `response.data` is the response's ReadableStream and we can stream
-        // its gzip straight through gunzip + tar extraction instead of holding
-        // the whole archive in memory (see extractTarballStream for why that matters).
-        const response = await octokit.request("GET /repos/{owner}/{repo}/tarball/{ref}", {
-            owner,
-            repo,
+        await downloadRepoTarball({
+            repoFullName,
             ref,
-            request: { parseSuccessResponseBody: false },
+            targetDir,
+            // parseSuccessResponseBody:false tells octokit not to buffer the body,
+            // so `response.data` is the response's ReadableStream and we can stream
+            // its gzip straight through gunzip + tar extraction instead of holding
+            // the whole archive in memory (see extractTarballStream for why that matters).
+            openStream: async () => {
+                const response = await octokit.request("GET /repos/{owner}/{repo}/tarball/{ref}", {
+                    owner,
+                    repo,
+                    ref,
+                    request: { parseSuccessResponseBody: false },
+                });
+                return toNodeStream(response.data);
+            },
         });
-
-        await extractTarballStream(toNodeStream(response.data), targetDir);
-
-        logger.info("Repo tarball extracted", { repoFullName, ref, targetDir });
     }
 
     async postComment(repoFullName: string, prNumber: number, body: string): Promise<string> {

@@ -1,11 +1,10 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
-import { createGzip } from "node:zlib";
-import { pack as packTar } from "tar-fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { extractTarballStream } from "../../src/git-provider/extract-tarball-stream";
+import { makeGitHubTarballBuffer } from "./github-tarball";
 
 // Tracks temp dirs so every test cleans up after itself even on failure.
 const tempDirs: string[] = [];
@@ -16,23 +15,6 @@ async function makeTempDir(prefix: string): Promise<string> {
     return dir;
 }
 
-/**
- * Builds a gzipped tarball stream shaped exactly like GitHub's `/tarball`
- * response: every entry nested under a single top-level `owner-repo-<sha>/`
- * directory. `files` maps repo-relative paths to contents.
- */
-async function makeGitHubTarball(wrapperDir: string, files: Record<string, string>): Promise<Readable> {
-    const source = await makeTempDir("pk-tarball-src-");
-    for (const [relPath, content] of Object.entries(files)) {
-        const full = path.join(source, wrapperDir, relPath);
-        await mkdir(path.dirname(full), { recursive: true });
-        await writeFile(full, content);
-    }
-    // tar-fs pack() emits entries relative to `source`, i.e. prefixed with the
-    // wrapper dir - the same single-top-level-directory shape GitHub produces.
-    return packTar(source).pipe(createGzip());
-}
-
 afterEach(async () => {
     await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
@@ -40,11 +22,13 @@ afterEach(async () => {
 describe("extractTarballStream", () => {
     it("extracts a gzipped tarball, stripping GitHub's top-level wrapper directory", async () => {
         const target = await makeTempDir("pk-tarball-out-");
-        const gzipped = await makeGitHubTarball("acme-widgets-abc1234", {
-            "package.json": '{"name":"widgets"}',
-            "apps/web/index.ts": "export const x = 1;",
-            "README.md": "# Widgets",
-        });
+        const gzipped = Readable.from(
+            await makeGitHubTarballBuffer("acme-widgets-abc1234", {
+                "package.json": '{"name":"widgets"}',
+                "apps/web/index.ts": "export const x = 1;",
+                "README.md": "# Widgets",
+            }),
+        );
 
         await extractTarballStream(gzipped, target);
 
@@ -56,9 +40,11 @@ describe("extractTarballStream", () => {
 
     it("does not leave the wrapper directory behind", async () => {
         const target = await makeTempDir("pk-tarball-out-");
-        const gzipped = await makeGitHubTarball("acme-widgets-deadbee", {
-            "src/main.ts": "console.log('hi');",
-        });
+        const gzipped = Readable.from(
+            await makeGitHubTarballBuffer("acme-widgets-deadbee", {
+                "src/main.ts": "console.log('hi');",
+            }),
+        );
 
         await extractTarballStream(gzipped, target);
 
