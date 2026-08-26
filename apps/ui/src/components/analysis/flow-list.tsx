@@ -1,4 +1,14 @@
-import { Badge, Panel, PanelBody, PanelHeader, PanelTitle } from "@autonoma/blacklight";
+import {
+  Badge,
+  cn,
+  Panel,
+  PanelBody,
+  PanelHeader,
+  PanelTitle,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@autonoma/blacklight";
 import {
   type AnalysisFindingView,
   type AnalysisFlow,
@@ -10,32 +20,60 @@ import { ArrowUpRightIcon } from "@phosphor-icons/react/ArrowUpRight";
 import { CaretRightIcon } from "@phosphor-icons/react/CaretRight";
 import { OWNER_META, type OwnerMeta } from "components/analysis/owner-meta";
 import { VerdictBadge } from "components/analysis/verdict-badge";
+import { InfoHint } from "components/info-hint";
 import type * as React from "react";
 import { AppLink } from "routes/_blacklight/_app-shell/-app-link";
 
 type BadgeVariant = NonNullable<React.ComponentProps<typeof Badge>["variant"]>;
 
 /**
- * THE presentation of each flow status. A `Record` over the union, so a new status is a compile error here until it
- * is given copy and a tone, and no surface re-derives its own.
+ * THE presentation of each flow status: a human label, a badge tone, and the plain-language `description` the chip
+ * reveals on hover. A `Record` over the union, so a new status is a compile error here until it is given all three,
+ * and no surface re-derives its own copy.
  */
-export const FLOW_STATUS_META: Record<AnalysisFlowStatus, { label: string; variant: BadgeVariant }> = {
-  broken: { label: "Bug", variant: "critical" },
-  verified: { label: "Verified", variant: "success" },
-  partial: { label: "Partly verified", variant: "warn" },
-  unverified: { label: "Not verified", variant: "neutral" },
+export const FLOW_STATUS_META: Record<
+  AnalysisFlowStatus,
+  { label: string; variant: BadgeVariant; description: string }
+> = {
+  broken: {
+    label: "Bug",
+    variant: "critical",
+    description: "Autonoma reproduced a bug in this flow - a check that should pass fails on this PR.",
+  },
+  verified: {
+    label: "Verified",
+    variant: "success",
+    description: "Every check covering this flow passed. Autonoma exercised it end to end and the app held up.",
+  },
+  partial: {
+    label: "Partly verified",
+    variant: "warn",
+    description:
+      "Some checks in this flow passed, but at least one couldn't be completed - so the flow isn't fully confirmed.",
+  },
+  unverified: {
+    label: "Not verified",
+    variant: "neutral",
+    description: "No check could confirm this flow on this run, so Autonoma can't vouch for its current state.",
+  },
 };
 
 /**
- * Whose a flow's gaps are - the reader's first question, so it is a real badge rather than a muted one. A flow with
- * no gap (`none`) has no owner and shows nothing. The `client`/`autonoma` badges come from the shared owner registry
- * so the flows and open-issues lists render the same owner term identically.
+ * Whose a flow's gaps are - the reader's first question, drawn from the shared owner registry so the flows and
+ * open-issues lists word the same owner identically. A flow additionally has a `none` case (no gap, no owner) that
+ * shows nothing. The flow list renders it as a legible hover-native chip (label + its (i) description); the registry's
+ * `icon` is unused here.
  */
 export const FLOW_OWNER_META: Record<AnalysisFlow["owner"], OwnerMeta | undefined> = {
   client: OWNER_META.client,
   autonoma: OWNER_META.autonoma,
   none: undefined,
 };
+
+/** What a "flow" is, in the reader's language - the copy behind the (i) on the panel title. */
+const FLOW_CONCEPT_HELP =
+  'A flow is one piece of your app\'s behaviour - like "Guest checkout" or "Reset password" - that a group of ' +
+  "Autonoma's tests covers together. This PR's changes are grouped into the flows they touch.";
 
 /**
  * The branch's flow itemization: which parts of the app this PR has established, and which it has not.
@@ -67,7 +105,12 @@ export function AnalysisFlowList({
   return (
     <Panel>
       <PanelHeader>
-        <PanelTitle>Flows tested in this PR</PanelTitle>
+        <PanelTitle>
+          Flows tested in this PR
+          <InfoHint ariaLabel="What a flow is" className="text-text-secondary">
+            {FLOW_CONCEPT_HELP}
+          </InfoHint>
+        </PanelTitle>
       </PanelHeader>
       <PanelBody className="p-0">
         <ul className="divide-y divide-border-dim">
@@ -121,22 +164,52 @@ function FlowRow({
   const findingsBackHeader = findings.length > 0 && findings.length === flow.testSlugs.length;
 
   return (
-    <li className="flex flex-col gap-1 px-4 py-2.5">
+    <li className="flex flex-col gap-1 px-4 py-3">
+      {/* Title leads so every flow name starts at the same left edge; the status chip trails it, owner sits far right. */}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <Badge variant={status.variant} className="shrink-0 font-mono text-3xs uppercase tracking-wider">
-          {status.label}
-        </Badge>
         <span className="text-sm font-medium text-text-primary">{flow.title}</span>
+        <HintBadge label={status.label} variant={status.variant} hint={status.description} />
         {composition != null && <span className="font-mono text-3xs text-text-secondary">{composition}</span>}
         {owner != null && (
-          <Badge variant={owner.variant} className="ml-auto shrink-0 font-mono text-3xs uppercase tracking-wider">
-            {owner.label}
-          </Badge>
+          <HintBadge label={owner.label} variant={owner.variant} hint={owner.description} className="ml-auto" />
         )}
       </div>
       <p className="text-xs leading-relaxed text-text-secondary">{flow.detail}</p>
       {findingsBackHeader && <FlowFindings findings={findings} prNumber={prNumber} snapshotId={snapshotId} />}
     </li>
+  );
+}
+
+/**
+ * A status/owner chip whose whole surface reveals its plain-language explanation on hover - no separate (i). The
+ * Badge renders as a `button` so the hint is keyboard-reachable, not mouse-only.
+ */
+function HintBadge({
+  label,
+  variant,
+  hint,
+  className,
+}: {
+  label: string;
+  variant: BadgeVariant;
+  hint: string;
+  className?: string;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Badge
+            variant={variant}
+            render={<button type="button" />}
+            className={cn("font-mono text-3xs uppercase tracking-wider", className)}
+          >
+            {label}
+          </Badge>
+        }
+      />
+      <TooltipContent className="max-w-xs normal-case">{hint}</TooltipContent>
+    </Tooltip>
   );
 }
 

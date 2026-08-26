@@ -657,6 +657,28 @@ export const FlowsExpanded: Story = {
   },
 };
 
+/** The flow-list glossary (i), opened: hovering the section title explains what a "flow" is. */
+export const FlowInfo: Story = {
+  args: { path: OVERVIEW_PATH },
+  parameters: { msw: { handlers: flowsHandlers } },
+  play: async ({ canvasElement }) => {
+    await userEvent.hover(await within(canvasElement).findByRole("button", { name: /what a flow is/i }));
+    // The tooltip renders in a portal, outside `canvasElement` - reach it through the document body.
+    await within(document.body).findByText(/covers together/i);
+  },
+};
+
+/** A coverage-status chip, hovered: the whole chip (no separate (i)) reveals what that status means for the flow. */
+export const CoverageStatusInfo: Story = {
+  args: { path: OVERVIEW_PATH },
+  parameters: { msw: { handlers: flowsHandlers } },
+  play: async ({ canvasElement }) => {
+    await userEvent.hover(await within(canvasElement).findByRole("button", { name: /^bug$/i }));
+    // The tooltip renders in a portal, outside `canvasElement` - reach it through the document body.
+    await within(document.body).findByText(/reproduced a bug in this flow/i);
+  },
+};
+
 /**
  * A run still in flight with no earlier settled report: the hero becomes an "Analyzing..." banner linking into the
  * in-progress checkpoint where the staged view lives - the PR page itself shows no live progress.
