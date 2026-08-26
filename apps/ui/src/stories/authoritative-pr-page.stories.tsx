@@ -74,6 +74,14 @@ const analysisIssues: NonNullable<TrpcFixtures["branches"]>["analysisIssues"] = 
     runCount: 1,
   },
   {
+    id: "issue_preview_env",
+    title: "Preview environment failed to start on this branch",
+    kind: "environment",
+    severity: "high",
+    status: "open",
+    runCount: 1,
+  },
+  {
     id: "issue_cart_badge",
     title: "Cart badge miscounts items after removal",
     kind: "bug",

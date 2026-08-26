@@ -8,6 +8,7 @@ import {
 } from "@autonoma/types";
 import { ArrowUpRightIcon } from "@phosphor-icons/react/ArrowUpRight";
 import { CaretRightIcon } from "@phosphor-icons/react/CaretRight";
+import { OWNER_META, type OwnerMeta } from "components/analysis/owner-meta";
 import { VerdictBadge } from "components/analysis/verdict-badge";
 import type * as React from "react";
 import { AppLink } from "routes/_blacklight/_app-shell/-app-link";
@@ -27,11 +28,12 @@ export const FLOW_STATUS_META: Record<AnalysisFlowStatus, { label: string; varia
 
 /**
  * Whose a flow's gaps are - the reader's first question, so it is a real badge rather than a muted one. A flow with
- * no gap has no owner and shows nothing.
+ * no gap (`none`) has no owner and shows nothing. The `client`/`autonoma` badges come from the shared owner registry
+ * so the flows and open-issues lists render the same owner term identically.
  */
-export const FLOW_OWNER_META: Record<AnalysisFlow["owner"], { label: string; variant: BadgeVariant } | undefined> = {
-  client: { label: "Yours to fix", variant: "warn" },
-  autonoma: { label: "On us", variant: "secondary" },
+export const FLOW_OWNER_META: Record<AnalysisFlow["owner"], OwnerMeta | undefined> = {
+  client: OWNER_META.client,
+  autonoma: OWNER_META.autonoma,
   none: undefined,
 };
 

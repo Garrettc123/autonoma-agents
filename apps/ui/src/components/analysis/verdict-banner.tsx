@@ -1,4 +1,4 @@
-import { Badge, cn, StatusDot, Tooltip, TooltipContent, TooltipTrigger } from "@autonoma/blacklight";
+import { Badge, cn, StatusDot } from "@autonoma/blacklight";
 import {
   type AnalysisFlow,
   type AnalysisVerdictState,
@@ -7,8 +7,8 @@ import {
   analysisPrTitle,
   tallyAnalysisFlows,
 } from "@autonoma/types";
-import { InfoIcon } from "@phosphor-icons/react/Info";
 import { VERDICT_TONE } from "components/analysis/verdict-headline";
+import { InfoHint } from "components/info-hint";
 import type * as React from "react";
 
 type DotStatus = NonNullable<React.ComponentProps<typeof StatusDot>["status"]>;
@@ -76,7 +76,9 @@ export function VerdictBanner({
           <StatusDot status={tone.dot} />
           {badgeLabel}
         </Badge>
-        <VerdictStateInfo description={VERDICT_DESCRIPTION[verdict.state]} />
+        <InfoHint ariaLabel="What this verdict means" size={14} className="text-text-secondary">
+          {VERDICT_DESCRIPTION[verdict.state]}
+        </InfoHint>
       </div>
 
       <div className="min-w-0">
@@ -86,26 +88,6 @@ export function VerdictBanner({
 
       <VerdictCounts openIssueCount={openIssueCount} flowsCovered={tally.total} testsRunCount={testsRunCount} />
     </section>
-  );
-}
-
-/** The (i) that explains what the banner's verdict state means. */
-function VerdictStateInfo({ description }: { description: string }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            aria-label="What this verdict means"
-            className="flex items-center text-text-secondary opacity-60 transition-opacity hover:opacity-100"
-          >
-            <InfoIcon size={14} />
-          </button>
-        }
-      />
-      <TooltipContent className="max-w-xs normal-case">{description}</TooltipContent>
-    </Tooltip>
   );
 }
 

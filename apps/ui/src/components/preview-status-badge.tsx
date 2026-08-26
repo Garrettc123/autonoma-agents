@@ -1,5 +1,5 @@
-import { Badge, cn, Tooltip, TooltipContent, TooltipTrigger } from "@autonoma/blacklight";
-import { InfoIcon } from "@phosphor-icons/react/Info";
+import { Badge, cn } from "@autonoma/blacklight";
+import { InfoHint } from "components/info-hint";
 import type { ComponentProps } from "react";
 
 type BadgeVariant = ComponentProps<typeof Badge>["variant"];
@@ -46,22 +46,7 @@ export function PreviewStatusBadge({
   return (
     <Badge variant={variant} className={cn("shrink-0 gap-1 font-mono text-[10px] uppercase", className)}>
       {label}
-      {help != null && (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <button
-                type="button"
-                aria-label={`What "${label}" means`}
-                className="flex items-center opacity-60 transition-opacity hover:opacity-100"
-              >
-                <InfoIcon size={11} />
-              </button>
-            }
-          />
-          <TooltipContent className="max-w-xs normal-case">{help}</TooltipContent>
-        </Tooltip>
-      )}
+      {help != null && <InfoHint label={label}>{help}</InfoHint>}
     </Badge>
   );
 }
