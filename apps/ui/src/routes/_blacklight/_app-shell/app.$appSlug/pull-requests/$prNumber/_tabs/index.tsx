@@ -9,6 +9,7 @@ import { AnalyzingBanner } from "components/analysis/analyzing-banner";
 import { AnalysisFlowList } from "components/analysis/flow-list";
 import { AnalysisOpenIssuesList } from "components/analysis/open-issues-list";
 import { AnalysisReportProse } from "components/analysis/report-prose";
+import { AnalysisTestsRunSection } from "components/analysis/tests-run-section";
 import { VerdictBanner } from "components/analysis/verdict-banner";
 import { CheckpointSummaryPill } from "components/pr-status/checkpoint-summary-pill";
 import { ShaRange } from "components/snapshot/sha-range";
@@ -212,8 +213,8 @@ function SettledReportColumn({
 }
 
 // The issues-first report column, split from the overview so it (and its open-issues query) only loads once the
-// report has landed - a still-running run never pays for it. Ordered banner -> open issues -> coverage ->
-// collapsed report -> impact link, leading with the answer and demoting the prose.
+// report has landed - a still-running run never pays for it. Ordered banner -> open issues -> coverage -> tests run
+// -> collapsed report -> impact link, leading with the answer and demoting the prose.
 function AuthoritativeReportColumn({
   branchId,
   prNumber,
@@ -239,11 +240,12 @@ function AuthoritativeReportColumn({
         headline={report.headline}
         flows={report.flows}
         openIssueCount={openIssues.length}
-        testsRunCount={report.verdict.investigatedCount}
+        testsRunCount={report.testRuns.length}
       />
       {/* A clean PR shows the green banner and its coverage alone - never an empty "Open issues (0)" panel. */}
       {openIssues.length > 0 && <AnalysisOpenIssuesList issues={openIssues} prNumber={prNumber} />}
       <AnalysisFlowList flows={report.flows} findings={report.findings} prNumber={prNumber} snapshotId={snapshotId} />
+      <AnalysisTestsRunSection testRuns={report.testRuns} />
       {report.reportMarkdown != null && (
         <AnalysisReportProse
           markdown={report.reportMarkdown}

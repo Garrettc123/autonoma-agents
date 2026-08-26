@@ -279,11 +279,13 @@ export class BranchesService extends Service {
             const sorted = views.sort(
                 (left, right) => analysisFindingSortKey(left.category) - analysisFindingSortKey(right.category),
             );
-            const [findings, reportEvidence, run, verdict] = await Promise.all([
+            const branch = this.analysisStore.forBranch(report.branchId);
+            const [findings, reportEvidence, run, verdict, testRuns] = await Promise.all([
                 Promise.all(sorted.map((finding) => this.signAnalysisFinding(finding))),
                 this.signEvidenceManifest(report.reportMarkdown, report.evidenceManifest),
                 analysis.planeSummary(),
-                this.analysisStore.forBranch(report.branchId).verdict(),
+                branch.verdict(),
+                branch.testRuns(),
             ]);
             this.logger.info("Analysis report data assembled", {
                 extra: { snapshotId, findingCount: findings.length, reportEvidenceCount: reportEvidence.length },
@@ -301,6 +303,7 @@ export class BranchesService extends Service {
                 run,
                 verdict,
                 findings,
+                testRuns,
             };
         } catch (error) {
             this.logger.warn("Could not load analysis report data; treating as absent", {

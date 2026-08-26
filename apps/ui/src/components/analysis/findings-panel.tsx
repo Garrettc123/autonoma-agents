@@ -7,6 +7,7 @@ import {
 } from "@autonoma/types";
 import { CaretRightIcon } from "@phosphor-icons/react/CaretRight";
 import { VerdictBadge } from "components/analysis/verdict-badge";
+import { TIER_LABEL } from "components/analysis/verdict-meta";
 import { useState } from "react";
 import { AppLink } from "routes/_blacklight/_app-shell/-app-link";
 
@@ -68,7 +69,9 @@ export function AnalysisFindingsPanel({
 
             {needsReview.length > 0 && (
               <div className="flex flex-col gap-2">
-                <span className="font-mono text-2xs uppercase tracking-widest text-text-secondary">Needs review</span>
+                <span className="font-mono text-2xs uppercase tracking-widest text-text-secondary">
+                  {TIER_LABEL.needs_review}
+                </span>
                 <ul className="flex flex-col gap-2">
                   {needsReview.map((finding) => (
                     <FindingRow key={finding.id} finding={finding} prNumber={prNumber} snapshotId={snapshotId} />

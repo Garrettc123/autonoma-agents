@@ -1,9 +1,9 @@
-import type { PrPipelineStatus } from "@autonoma/types";
+import type { AnalysisTestRun, PrPipelineStatus } from "@autonoma/types";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { appShellHandlers, baseApplication, branchPage } from "lib/storybook/base-fixtures";
 import { PageStory } from "lib/storybook/page-story";
 import type { TrpcFixtures } from "lib/storybook/trpc-handler";
-import { userEvent, within } from "storybook/test";
+import { expect, userEvent, within } from "storybook/test";
 import { withRunSignals } from "./analysis-run-signals";
 
 const FIXTURE_EPOCH = new Date("2026-01-01T00:00:00.000Z");
@@ -89,6 +89,29 @@ const analysisIssues: NonNullable<TrpcFixtures["branches"]>["analysisIssues"] = 
     status: "resolved",
     runCount: 3,
   },
+];
+
+// A "Tests run" row: one test at its last-known verdict, keyed like the finding fixtures (`gen_<slug>` generation,
+// `<slug>.md` name) so a row's generation link and the withRunSignals findings stay in step.
+function testRun(slug: string, category: string): AnalysisTestRun {
+  return { id: slug, generationId: `gen_${slug}`, testCase: { name: `${slug}.md`, slug }, category };
+}
+
+// The five tests THIS checkpoint investigated - the same set the findings fixture carries.
+const runTestRuns: AnalysisTestRun[] = [
+  testRun("checkout-place-order", "client_bug"),
+  testRun("coupon-apply", "scenario_issue"),
+  testRun("payment-iframe", "engine_artifact"),
+  testRun("guest-add-to-cart", "passed"),
+  testRun("cart-badge-count", "passed"),
+];
+
+// The PR's CUMULATIVE tests: the five above plus two carried from an earlier commit this checkpoint did not re-run -
+// so the "Tests run" count exceeds one run's findings, exercising the accumulated-across-the-branch reading.
+const accumulatedTestRuns: AnalysisTestRun[] = [
+  ...runTestRuns,
+  testRun("login-basic", "passed"),
+  testRun("search-filter", "passed"),
 ];
 
 // The two-plane authoritative report: the Reporter's prose hero + its findings. The PR page renders the prose and
@@ -207,7 +230,14 @@ const analysisReport: NonNullable<TrpcFixtures["branches"]> = {
         evidence: [],
       }),
     ],
+    testRuns: runTestRuns,
   },
+};
+
+// The same report seen from a two-commit PR: the "Tests run" list (and the banner's count) accumulate the run's five
+// tests plus two carried from an earlier checkpoint, so it reads more tests than THIS run's findings.
+const accumulatedReport: NonNullable<TrpcFixtures["branches"]> = {
+  analysisReport: { ...analysisReport.analysisReport!, testRuns: accumulatedTestRuns },
 };
 
 function snapshotHistoryItem(overrides: {
@@ -551,6 +581,11 @@ const cleanReport: NonNullable<TrpcFixtures["branches"]> = {
         runSuccess: true,
       }),
     ],
+    testRuns: [
+      testRun("checkout-guest", "passed"),
+      testRun("cart-badge-count", "passed"),
+      testRun("guest-add-to-cart", "passed"),
+    ],
   },
 };
 
@@ -680,6 +715,41 @@ export const CoverageStatusInfo: Story = {
 };
 
 /**
+ * The "Tests run" lens, opened: every test run across the PR at its last-known verdict, grouped by outcome, each row
+ * linking to its generation page rather than the finding page. Cumulative across the branch - this two-commit PR
+ * lists seven tests (five this run, two carried), more than one run's findings. Collapsed by default (the `Report`
+ * story shows it at rest).
+ */
+export const TestsRun: Story = {
+  args: { path: OVERVIEW_PATH },
+  parameters: {
+    msw: {
+      handlers: appShellHandlers(
+        pageFixtures({
+          ...accumulatedReport,
+          analysisIssues,
+          analysisJob: { status: "completed", startedAt: STARTED_AT, completedAt: COMPLETED_AT },
+        }),
+      ),
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByText("Tests run"));
+    // The runs fall into outcome groups - one failed, two that couldn't run. ("Passed" is not asserted here: the
+    // verdict badges on the passing rows carry that word too, so it is not a unique group-header handle.)
+    await canvas.findByText("Failed");
+    await canvas.findByText("Couldn't run");
+    // A test carried from an earlier commit still appears, so the list is the PR's cumulative set, not one run's.
+    await canvas.findByRole("link", { name: /login-basic\.md/ });
+    // Each row links to the run's generation page (`.md` marks the test-run row, distinct from the report prose's
+    // finding-page link of the same slug), not to the finding page.
+    const row = await canvas.findByRole("link", { name: /checkout-place-order\.md/ });
+    await expect(row).toHaveAttribute("href", expect.stringContaining("/generations/gen_checkout-place-order"));
+  },
+};
+
+/**
  * A run still in flight with no earlier settled report: the hero becomes an "Analyzing..." banner linking into the
  * in-progress checkpoint where the staged view lives - the PR page itself shows no live progress.
  */
@@ -786,8 +856,17 @@ const notConfirmedReport: NonNullable<TrpcFixtures["branches"]> = {
     },
     verdict: { state: "not_confirmed", bugCount: 0, coverageGapCount: 2, investigatedCount: 5 },
     branchId: BRANCH_ID,
-    // The PR overview renders the prose + open-issues list, not the per-snapshot findings, so this stays empty.
+    // No findings fixtured (those are this run's, and drive the flow dropdowns + prose tokens the not_confirmed
+    // story exercises), but the branch-cumulative test runs still populate the "Tests run" section: three verified,
+    // two that couldn't confirm.
     findings: [],
+    testRuns: [
+      testRun("checkout-guest", "passed"),
+      testRun("checkout-confirm", "passed"),
+      testRun("inv-list", "passed"),
+      testRun("checkout-coupon", "scenario_issue"),
+      testRun("inv-export", "environment_failure"),
+    ],
   },
 };
 
@@ -909,6 +988,8 @@ const noTestsNeededReport: NonNullable<TrpcFixtures["branches"]> = {
     verdict: { state: "no_tests_needed", bugCount: 0, coverageGapCount: 0, investigatedCount: 0 },
     branchId: BRANCH_ID,
     findings: [],
+    // Nothing ran on the branch, so the banner reads "0 tests run" and the "Tests run" section is omitted.
+    testRuns: [],
   },
 };
 

@@ -190,5 +190,38 @@ analysisSuite({
             expect(verdict.bugCount).toBe(1);
             expect(read.map((f) => f.title)).toEqual(["Checkout", "Search"]);
         });
+
+        test("testRuns returns the newest verdict per test across snapshots, one row per test, unjudged excluded", async ({
+            harness,
+        }) => {
+            const run = await harness.seedAnalysis();
+            // checkout ran and passed on the first snapshot...
+            await harness.recordVerdict(run, "checkout", "passed");
+            // ...then a later commit re-ran it and found a bug: that newer verdict is the one that shows, linking to
+            // the run that reached it.
+            const later = await harness.addSnapshot(run.branchId, run.organizationId);
+            const rerun = await harness.recordVerdict(run, "checkout", "client_bug", { snapshotId: later });
+            await harness.recordVerdict(run, "search", "passed", { snapshotId: later });
+            // A selected-but-unjudged test (no verdict) must not appear - it was never run to a conclusion.
+            await harness.selectTests(run, ["never-ran"]);
+
+            const testRuns = await harness.store.forBranch(run.branchId).testRuns();
+
+            expect(testRuns.map((testRun) => testRun.testCase.slug)).toEqual(["checkout", "search"]);
+            const checkout = testRuns.find((testRun) => testRun.testCase.slug === "checkout");
+            expect(checkout?.category).toBe("client_bug");
+            expect(checkout?.generationId).toBe(rerun.generationId);
+        });
+
+        test("testRuns is scoped to its branch", async ({ harness }) => {
+            const run = await harness.seedAnalysis();
+            await harness.recordVerdict(run, "checkout", "passed");
+            // A different branch's run must not leak into this branch's list.
+            const other = await harness.seedAnalysis();
+            await harness.recordVerdict(other, "other-checkout", "client_bug");
+
+            const testRuns = await harness.store.forBranch(run.branchId).testRuns();
+            expect(testRuns.map((testRun) => testRun.testCase.slug)).toEqual(["checkout"]);
+        });
     },
 });

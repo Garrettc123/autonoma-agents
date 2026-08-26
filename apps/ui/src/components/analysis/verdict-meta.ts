@@ -23,6 +23,18 @@ export function verdictBehaviorOutcome(category: string): BehaviorOutcome {
     return analysisFindingTier(category) === "passed" ? "match" : "divergence";
 }
 
+/**
+ * The outcome header a tier renders under wherever findings are grouped by tier - the PR overview's "Tests run" list
+ * and the snapshot findings panel's "Needs review" group both read from this one map, so the wording cannot drift
+ * between them. A `Record` over the taxonomy tier SSOT, so a new tier is a compile error here until it is named.
+ */
+export const TIER_LABEL: Record<AnalysisFindingTier, string> = {
+    bug: "Failed",
+    needs_review: "Needs review",
+    coverage: "Couldn't run",
+    passed: "Passed",
+};
+
 export interface AnalysisVerdictMeta {
     label: string;
     variant: FindingBadgeVariant;

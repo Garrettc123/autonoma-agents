@@ -784,6 +784,23 @@ export const analysisFindingViewSchema = investigationFindingSchema.omit({ cover
 export type AnalysisFindingView = z.infer<typeof analysisFindingViewSchema>;
 
 /**
+ * One test's last-known outcome across the whole branch, for the PR overview's "Tests run" lens: the newest finding
+ * per test (across every snapshot) that reached a verdict, reduced to what a row needs. Cumulative like the verdict,
+ * headline and flows beside it - a test carried unchanged from an earlier commit still appears, at the verdict that
+ * commit gave it, linking to that run. `category` is the terminal `AnalysisVerdict` as a plain string (unknown
+ * values fall back gracefully, matching the finding display contract).
+ */
+export const analysisTestRunSchema = z.object({
+    /** The finding id behind this outcome - what a later repoint to the merged test-result page keys on. */
+    id: z.string(),
+    /** The generation the test's latest verdict judged - the row's link today (its video, steps and trace). */
+    generationId: z.string(),
+    testCase: z.object({ name: z.string(), slug: z.string() }),
+    category: z.string(),
+});
+export type AnalysisTestRun = z.infer<typeof analysisTestRunSchema>;
+
+/**
  * The authoritative analysis report as the snapshot page consumes it: the merged pipeline's per-run
  * `AnalysisReport` header plus its `AnalysisFinding` children, re-signed for display. `category` is the terminal
  * `AnalysisVerdict` as a plain string - the UI maps the known verdicts to styles and falls back gracefully,
@@ -827,6 +844,12 @@ export const analysisReportDataSchema = z.object({
     /** What the PR as a whole reads as, cumulative across the branch. The page renders both. */
     verdict: analysisVerdictSummarySchema,
     findings: z.array(analysisFindingViewSchema),
+    /**
+     * Every test run across the PR, one row per test at its last-known verdict - cumulative across the branch,
+     * unlike `findings`, which are only THIS run's. The overview's "Tests run" lens reads this, and the verdict
+     * banner's "tests run" count is its length, so both agree with the cumulative issues and flows beside them.
+     */
+    testRuns: z.array(analysisTestRunSchema),
 });
 export type AnalysisReportData = z.infer<typeof analysisReportDataSchema>;
 

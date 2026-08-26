@@ -1,6 +1,6 @@
 import { Panel, PanelBody, PanelHeader, PanelTitle } from "@autonoma/blacklight";
 import type { AnalysisFindingView, ResolvedEvidenceAsset } from "@autonoma/types";
-import { CaretRightIcon } from "@phosphor-icons/react/CaretRight";
+import { CollapsiblePanel } from "components/analysis/collapsible-panel";
 import { ReasoningMarkdown } from "components/snapshot/reasoning-block";
 import type { ReactNode } from "react";
 import { AppLink } from "routes/_blacklight/_app-shell/-app-link";
@@ -74,19 +74,7 @@ export function AnalysisReportProse({
   );
 
   if (collapsible) {
-    return (
-      <Panel>
-        <details className="group">
-          <summary className="cursor-pointer list-none">
-            <PanelHeader className="transition-colors hover:bg-surface-raised">
-              <PanelTitle>Full report</PanelTitle>
-              <CaretRightIcon size={12} className="text-text-secondary transition-transform group-open:rotate-90" />
-            </PanelHeader>
-          </summary>
-          <PanelBody>{body}</PanelBody>
-        </details>
-      </Panel>
-    );
+    return <CollapsiblePanel title="Full report">{body}</CollapsiblePanel>;
   }
 
   return (

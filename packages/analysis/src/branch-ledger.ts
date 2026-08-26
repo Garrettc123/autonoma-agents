@@ -5,6 +5,7 @@ import {
     type AnalysisFlow,
     type AnalysisIssueKind,
     type AnalysisIssueStatus,
+    type AnalysisTestRun,
     type AnalysisVerdictCounts,
     type AnalysisVerdictSummary,
     type RunPlaneSummary,
@@ -12,6 +13,7 @@ import {
     analysisIssueStatusSchema,
 } from "@autonoma/types";
 import { readPlaneSummary } from "./queries/finding-coverage";
+import { readBranchTestRuns } from "./queries/read-branch-test-runs";
 import { type Issue, issueStatusFilter, readIssues } from "./queries/read-issues";
 import { type AnalysisLifecycle, lifecycleSelect, toLifecycle } from "./queries/read-lifecycle";
 import { type SettledReport, readLatestSettledReport } from "./queries/read-report";
@@ -152,6 +154,20 @@ export class BranchLedger {
     public async verdictWithFlows(): Promise<{ verdict: AnalysisVerdictSummary; flows: AnalysisFlow[] }> {
         const { verdict, report } = await this.readVerdictAndReport();
         return { verdict, flows: report?.flows ?? [] };
+    }
+
+    /**
+     * Every test run across the branch at its last-known verdict - the "Tests run" lens the PR overview reads, and
+     * the count the verdict banner shows. Cumulative across the branch's commits, like {@link verdictWithFlows}'s
+     * flows, not one run's findings. See {@link readBranchTestRuns}.
+     */
+    public async testRuns(): Promise<AnalysisTestRun[]> {
+        const testRuns = await readBranchTestRuns(this.db, this.branchId);
+        this.logger.info("Read branch test runs", {
+            branch: { branchId: this.branchId },
+            extra: { count: testRuns.length },
+        });
+        return testRuns;
     }
 
     /**

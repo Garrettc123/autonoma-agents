@@ -199,6 +199,39 @@ const analysisReportData: AnalysisReportFixture = {
       evidence: [],
     }),
   ],
+  // The branch-cumulative "Tests run" list (the PR overview reads it; the per-job snapshot page does not render it).
+  testRuns: [
+    {
+      id: "checkout-place-order",
+      generationId: "gen_checkout-place-order",
+      testCase: { name: "checkout-place-order.md", slug: "checkout-place-order" },
+      category: "client_bug",
+    },
+    {
+      id: "coupon-apply",
+      generationId: "gen_coupon-apply",
+      testCase: { name: "coupon-apply.md", slug: "coupon-apply" },
+      category: "scenario_issue",
+    },
+    {
+      id: "payment-iframe",
+      generationId: "gen_payment-iframe",
+      testCase: { name: "payment-iframe.md", slug: "payment-iframe" },
+      category: "engine_artifact",
+    },
+    {
+      id: "guest-add-to-cart",
+      generationId: "gen_guest-add-to-cart",
+      testCase: { name: "guest-add-to-cart.md", slug: "guest-add-to-cart" },
+      category: "passed",
+    },
+    {
+      id: "cart-badge-count",
+      generationId: "gen_cart-badge-count",
+      testCase: { name: "cart-badge-count.md", slug: "cart-badge-count" },
+      category: "passed",
+    },
+  ],
 };
 
 const analysisReport: NonNullable<TrpcFixtures["branches"]> = { analysisReport: analysisReportData };
