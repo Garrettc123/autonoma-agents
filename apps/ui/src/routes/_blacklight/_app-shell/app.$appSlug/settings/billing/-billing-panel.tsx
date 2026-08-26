@@ -16,23 +16,12 @@ import {
   SelectTrigger,
   SelectValue,
   Separator,
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
 } from "@autonoma/blacklight";
 import { CreditCardIcon } from "@phosphor-icons/react/CreditCard";
-import { CrownSimpleIcon } from "@phosphor-icons/react/CrownSimple";
 import { GiftIcon } from "@phosphor-icons/react/Gift";
 import { LightningIcon } from "@phosphor-icons/react/Lightning";
 import { TerminalWindowIcon } from "@phosphor-icons/react/TerminalWindow";
-import {
-  CHECKOUT_TYPE_SUBSCRIPTION,
-  CHECKOUT_TYPE_TOPUP,
-  type CheckoutType,
-  formatSubscriptionStatus,
-  formatTransactionType,
-} from "lib/billing/formatters";
-import { isSubscribed } from "lib/billing/is-subscribed";
+import { formatSubscriptionStatus, formatTransactionType } from "lib/billing/formatters";
 import { formatDate } from "lib/format";
 import {
   useBillingStatus,
@@ -67,7 +56,6 @@ export function BillingPanel() {
     setAutoTopUpPackageId(data.autoTopUpPackageId ?? "");
   }, [data.autoTopUpEnabled, data.autoTopUpThreshold, data.autoTopUpPackageId]);
 
-  const subscribed = isSubscribed(data.subscriptionStatus);
   // Vercel-provisioned orgs pay through Vercel's own billing, never Stripe - Upgrade,
   // Open billing portal, and Buy top-up all create Stripe checkout/portal sessions,
   // which is the wrong destination (and would fail: these orgs have no
@@ -85,10 +73,10 @@ export function BillingPanel() {
       thresholdValue !== data.autoTopUpThreshold ||
       autoTopUpPackageId !== (data.autoTopUpPackageId ?? ""));
 
-  function handleCreateCheckout(type: CheckoutType, packageId?: string) {
+  function handleCreateCheckout(packageId?: string) {
     const returnPath = `${window.location.pathname}${window.location.search}`;
     createCheckout.mutate(
-      { type, returnPath, packageId },
+      { returnPath, packageId },
       {
         onSuccess: (result) => {
           if (result.url == null) return;
@@ -178,7 +166,7 @@ export function BillingPanel() {
                       key={pkg.id}
                       variant="outline"
                       className="h-auto w-full flex-col items-start gap-1 py-2"
-                      onClick={() => handleCreateCheckout(CHECKOUT_TYPE_TOPUP, pkg.id)}
+                      onClick={() => handleCreateCheckout(pkg.id)}
                       disabled={createCheckout.isPending}
                       aria-label={`billing-buy-topup-${pkg.id}`}
                     >
@@ -239,19 +227,6 @@ export function BillingPanel() {
               <p className="text-sm text-text-secondary">Your plan and billing are managed in the Vercel dashboard.</p>
             ) : (
               <div className="flex flex-wrap gap-2">
-                <Tooltip>
-                  <TooltipTrigger render={<span />}>
-                    <Button
-                      onClick={() => handleCreateCheckout(CHECKOUT_TYPE_SUBSCRIPTION)}
-                      disabled={subscribed || createCheckout.isPending}
-                      aria-label="billing-start-subscription"
-                    >
-                      <CrownSimpleIcon size={14} />
-                      Upgrade
-                    </Button>
-                  </TooltipTrigger>
-                  {subscribed && <TooltipContent>You are already on the Pro plan</TooltipContent>}
-                </Tooltip>
                 <Button
                   variant="outline"
                   onClick={handleOpenPortal}

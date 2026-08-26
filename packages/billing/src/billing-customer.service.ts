@@ -1,12 +1,7 @@
 import type { PrismaClient } from "@autonoma/db";
 import { CreditTransactionType } from "@autonoma/db";
 import { BadRequestError, NotFoundError, SpendCapExceededError } from "@autonoma/errors";
-import {
-    BILLING_CHECKOUT_TYPES,
-    BILLING_PAYMENT_INTENT_TYPES,
-    BILLING_TOPUP_SOURCES,
-    type BillingCheckoutType,
-} from "@autonoma/types";
+import { BILLING_PAYMENT_INTENT_TYPES, BILLING_TOPUP_SOURCES } from "@autonoma/types";
 import { ensureBillingProvisioning } from "./billing-provisioning";
 import type { BillingTopupPackageService } from "./billing-topup-package.service";
 import { buildCustomerCreateIdempotencyKey, isUniqueConstraintError } from "./billing-utils";
@@ -15,6 +10,7 @@ import { Service } from "./service";
 import type { SpendCapService } from "./spend-cap.service";
 import { getStripe } from "./stripe-client";
 import { syncStripeDataToDb } from "./stripe-sync";
+import type { SubscriptionStatusResult } from "./types";
 
 export class BillingCustomerService extends Service {
     constructor(
@@ -96,12 +92,7 @@ export class BillingCustomerService extends Service {
         }
     }
 
-    async createCheckoutSession(
-        organizationId: string,
-        type: BillingCheckoutType,
-        returnPath?: string,
-        packageId?: string,
-    ) {
+    async createCheckoutSession(organizationId: string, returnPath?: string, packageId?: string) {
         const org = await this.db.organization.findUnique({
             where: { id: organizationId },
             select: { name: true },
@@ -116,24 +107,6 @@ export class BillingCustomerService extends Service {
         const { cancelPath, successPath } = this.resolveCheckoutReturnPaths(returnPath);
         const cancelUrl = this.buildAbsoluteAppUrl(cancelPath);
         const successUrl = this.buildCheckoutSuccessUrl(successPath);
-
-        if (type === BILLING_CHECKOUT_TYPES.SUBSCRIPTION) {
-            if (env.STRIPE_SUBSCRIPTION_PRICE_ID == null) {
-                throw new Error("STRIPE_SUBSCRIPTION_PRICE_ID is not configured");
-            }
-
-            const session = await stripe.checkout.sessions.create({
-                mode: "subscription",
-                customer: customer.stripeCustomerId,
-                line_items: [{ price: env.STRIPE_SUBSCRIPTION_PRICE_ID, quantity: 1 }],
-                payment_method_collection: "always",
-                success_url: successUrl,
-                cancel_url: cancelUrl,
-            });
-
-            this.logger.info("Created subscription checkout session", { organizationId, sessionId: session.id });
-            return { url: session.url };
-        }
 
         if (packageId == null) throw new BadRequestError("A top-up package must be selected");
 
@@ -199,6 +172,24 @@ export class BillingCustomerService extends Service {
 
         this.logger.info("Created billing portal session", { organizationId });
         return { url: session.url };
+    }
+
+    /**
+     * The organization's subscription status on its own, for the app shell's upgrade button.
+     *
+     * Separate from {@link getBillingStatus} because the shell renders on every page and needs one
+     * enum, not a balance, a lifetime aggregate and the last 20 transactions. Answers with an
+     * object rather than a bare value so a missing billing row is still valid React Query data.
+     */
+    async getSubscriptionStatus(organizationId: string): Promise<SubscriptionStatusResult> {
+        this.logger.info("Reading subscription status", { organization: { organizationId } });
+
+        const customer = await this.db.billingCustomer.findUnique({
+            where: { organizationId },
+            select: { subscriptionStatus: true },
+        });
+
+        return { subscriptionStatus: customer?.subscriptionStatus ?? undefined };
     }
 
     async getBillingStatus(organizationId: string) {

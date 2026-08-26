@@ -1,50 +1,31 @@
 import { Button } from "@autonoma/blacklight";
-import { CrownSimpleIcon } from "@phosphor-icons/react/CrownSimple";
+import { LightningIcon } from "@phosphor-icons/react/Lightning";
 import { useQuery } from "@tanstack/react-query";
-import { CHECKOUT_TYPE_SUBSCRIPTION } from "lib/billing/formatters";
-import { isSubscribed } from "lib/billing/is-subscribed";
-import { useCreateCheckoutSession } from "lib/query/billing.queries";
+import { Link, useParams } from "@tanstack/react-router";
 import { trpc } from "lib/trpc";
 
 /**
- * Renders nothing once the organization is paying, so the bar's one solid call to action is only there while
- * there is something to call for. The billing destination itself is not conditional - it lives in the account
- * menu, which is where someone who already pays goes looking for it.
+ * The bar's one solid call to action, shown only when the organization has run its balance down -
+ * at or below zero it can no longer start a run, a preview deploy or a PR analysis, so this is the
+ * one moment the top bar has something worth interrupting for. A healthy balance renders nothing;
+ * billing lives in the account menu for everyone who is just looking.
  *
- * The checkout URL is Stripe's, so leaving the SPA for it is the point rather than a routing mistake.
+ * There is no plan to upgrade to - credits are the only thing sold - so this points at the app's
+ * own billing settings rather than creating a checkout session itself.
  */
 export function UpgradeButton() {
   const { data } = useQuery(trpc.billing.status.queryOptions());
-  const createCheckout = useCreateCheckoutSession();
+  const params = useParams({ strict: false });
 
-  if (data == null || isSubscribed(data.subscriptionStatus)) return undefined;
-
-  function handleUpgrade() {
-    const returnPath = `${window.location.pathname}${window.location.search}`;
-    createCheckout.mutate(
-      { type: CHECKOUT_TYPE_SUBSCRIPTION, returnPath },
-      {
-        onSuccess: (result) => {
-          if (result.url == null) return;
-          window.location.href = result.url;
-        },
-      },
-    );
-  }
+  if (data == null || params.appSlug == null) return undefined;
+  if (data.creditBalance > 0) return undefined;
 
   return (
-    // The label drops at the same width the suite-health pill does, so the two calls to action narrow together
-    // rather than one at a time. The crown and the fill colour still read as "upgrade" without it.
-    <Button
-      variant="cta"
-      size="sm"
-      onClick={handleUpgrade}
-      disabled={createCheckout.isPending}
-      aria-label="Upgrade"
-      className="shrink-0 gap-1.5"
-    >
-      <CrownSimpleIcon size={13} weight="fill" />
-      <span className="hidden lg:inline">Upgrade</span>
-    </Button>
+    <Link to="/app/$appSlug/settings/billing" params={{ appSlug: params.appSlug }}>
+      <Button variant="cta" size="sm" aria-label="Add credits" className="shrink-0 gap-1.5">
+        <LightningIcon size={13} weight="fill" />
+        <span className="hidden lg:inline">Add credits</span>
+      </Button>
+    </Link>
   );
 }

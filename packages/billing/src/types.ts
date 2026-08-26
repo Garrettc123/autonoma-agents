@@ -4,7 +4,7 @@ import type {
     ComputePricingReference,
     CreditTransaction,
 } from "@autonoma/db";
-import type { BillingCheckoutType, BillingTopupSource } from "@autonoma/types";
+import type { BillingTopupSource } from "@autonoma/types";
 import type { BillingPricingValues } from "./billing-pricing.types";
 import type { VercelOverageStatus } from "./vercel-overage.service";
 
@@ -117,9 +117,12 @@ export interface BillingServiceOptions {
     alertNotifier?: BillingAlertNotifier;
 }
 
-
 export type BillingSessionResult = {
     url: string | null;
+};
+
+export type SubscriptionStatusResult = {
+    subscriptionStatus?: string;
 };
 
 export type BillingStatusResult = {
@@ -145,12 +148,12 @@ export interface BillingService {
     startGracePeriodByOrganizationId(organizationId: string, gracePeriodDays: number): Promise<void>;
     createCheckoutSession(
         organizationId: string,
-        type: BillingCheckoutType,
         returnPath?: string,
         packageId?: string,
     ): Promise<BillingSessionResult>;
     createPortalSession(organizationId: string, returnPath?: string): Promise<BillingSessionResult>;
     getBillingStatus(organizationId: string): Promise<BillingStatusResult>;
+    getSubscriptionStatus(organizationId: string): Promise<SubscriptionStatusResult>;
     updateAutoTopUp(organizationId: string, enabled: boolean, threshold: number, packageId?: string): Promise<void>;
     checkCreditsGate(organizationId: string, runCount: number, architecture: ApplicationArchitecture): Promise<void>;
     deductCreditsForGeneration(generationId: string, context?: DeductGenerationContext): Promise<boolean>;

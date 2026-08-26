@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { BILLING_CHECKOUT_TYPES } from "../constants/billing";
 
 export const BillingTransactionSchema = z.object({
     id: z.string(),
@@ -38,11 +37,6 @@ export const BillingStatusSchema = z.object({
     transactions: z.array(BillingTransactionSchema),
 });
 export type BillingStatus = z.infer<typeof BillingStatusSchema>;
-
-export const CreateCheckoutInputSchema = z.object({
-    type: z.enum([BILLING_CHECKOUT_TYPES.SUBSCRIPTION, BILLING_CHECKOUT_TYPES.TOPUP]),
-});
-export type CreateCheckoutInput = z.infer<typeof CreateCheckoutInputSchema>;
 
 export const AutoTopUpInputSchema = z.object({
     enabled: z.boolean(),

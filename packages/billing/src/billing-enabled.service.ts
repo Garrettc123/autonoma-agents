@@ -1,5 +1,5 @@
 import type { ApplicationArchitecture, PrismaClient } from "@autonoma/db";
-import type { BillingCheckoutType, BillingTopupSource } from "@autonoma/types";
+import type { BillingTopupSource } from "@autonoma/types";
 import { AutoTopUpService } from "./auto-topup.service";
 import { BillingCustomerService } from "./billing-customer.service";
 import { BillingPricingService } from "./billing-pricing.service";
@@ -52,8 +52,8 @@ export class EnabledBillingService implements BillingService, StripeBillingServi
         return customer;
     }
 
-    createCheckoutSession(organizationId: string, type: BillingCheckoutType, returnPath?: string, packageId?: string) {
-        return this.billingCustomerService.createCheckoutSession(organizationId, type, returnPath, packageId);
+    createCheckoutSession(organizationId: string, returnPath?: string, packageId?: string) {
+        return this.billingCustomerService.createCheckoutSession(organizationId, returnPath, packageId);
     }
 
     createPortalSession(organizationId: string, returnPath?: string) {
@@ -62,6 +62,10 @@ export class EnabledBillingService implements BillingService, StripeBillingServi
 
     getBillingStatus(organizationId: string) {
         return this.billingCustomerService.getBillingStatus(organizationId);
+    }
+
+    getSubscriptionStatus(organizationId: string) {
+        return this.billingCustomerService.getSubscriptionStatus(organizationId);
     }
 
     updateAutoTopUp(organizationId: string, enabled: boolean, threshold: number, packageId?: string) {

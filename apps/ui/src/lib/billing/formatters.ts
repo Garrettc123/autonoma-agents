@@ -1,8 +1,3 @@
-export const CHECKOUT_TYPE_SUBSCRIPTION = "subscription" as const;
-export const CHECKOUT_TYPE_TOPUP = "topup" as const;
-
-export type CheckoutType = typeof CHECKOUT_TYPE_SUBSCRIPTION | typeof CHECKOUT_TYPE_TOPUP;
-
 // Human-readable labels for CreditTransactionType. Keyed by the enum string so a
 // new transaction type renders its raw value (still legible) until added here.
 const TRANSACTION_TYPE_LABELS: Record<string, string> = {

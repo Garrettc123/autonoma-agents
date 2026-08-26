@@ -1,10 +1,3 @@
-export const BILLING_CHECKOUT_TYPES = {
-    SUBSCRIPTION: "subscription",
-    TOPUP: "topup",
-} as const;
-
-export type BillingCheckoutType = (typeof BILLING_CHECKOUT_TYPES)[keyof typeof BILLING_CHECKOUT_TYPES];
-
 export const BILLING_PAYMENT_INTENT_TYPES = {
     TOPUP: "topup",
 } as const;

@@ -1,5 +1,4 @@
 import { resolveFreeStartEligibility } from "@autonoma/billing";
-import { BILLING_CHECKOUT_TYPES } from "@autonoma/types";
 import { z } from "zod";
 import { protectedProcedure, writeProcedure, router } from "../../trpc";
 
@@ -20,13 +19,12 @@ const billingRouterImpl = router({
     createCheckoutSession: writeProcedure
         .input(
             z.object({
-                type: z.enum([BILLING_CHECKOUT_TYPES.SUBSCRIPTION, BILLING_CHECKOUT_TYPES.TOPUP]),
                 returnPath: z.string().max(500).optional(),
                 packageId: z.string().min(1).optional(),
             }),
         )
         .mutation(({ ctx: { services, organizationId }, input }) =>
-            services.billing.createCheckoutSession(organizationId, input.type, input.returnPath, input.packageId),
+            services.billing.createCheckoutSession(organizationId, input.returnPath, input.packageId),
         ),
     createPortalSession: writeProcedure
         .input(

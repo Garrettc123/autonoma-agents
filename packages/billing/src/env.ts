@@ -6,7 +6,6 @@ export const env = createEnv({
         STRIPE_ENABLED: z.stringbool().default(false),
         STRIPE_SECRET_KEY: z.string().min(1).optional(),
         STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
-        STRIPE_SUBSCRIPTION_PRICE_ID: z.string().min(1).optional(),
         BILLING_GRACE_PERIOD_DAYS: z.coerce.number().int().min(0).default(3),
         APP_URL: z.string().optional().default("http://localhost:3000"),
     },
