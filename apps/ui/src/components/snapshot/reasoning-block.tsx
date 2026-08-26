@@ -71,11 +71,19 @@ export function ReasoningMarkdown({
               {children}
             </code>
           ),
+          // `list-outside` (marker in a left gutter, not `list-inside`): a loose list - one with a blank line
+          // between items, or an item holding a nested sub-list - wraps each item's text in a block `<p>`, and
+          // `inside` would drop that block onto its own line below the marker. `outside` keeps the marker beside
+          // the first line whether the content is inline or a block.
           ul: ({ children }) => (
-            <ul className="mb-3 list-inside list-disc space-y-1 text-sm text-text-primary">{children}</ul>
+            <ul className="mb-3 list-outside list-disc space-y-1 pl-6 text-sm text-text-primary [&_li>p]:mb-0">
+              {children}
+            </ul>
           ),
           ol: ({ children }) => (
-            <ol className="mb-3 list-inside list-decimal space-y-1 text-sm text-text-primary">{children}</ol>
+            <ol className="mb-3 list-outside list-decimal space-y-1 pl-6 text-sm text-text-primary [&_li>p]:mb-0">
+              {children}
+            </ol>
           ),
           li: ({ children }) => <li className="text-sm text-text-primary">{children}</li>,
           img: ({ src, alt }) => (
