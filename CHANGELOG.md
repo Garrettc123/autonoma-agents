@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.260826.1](https://github.com/Autonoma-AI/agent/compare/v1.260824.2...v1.260826.1) (2026-08-26)
+
+
+### Features
+
+* admin compute billing page ([#2757](https://github.com/Autonoma-AI/agent/issues/2757)) ([2647d4d](https://github.com/Autonoma-AI/agent/commit/2647d4d838101fe1109ce9fc576ae342dd56dfb9))
+* **api:** user_prompt events - service, HTTP route, MCP tool, signal poke ([#2788](https://github.com/Autonoma-AI/agent/issues/2788)) ([0c6fa07](https://github.com/Autonoma-AI/agent/commit/0c6fa074fe9f1a94c3501c96f8e3f9c259462020))
+* **billing:** deploy every cronjob and project compute billing befor… ([#2720](https://github.com/Autonoma-AI/agent/issues/2720)) ([712afad](https://github.com/Autonoma-AI/agent/commit/712afadfeedcc44d7c57aabf2cbdad17ca507f80))
+* **billing:** kill in-flight jobs when an org crosses its credit floor ([#2698](https://github.com/Autonoma-AI/agent/issues/2698)) ([76bb7a5](https://github.com/Autonoma-AI/agent/commit/76bb7a5b46a3992edf3664c87a8fd54ec52f03fb))
+* **billing:** pay-as-you-go top-up packages and org spend caps ([#2701](https://github.com/Autonoma-AI/agent/issues/2701)) ([15dd788](https://github.com/Autonoma-AI/agent/commit/15dd788e02ad2efc8721f8f718c5e4565327ae83))
+* **diffs:** impact and report agents address user_prompt events ([#2790](https://github.com/Autonoma-AI/agent/issues/2790)) ([42a92c7](https://github.com/Autonoma-AI/agent/commit/42a92c753480558f818d3e989e6ef6ad08efa265))
+* verdict-banner hero, issues/coverage above a collapsed PR report ([#2772](https://github.com/Autonoma-AI/agent/issues/2772)) ([37e1a54](https://github.com/Autonoma-AI/agent/commit/37e1a54625dee6c955d65e7a132913612a353c0e))
+* **workflow:** inbox drain loop - signal handler + drain before exit ([#2789](https://github.com/Autonoma-AI/agent/issues/2789)) ([beb2640](https://github.com/Autonoma-AI/agent/commit/beb2640a8e3309ea479dceb92bd5b59ff4af2b81))
+
+
+### Bug Fixes
+
+* **onboarding:** keep an app live through a base-preview redeploy ([#2796](https://github.com/Autonoma-AI/agent/issues/2796)) ([c12ea8e](https://github.com/Autonoma-AI/agent/commit/c12ea8e5492ba3af73db94b7c0f49c6553e3d204))
+* **previewkit:** retry a repo tarball download that drops mid-body ([#2795](https://github.com/Autonoma-AI/agent/issues/2795)) ([fbbed9c](https://github.com/Autonoma-AI/agent/commit/fbbed9cb0226090cd6bd9e89a3c806d890baf2f1))
+
 ## [1.260824.2](https://github.com/Autonoma-AI/agent/compare/v1.260824.1...v1.260824.2) (2026-08-24)
 
 
