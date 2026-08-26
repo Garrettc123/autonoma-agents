@@ -1621,6 +1621,17 @@ model BillingPricing {
   creditsPerVcpuHour     Int @default(0) @map("credits_per_vcpu_hour")
   creditsPerGbMemoryHour Int @default(0) @map("credits_per_gb_memory_hour")
 
+  // Margin on metered, USD-denominated consumption, in basis points (10000 = 1.0x = cost).
+  // Credits are SOLD at creditsPerTopup / stripeTopupAmountCents - 1500 per USD by default - and
+  // usdToCreditCost converts spend back at that same rate, so without this every metered path
+  // (LLM proxy, AI cost, generation) resells AI at exactly what it cost us. This is the one knob
+  // that makes that margin a deliberate number instead of an accident.
+  //
+  // Deliberately NOT applied to creditsPerVcpuHour/creditsPerGbMemoryHour above: those are
+  // credits-per-hour figures an admin sets directly, so whatever margin they carry is already
+  // inside the number. Applying this to them too would silently double-count it.
+  meteredMarkupBps Int @default(10000) @map("metered_markup_bps")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

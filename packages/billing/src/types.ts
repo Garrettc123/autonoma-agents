@@ -181,6 +181,7 @@ export interface BillingService {
         organizationId: string,
         rates: { creditsPerVcpuHour: number; creditsPerGbMemoryHour: number },
     ): Promise<void>;
+    updateMeteredMarkup(organizationId: string, meteredMarkupBps: number): Promise<void>;
     getComputePricingReferences(): Promise<ComputePricingReference[]>;
     listActiveTopupPackages(): Promise<BillingTopupPackageItem[]>;
     listAllTopupPackages(): Promise<BillingTopupPackageItem[]>;

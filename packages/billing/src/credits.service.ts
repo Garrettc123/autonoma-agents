@@ -418,9 +418,8 @@ export class CreditsService extends Service {
     /**
      * Deduct credits for a single managed LLM proxy request. `costUsd` is the
      * dollar amount OpenRouter charged us (from the response's usage accounting).
-     * We convert to credits at the same rate top-ups are priced
-     * (`creditsPerTopup` per `stripeTopupAmountCents`), so the existing margin
-     * carries over and there's no separate pricing knob.
+     * `usdToCreditCost` turns that into a credit charge: converted at the rate
+     * top-ups are sold at, then priced by the org's `meteredMarkupBps`.
      *
      * Unlike generation/run deductions, this does NOT require a sufficient
      * balance: the balance floors at zero so a single over-budget request can't
@@ -442,13 +441,17 @@ export class CreditsService extends Service {
         const pricing = await this.pricingService.getOrCreatePricing(organizationId);
         const cost = usdToCreditCost(costUsd, pricing);
         if (cost == null) {
-            this.logger.warn("Organization has no usable credits-per-USD rate, skipping LLM proxy deduction", {
-                organizationId,
-                costUsd,
-                requestId,
-                creditsPerTopup: pricing.creditsPerTopup,
-                stripeTopupAmountCents: pricing.stripeTopupAmountCents,
-            });
+            this.logger.warn(
+                "Organization has no usable credits-per-USD rate or markup, skipping LLM proxy deduction",
+                {
+                    organizationId,
+                    costUsd,
+                    requestId,
+                    creditsPerTopup: pricing.creditsPerTopup,
+                    stripeTopupAmountCents: pricing.stripeTopupAmountCents,
+                    meteredMarkupBps: pricing.meteredMarkupBps,
+                },
+            );
             return false;
         }
         const transactionId = `ctr_llm_${requestId}`;

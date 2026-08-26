@@ -246,6 +246,21 @@ export const adminRouter = router({
                 }),
             ),
         /**
+         * Margin on metered, USD-denominated consumption, in basis points - 10000 is 1.0x, i.e. bill
+         * exactly what the spend cost us. Deliberate and admin-only, same as `updateComputePricing`.
+         * Capped at 100x as a fat-finger guard; a markup that high is already a pricing incident.
+         */
+        updateMeteredMarkup: internalProcedure
+            .input(
+                z.object({
+                    organizationId: z.string().min(1),
+                    meteredMarkupBps: z.number().int().positive().max(1_000_000),
+                }),
+            )
+            .mutation(({ ctx: { services }, input }) =>
+                services.billing.updateMeteredMarkup(input.organizationId, input.meteredMarkupBps),
+            ),
+        /**
          * Sets how far below zero an org's credit balance may go before new previewkit deploys/PR
          * analysis runs are blocked. Deliberate and admin-only, same as setting a custom compute
          * pricing rate - there is no automatic "this org is enterprise" detection.

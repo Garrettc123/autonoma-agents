@@ -20,6 +20,7 @@ export class BillingPricingService extends Service {
                 stripeTopupAmountCents: true,
                 creditsPerVcpuHour: true,
                 creditsPerGbMemoryHour: true,
+                meteredMarkupBps: true,
             },
         });
         if (existing != null) return existing;
@@ -38,6 +39,7 @@ export class BillingPricingService extends Service {
                 stripeTopupAmountCents: true,
                 creditsPerVcpuHour: true,
                 creditsPerGbMemoryHour: true,
+                meteredMarkupBps: true,
             },
         });
     }
@@ -74,6 +76,24 @@ export class BillingPricingService extends Service {
             organizationId,
             creditsPerVcpuHour,
             creditsPerGbMemoryHour,
+        });
+    }
+
+    /**
+     * Sets the org's margin on metered, USD-denominated consumption, in basis points (10000 = 1.0x =
+     * bill exactly what it cost us). Admin-only and deliberate, same rollout shape as
+     * `updateComputePricing` - every org starts at 1.0x, which is the historical behaviour.
+     */
+    async updateMeteredMarkup(organizationId: string, meteredMarkupBps: number): Promise<void> {
+        const rounded = Math.round(meteredMarkupBps);
+        await this.db.billingPricing.upsert({
+            where: { organizationId },
+            create: { organizationId, meteredMarkupBps: rounded },
+            update: { meteredMarkupBps: rounded },
+        });
+        this.logger.info("Updated metered markup for organization", {
+            organizationId,
+            meteredMarkupBps: rounded,
         });
     }
 

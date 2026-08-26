@@ -8,4 +8,5 @@ export type BillingPricingValues = {
     stripeTopupAmountCents: number;
     creditsPerVcpuHour: number;
     creditsPerGbMemoryHour: number;
+    meteredMarkupBps: number;
 };

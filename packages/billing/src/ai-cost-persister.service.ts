@@ -101,11 +101,12 @@ async function deductCreditsForAiCost(
         const pricing = await new BillingPricingService(db).getOrCreatePricing(organizationId);
         const cost = usdToCreditCost(costMicrodollars / MICRODOLLARS_PER_USD, pricing);
         if (cost == null) {
-            logger.warn("Organization has no usable credits-per-USD rate, skipping AI cost deduction", {
+            logger.warn("Organization has no usable credits-per-USD rate or markup, skipping AI cost deduction", {
                 extra: {
                     organizationId,
                     creditsPerTopup: pricing.creditsPerTopup,
                     stripeTopupAmountCents: pricing.stripeTopupAmountCents,
+                    meteredMarkupBps: pricing.meteredMarkupBps,
                     costMicrodollars,
                 },
             });

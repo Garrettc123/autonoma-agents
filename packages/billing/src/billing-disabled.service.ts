@@ -154,6 +154,10 @@ export class DisabledBillingService implements BillingService {
         return this.billingPricingService.updateComputePricing(organizationId, rates);
     }
 
+    updateMeteredMarkup(organizationId: string, meteredMarkupBps: number) {
+        return this.billingPricingService.updateMeteredMarkup(organizationId, meteredMarkupBps);
+    }
+
     getComputePricingReferences() {
         return this.billingPricingService.getComputePricingReferences();
     }
