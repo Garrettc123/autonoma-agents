@@ -316,6 +316,29 @@ const snapshotHistory: NonNullable<TrpcFixtures["branches"]>["snapshotHistory"] 
   }),
 ];
 
+// A long-lived PR's history: eight checkpoints newest-first, so the CHECKPOINT HISTORY list overflows its ~20rem cap
+// and scrolls internally rather than the rail growing with the commit count. Each carries a distinct head sha (only
+// the first 7 chars show) so the rows read as a real timeline.
+const MANY_CHECKPOINT_COUNT = 8;
+const manyCheckpointHistory: NonNullable<TrpcFixtures["branches"]>["snapshotHistory"] = Array.from(
+  { length: MANY_CHECKPOINT_COUNT },
+  (_, i) => {
+    const needsAttention = i % 3 === 0;
+    const position = MANY_CHECKPOINT_COUNT - i; // 8 (newest) down to 1
+    return snapshotHistoryItem({
+      id: `snap_pr482_auth_${String(position).padStart(2, "0")}`,
+      headSha: `${(0xa0 + i).toString(16)}1d9c07e2f5a8c1d3e6f90a2b4c6d8e0f1234567`.slice(0, 40),
+      createdAt: new Date(RUN_AT.getTime() - i * 3 * 60 * 60 * 1000),
+      prevSnapshotId:
+        i === MANY_CHECKPOINT_COUNT - 1 ? null : `snap_pr482_auth_${String(position - 1).padStart(2, "0")}`,
+      tone: needsAttention ? "critical" : "success",
+      label: needsAttention ? "1 bug" : "3/3 verified",
+      passing: needsAttention ? 2 : 3,
+      failing: needsAttention ? 1 : 0,
+    });
+  },
+);
+
 // The newest run, settled as failed: the snapshot carries the `failed` status settlement writes, and its summary
 // reports the pipeline failure rather than a test breakdown (there are no findings to break down).
 const failedSnapshotHistoryItem: (typeof snapshotHistory)[number] = {
@@ -724,6 +747,38 @@ export const CoverageStatusInfo: Story = {
     await userEvent.hover(await within(canvasElement).findByRole("button", { name: /^bug$/i }));
     // The tooltip renders in a portal, outside `canvasElement` - reach it through the document body.
     await within(document.body).findByText(/reproduced a bug in this flow/i);
+  },
+};
+
+/** The checkpoint-history (i), opened: hovering the rail's panel title explains what a checkpoint is. */
+export const CheckpointInfo: Story = {
+  args: { path: OVERVIEW_PATH },
+  parameters: { msw: { handlers: flowsHandlers } },
+  play: async ({ canvasElement }) => {
+    await userEvent.hover(await within(canvasElement).findByRole("button", { name: /what a checkpoint is/i }));
+    // The tooltip renders in a portal, outside `canvasElement` - reach it through the document body.
+    await within(document.body).findByText(/newest-first/i);
+  },
+};
+
+/**
+ * A long-lived PR with eight checkpoints: the CHECKPOINT HISTORY list overflows its ~20rem cap and scrolls internally
+ * (only ~4 rows show at once) while the Tests run panel stays put below it, rather than the rail growing with the
+ * commit count. The two-checkpoint stories above cannot exercise this.
+ */
+export const ManyCheckpoints: Story = {
+  args: { path: OVERVIEW_PATH },
+  parameters: {
+    msw: {
+      handlers: appShellHandlers(
+        pageFixtures({
+          ...analysisReport,
+          analysisIssues,
+          analysisJob: { status: "completed", startedAt: STARTED_AT, completedAt: COMPLETED_AT },
+          snapshotHistory: manyCheckpointHistory,
+        }),
+      ),
+    },
   },
 };
 

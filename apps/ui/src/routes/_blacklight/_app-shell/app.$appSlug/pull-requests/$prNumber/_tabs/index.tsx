@@ -1,4 +1,4 @@
-import { Badge, Panel, PanelBody, Skeleton, StatusDot } from "@autonoma/blacklight";
+import { Badge, cn, Panel, PanelBody, PanelHeader, PanelTitle, Skeleton, StatusDot } from "@autonoma/blacklight";
 import type { AnalysisFindingView, AnalysisFlow, AnalysisIssueSummary } from "@autonoma/types";
 import { ArrowRightIcon } from "@phosphor-icons/react/ArrowRight";
 import { CaretRightIcon } from "@phosphor-icons/react/CaretRight";
@@ -12,6 +12,7 @@ import { AnalysisOpenIssuesList } from "components/analysis/open-issues-list";
 import { ReportDrawer } from "components/analysis/report-drawer";
 import { AnalysisTestsRunSection } from "components/analysis/tests-run-section";
 import { VerdictBanner } from "components/analysis/verdict-banner";
+import { InfoHint } from "components/info-hint";
 import { CheckpointSummaryPill } from "components/pr-status/checkpoint-summary-pill";
 import { ShaRange } from "components/snapshot/sha-range";
 import { CATEGORY, buildSections, type EntryCategory } from "components/snapshot/snapshot-entries";
@@ -42,6 +43,10 @@ type SnapshotDetail = RouterOutputs["branches"]["snapshotDetail"];
 type ExecutedTest = SnapshotDetail["executedTests"][number];
 type PRExecutedTest = ExecutedTest & { snapshotId: string; category?: EntryCategory };
 type PRTestRunSection = { key: string; title: string; entries: PRExecutedTest[] };
+
+const CHECKPOINT_HISTORY_HELP =
+  "A checkpoint is one analysis of the branch at a specific commit. This lists them newest-first, so you can see " +
+  "how the verdict changed as you pushed.";
 
 export const Route = createFileRoute("/_blacklight/_app-shell/app/$appSlug/pull-requests/$prNumber/_tabs/")({
   loader: async ({ context, params: { appSlug, prNumber } }) => {
@@ -158,10 +163,13 @@ function AuthoritativePrOverview({
   const runInFlight = latestReport == null && analysisJob.status !== "failed";
   // While the latest run is unsettled, show the most recent earlier settled run's report (latest excluded).
   const earlierSettled = latestReport == null ? snapshots.slice(1).find((snapshot) => snapshot.settled) : undefined;
+  // Whichever report the left column renders is the one the rail's tests-run mirrors: the latest when settled, else the
+  // earlier-settled fallback. Undefined only while a first run analyzes with nothing settled behind it (no tests-run).
+  const reportSnapshotId = latestReport != null ? latestSnapshot.id : earlierSettled?.id;
 
   return (
     <div className="p-6">
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_19rem]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <div className="flex min-w-0 flex-col gap-4">
           {latestReport != null ? (
             <Suspense fallback={<AuthoritativeReportSkeleton />}>
@@ -193,7 +201,7 @@ function AuthoritativePrOverview({
             <AnalysisJobStatus job={analysisJob} />
           )}
         </div>
-        <CheckpointRail prNumber={prNumber} snapshots={snapshots} />
+        <AuthoritativeRail prNumber={prNumber} snapshots={snapshots} reportSnapshotId={reportSnapshotId} />
       </div>
     </div>
   );
@@ -215,8 +223,9 @@ function SettledReportColumn({
 }
 
 // The issues-first report column, split from the overview so it (and its open-issues query) only loads once the
-// report has landed - a still-running run never pays for it. Ordered banner -> open issues -> coverage -> tests run
-// -> impact link, leading with the answer; the full report prose is a drawer off the banner.
+// report has landed - a still-running run never pays for it. Ordered banner -> open issues -> coverage -> impact
+// link, leading with the answer; the full report prose is a drawer off the banner and the tests-run lens sits in
+// the rail.
 function AuthoritativeReportColumn({
   branchId,
   prNumber,
@@ -256,7 +265,6 @@ function AuthoritativeReportColumn({
         }
       />
       <IssuesAndFlows openIssues={openIssues} flows={report.flows} findings={report.findings} prNumber={prNumber} />
-      <AnalysisTestsRunSection testRuns={report.testRuns} />
       <LatestSnapshotLink prNumber={prNumber} snapshotId={snapshotId} />
     </>
   );
@@ -325,6 +333,99 @@ function LatestSnapshotLink({ prNumber, snapshotId }: { prNumber: number; snapsh
     >
       View impact analysis and suite changes
       <ArrowRightIcon size={12} />
+    </AppLink>
+  );
+}
+
+// The authoritative overview's right column: the checkpoint history, then the tests-run lens beneath it. It sits at
+// its natural height rather than stretching the full page, and the tests-run mirrors whichever report the left column
+// shows - absent only while a first run analyzes with nothing settled behind it.
+function AuthoritativeRail({
+  prNumber,
+  snapshots,
+  reportSnapshotId,
+}: {
+  prNumber: number;
+  snapshots: Snapshot[];
+  reportSnapshotId: string | undefined;
+}) {
+  return (
+    <div className="flex flex-col gap-4 self-start">
+      <AuthoritativeCheckpointRail prNumber={prNumber} snapshots={snapshots} />
+      {reportSnapshotId != null && (
+        <Suspense fallback={<Skeleton className="h-11 w-full" />}>
+          <RailTestsRun snapshotId={reportSnapshotId} />
+        </Suspense>
+      )}
+    </div>
+  );
+}
+
+// The tests-run lens for the report the overview displays. Reads the same cached report query the column already
+// holds, so it never costs a second fetch; the section self-nulls when that report has no runs.
+function RailTestsRun({ snapshotId }: { snapshotId: string }) {
+  const { data: report } = useAnalysisReport(snapshotId);
+  if (report == null) return undefined;
+  return <AnalysisTestsRunSection testRuns={report.testRuns} />;
+}
+
+// The checkpoint history panel: every checkpoint on the PR, newest-first, each a two-row summary linking to its
+// snapshot page. The list caps its own height and scrolls internally so a long history never stretches the rail.
+function AuthoritativeCheckpointRail({ prNumber, snapshots }: { prNumber: number; snapshots: Snapshot[] }) {
+  return (
+    <Panel>
+      <PanelHeader>
+        <PanelTitle>
+          Checkpoint history
+          <InfoHint ariaLabel="What a checkpoint is" className="text-text-secondary">
+            {CHECKPOINT_HISTORY_HELP}
+          </InfoHint>
+        </PanelTitle>
+      </PanelHeader>
+      <PanelBody className="max-h-80 overflow-auto p-0">
+        {snapshots.map((snapshot, index) => (
+          <AuthoritativeCheckpointItem
+            key={snapshot.id}
+            prNumber={prNumber}
+            snapshot={snapshot}
+            isLatest={index === 0}
+          />
+        ))}
+      </PanelBody>
+    </Panel>
+  );
+}
+
+// One checkpoint box: the summary pill (status dot + "N/M verified · reason") and its relative time on row one, the
+// sha range on row two. The newest carries a subtle accent left-border and a muted "Latest" label.
+// Every earlier row is dimmed: those checkpoints are superseded, so a past "N bugs" reads as history rather than a
+// live alarm - only the latest row stays vivid (the header pill owns the current verdict).
+function AuthoritativeCheckpointItem({
+  prNumber,
+  snapshot,
+  isLatest,
+}: {
+  prNumber: number;
+  snapshot: Snapshot;
+  isLatest: boolean;
+}) {
+  return (
+    <AppLink
+      to="/app/$appSlug/pull-requests/$prNumber/snapshots/$snapshotId"
+      params={{ prNumber, snapshotId: snapshot.id }}
+      className={cn(
+        "flex flex-col gap-1.5 border-b border-l-2 border-l-transparent border-border-dim px-4 py-3 transition-colors last:border-b-0 hover:bg-surface-raised",
+        isLatest ? "border-l-primary" : "opacity-60",
+      )}
+    >
+      <div className="flex items-center gap-2">
+        {snapshot.summary != null && <CheckpointSummaryPill summary={snapshot.summary} />}
+        <div className="ml-auto flex shrink-0 items-center gap-2 font-mono text-2xs text-text-secondary">
+          {isLatest && <span className="text-3xs uppercase tracking-widest">Latest</span>}
+          <span>{formatRelativeTime(snapshot.createdAt)}</span>
+        </div>
+      </div>
+      <ShaRange baseSha={snapshot.baseSha} headSha={snapshot.headSha} />
     </AppLink>
   );
 }
