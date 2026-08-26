@@ -11,6 +11,7 @@ export type { LogQuerier, PreviewAppLogsInput } from "./logs/preview-app-logs";
 export { VerdictForModel } from "./classify/verdict-schema";
 export { ClassifierAgent } from "./classify/classifier-agent";
 export type { ClassifierAgentConfig } from "./classify/classifier-agent";
+export { CLASSIFIER_SYSTEM_PROMPT } from "./classify/prompt";
 export type { ClassifierInput, PreviewEnvAccess, PreviewScriptAccess, RunArtifacts, RunFacts } from "./classify/types";
 export { summarizeVerdictPlanes } from "@autonoma/types";
 export type { CoverageCategoryCount, CoverageSummary } from "@autonoma/types";

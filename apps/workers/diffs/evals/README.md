@@ -330,6 +330,12 @@ pnpm --filter @autonoma/worker-diffs eval
 - A case whose `baseSha`/`headSha` can no longer be fetched **skips with a warning** rather than
   red-failing the suite.
 - A JSON result with a pass-rate is written to `<step>/results/` (gitignored).
+- The **classifier** step additionally prints a precision/recall block to stdout and writes it into that
+  JSON's `metadata`: the confusion matrix, per-plane precision/recall (`app_health` vs `coverage` - the
+  headline, the only layer with real N on both sides), `client_bug` precision + false-positive count, and
+  per-category precision/recall with low-support recall withheld. It is tagged with a `promptSha` (sha256 of
+  `CLASSIFIER_SYSTEM_PROMPT`) and the resolved `model`, so two prompt versions are comparable by eye. Nothing
+  is committed: it is one live-model sample per case, so re-run on the same `promptSha` and read the spread.
 
 ## Capturing a case
 

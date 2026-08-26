@@ -1,11 +1,18 @@
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { InlineMp4VideoUploader, type ModelMessage, type UploadedVideo } from "@autonoma/ai";
 import { type Codebase, type EvidenceLoader, StorageEvidenceLoader, readPrDiffStat } from "@autonoma/diffs";
-import { ClassifierAgent, type ModelSession, type RunVerdict } from "@autonoma/diffs/analysis";
+import {
+    CLASSIFIER_SYSTEM_PROMPT,
+    ClassifierAgent,
+    type ModelSession,
+    type RunVerdict,
+} from "@autonoma/diffs/analysis";
 import { type CheckFailure, type LoadedCase, type RunCaseHelpers } from "@autonoma/evals";
 import { S3Storage } from "@autonoma/storage";
 import ffmpeg from "@ffmpeg-installer/ffmpeg";
 import { expect } from "vitest";
+import { z } from "zod";
 import {
     type CaseSkipContext,
     type RunOutcome,
@@ -22,6 +29,8 @@ import {
     type FrozenRunMedia,
     rehydrateClassifierInput,
 } from "./classifier-input";
+import { type ClassifierResultRow, computeClassifierMetrics } from "./classifier-metrics";
+import { formatClassifierMetrics } from "./classifier-metrics-report";
 import { FrozenAppLogArtifactError, FrozenAppLogArtifactStore } from "./frozen-app-log-artifact";
 import { createFrozenAppLogsLoader } from "./frozen-app-logs";
 import { writeClassifierTranscript } from "./transcript-artifact";
@@ -31,6 +40,16 @@ export type ClassifierCase = LoadedCase<ClassifierCaseInput, ClassifierFrontmatt
 
 /** Per-case timeout: a classification is a tool loop over a real clone plus four full-recording vision reads. */
 const TIMEOUT_MS = 900_000;
+
+/** How far the classifier prompt's sha256 is truncated for the run tag - long enough to be unique, short to read. */
+const PROMPT_SHA_LENGTH = 12;
+
+/** The per-case fields the precision/recall aggregation reads back off `this.results` (everything else is stripped). */
+const resultRowSchema = z.object({
+    expectedCategory: z.string().optional(),
+    category: z.string().optional(),
+    modelId: z.string().optional(),
+});
 
 /**
  * What every run of a Classifier case shares, rehydrated once per case: the checked-out clone, the pure input,
@@ -99,6 +118,52 @@ export class ClassifierEvaluation extends ScoredReplayEvaluation<
         };
     }
 
+    /**
+     * The base pass-rate metadata, plus per-plane and per-category precision/recall over the run's confusion
+     * matrix, tagged with the prompt sha and the resolved model. Printed to stdout - the human copies the headline
+     * into the trend by hand - and returned so it also lands in the (gitignored) result JSON's `metadata`. The
+     * print lives here because `afterAll` is the one end-of-suite hook, and it reads this method for its own summary.
+     */
+    protected override evaluationMetadata(startTimestamp: number) {
+        const base = super.evaluationMetadata(startTimestamp);
+        const rows = this.parsedRows();
+        const metrics = computeClassifierMetrics(rows);
+        const promptSha = createHash("sha256")
+            .update(CLASSIFIER_SYSTEM_PROMPT)
+            .digest("hex")
+            .slice(0, PROMPT_SHA_LENGTH);
+        const model = rows.find((row) => row.modelId != null)?.modelId ?? "unknown";
+
+        this.logger.info("Classifier eval precision/recall", {
+            extra: { promptSha, model, scored: metrics.scored, planes: metrics.planes, clientBug: metrics.clientBug },
+        });
+        console.log(formatClassifierMetrics(metrics, { promptSha, model }));
+
+        return { ...base, classifier: { promptSha, model, ...metrics } };
+    }
+
+    /**
+     * Read each per-case row back off `this.results` as the pair the confusion matrix needs, plus the model id.
+     * A row that fails to parse counts as unlabeled rather than throwing: this runs inside `evaluationMetadata`,
+     * which the base calls BEFORE it writes the result file, so a single bad row must not sink the whole write.
+     */
+    private parsedRows(): Array<ClassifierResultRow & { modelId?: string }> {
+        return this.results.map((result) => {
+            const parsed = resultRowSchema.safeParse(result);
+            if (!parsed.success) {
+                this.logger.warn("Skipping unreadable result row in precision/recall", {
+                    extra: { issues: parsed.error.issues },
+                });
+                return { expected: "" };
+            }
+            return {
+                expected: parsed.data.expectedCategory ?? "",
+                predicted: parsed.data.category,
+                modelId: parsed.data.modelId,
+            };
+        });
+    }
+
     protected override async setUp(testCase: ClassifierCase, helpers: RunCaseHelpers): Promise<ClassifierContext> {
         const { coords, input, media, baseline, appLogs } = rehydrateClassifierInput(testCase.input);
         const skipContext = { logger: this.logger, caseName: testCase.name };
@@ -132,10 +197,8 @@ export class ClassifierEvaluation extends ScoredReplayEvaluation<
     ): Promise<RunOutcome<RunVerdict>> {
         const videoModel = session.getVideoModel({ model: "smart-video", tag: "classifier-eval-video" });
         const recording = await this.loadRecording(context.media, context.evidenceLoader);
-        const classifier = new ClassifierAgent({
-            model: session.getModel({ model: "classifier", tag: "classifier-eval" }),
-            videoModel: videoModel.model,
-        });
+        const classifierModel = session.getModel({ model: "classifier", tag: "classifier-eval" });
+        const classifier = new ClassifierAgent({ model: classifierModel, videoModel: videoModel.model });
 
         const { verdict, conversation } = await this.classify(classifier, {
             ...context.input,
@@ -160,6 +223,9 @@ export class ClassifierEvaluation extends ScoredReplayEvaluation<
             result: verdict,
             info: {
                 category: verdict.category,
+                // The resolved classifier model id, so the precision/recall block can tag a run by (promptSha, model)
+                // and a comparison across runs knows whether the prompt or the model moved.
+                modelId: classifierModel.modelId,
                 confidence: verdict.confidence,
                 planFidelity: verdict.planFidelity,
                 headline: verdict.headline,
