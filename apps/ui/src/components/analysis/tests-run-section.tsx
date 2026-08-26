@@ -18,7 +18,7 @@ interface TierGroup {
 /**
  * The "Tests run" lens on the PR overview: every test the analysis ran across the PR, one row per test at its
  * last-known verdict, grouped by outcome and collapsed by default so it never competes with the verdict banner and
- * open issues above it. Each row links to that run's generation page - the video, steps and trace behind the verdict.
+ * open issues above it. Each row links to that test's result page - the verdict, video, steps and trace behind it.
  *
  * Cumulative across the branch, like the verdict, headline and flows beside it - a test carried unchanged from an
  * earlier commit still appears (which is why the count matches the banner's "tests run", not one run's findings). It
@@ -79,8 +79,8 @@ function TestRunRow({ testRun }: { testRun: AnalysisTestRun }) {
   return (
     <li>
       <AppLink
-        to="/app/$appSlug/generations/$generationId"
-        params={{ generationId: testRun.generationId }}
+        to="/app/$appSlug/findings/$findingId"
+        params={{ findingId: testRun.id }}
         className="group/row flex items-center gap-2 px-5 py-2 transition-colors hover:bg-surface-raised"
       >
         <VerdictBadge verdict={testRun.category} />

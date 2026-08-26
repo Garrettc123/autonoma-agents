@@ -1,6 +1,6 @@
 import { Skeleton } from "@autonoma/blacklight";
 import { ArrowLeftIcon } from "@phosphor-icons/react/ArrowLeft";
-import { Outlet, createFileRoute, notFound, useMatchRoute } from "@tanstack/react-router";
+import { Outlet, createFileRoute, notFound } from "@tanstack/react-router";
 import { AnalysisJobStatus } from "components/analysis/analysis-job-status";
 import { AnalysisStageTabs, deriveAnalysisStage } from "components/analysis/analysis-stage-tabs";
 import { isSelectionSettled } from "components/analysis/stage-empty-states";
@@ -52,20 +52,10 @@ function SnapshotReportLayout() {
 }
 
 function SnapshotReportContent({ prNumber, snapshotId }: { prNumber: number; snapshotId: string }) {
-  const { appSlug } = Route.useParams();
   const { data: report } = useSnapshotReport(snapshotId);
   const { data: job } = useAnalysisJob(snapshotId);
   const { data: run } = useAnalysisRun(snapshotId, { jobStatus: job?.status });
   const { data: analysisReport } = useAnalysisReport(snapshotId, { jobStatus: job?.status });
-  const matchRoute = useMatchRoute();
-  // The full-screen finding page owns the whole screen (its own header + back link); when it is the active leaf,
-  // render only its Outlet so it is not wrapped in the stage chrome.
-  const onFindingDetail = matchRoute({
-    to: "/app/$appSlug/pull-requests/$prNumber/snapshots/$snapshotId/findings",
-    params: { appSlug, prNumber, snapshotId },
-    fuzzy: true,
-  });
-  if (onFindingDetail) return <Outlet />;
 
   return (
     <div className="flex flex-col gap-6">

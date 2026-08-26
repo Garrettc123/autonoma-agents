@@ -210,7 +210,8 @@ analysisSuite({
             expect(testRuns.map((testRun) => testRun.testCase.slug)).toEqual(["checkout", "search"]);
             const checkout = testRuns.find((testRun) => testRun.testCase.slug === "checkout");
             expect(checkout?.category).toBe("client_bug");
-            expect(checkout?.generationId).toBe(rerun.generationId);
+            // The row is the newer finding - the one the rerun recorded, which its test-result page link keys on.
+            expect(checkout?.id).toBe(rerun.findingId);
         });
 
         test("testRuns is scoped to its branch", async ({ harness }) => {

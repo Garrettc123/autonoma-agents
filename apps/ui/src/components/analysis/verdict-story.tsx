@@ -1,3 +1,10 @@
+/**
+ * The presentational primitives of a finding's verdict story - the prose sections, the expected/actual claims,
+ * the observed-app-issues note, the classification-error block, and the code-evidence list. Rendered through the
+ * finding drawer's summary tab, which serves both the app-scoped test-result page and the running-stage quick-look
+ * drawer, so the two render the same verdict in one voice instead of two drifting copies. Each surface still owns
+ * its own section order and media panel; only the atoms live here.
+ */
 import { cn } from "@autonoma/blacklight";
 import type { InvestigationEvidence } from "@autonoma/types";
 import { CaretDownIcon } from "@phosphor-icons/react/CaretDown";
@@ -15,18 +22,6 @@ import { type ComponentType, type ReactNode, useState } from "react";
 
 /** The section-title icon size, so every verdict-story heading marks its section at the same scale. */
 const SECTION_ICON_SIZE = 13;
-
-/**
- * The presentational primitives of a finding's verdict story - the prose sections, the expected/actual claims,
- * the observed-app-issues note, the classification-error block, and the code-evidence list. Shared by the
- * full-screen finding page ({@link import("components/investigation/finding-detail").FindingDetail}) and the
- * checkpoint drawer's summary tab so the two render the same verdict in one voice instead of two drifting copies.
- * Each surface still owns its own section order and media panel; only the atoms live here.
- *
- * `level` is the heading level the surface nests these under: the full page (h1 headline) passes `2`, the drawer
- * (h2 headline) leaves the default `3`, so the document outline stays correct in both.
- */
-type HeadingLevel = 2 | 3;
 
 /**
  * Whether the observed behavior confirmed the expectation or contradicted it. A passing verdict's actual behavior
@@ -75,41 +70,29 @@ function isBlank(children: ReactNode): boolean {
 }
 
 export function VerdictSectionTitle({
-  level = 3,
   icon,
   children,
 }: {
-  level?: HeadingLevel;
-  /** An optional marker rendered before the label; the drawer sets one per section, the full page leaves it off. */
+  /** An optional marker rendered before the label; each section sets one. */
   icon?: ReactNode;
   children: ReactNode;
 }) {
-  const Heading = level === 2 ? "h2" : "h3";
-  // Compact surfaces (the drawer, level 3) render section titles semibold; the full page (level 2) uses the
-  // lighter weight its other headings share.
   return (
-    <Heading
-      className={cn(
-        "flex items-center gap-1.5 font-mono text-2xs uppercase tracking-widest text-text-secondary",
-        level === 3 && "font-semibold",
-      )}
-    >
+    <h3 className="flex items-center gap-1.5 font-mono text-2xs font-semibold uppercase tracking-widest text-text-secondary">
       {icon}
       {children}
-    </Heading>
+    </h3>
   );
 }
 
 /** A titled prose paragraph that renders nothing when its content is absent or blank. */
 export function ProseSection({
   title,
-  level = 3,
   tone = "primary",
   icon,
   children,
 }: {
   title: string;
-  level?: HeadingLevel;
   tone?: "primary" | "secondary";
   icon?: ReactNode;
   children: ReactNode;
@@ -117,9 +100,7 @@ export function ProseSection({
   if (isBlank(children)) return null;
   return (
     <section className="flex flex-col gap-2">
-      <VerdictSectionTitle level={level} icon={icon}>
-        {title}
-      </VerdictSectionTitle>
+      <VerdictSectionTitle icon={icon}>{title}</VerdictSectionTitle>
       <p className={cn("text-sm leading-relaxed", tone === "secondary" ? "text-text-secondary" : "text-text-primary")}>
         {children}
       </p>
@@ -128,17 +109,9 @@ export function ProseSection({
 }
 
 /** The expected app behavior of an app-health verdict, tinted info-blue. Renders nothing when the field is absent. */
-export function ExpectedSection({
-  level = 3,
-  icon,
-  children,
-}: {
-  level?: HeadingLevel;
-  icon?: ReactNode;
-  children: ReactNode;
-}) {
+export function ExpectedSection({ icon, children }: { icon?: ReactNode; children: ReactNode }) {
   return (
-    <BehaviorClaim title="Expected" tone="expected" level={level} icon={icon}>
+    <BehaviorClaim title="Expected" tone="expected" icon={icon}>
       {children}
     </BehaviorClaim>
   );
@@ -150,23 +123,16 @@ export function ExpectedSection({
  * field is absent.
  */
 export function ActualSection({
-  level = 3,
   outcome = "divergence",
   icon,
   children,
 }: {
-  level?: HeadingLevel;
   outcome?: BehaviorOutcome;
   icon?: ReactNode;
   children: ReactNode;
 }) {
   return (
-    <BehaviorClaim
-      title="Actual"
-      tone={outcome === "match" ? "actualMatch" : "actualDivergence"}
-      level={level}
-      icon={icon}
-    >
+    <BehaviorClaim title="Actual" tone={outcome === "match" ? "actualMatch" : "actualDivergence"} icon={icon}>
       {children}
     </BehaviorClaim>
   );
@@ -181,13 +147,11 @@ export function ExpectedActualSections({
   expected,
   actual,
   outcome = "divergence",
-  level = 3,
 }: {
   expected: ReactNode;
   actual: ReactNode;
   /** Whether the actual behavior matched the expectation (a pass) or contradicted it (a bug). Defaults to a bug. */
   outcome?: BehaviorOutcome;
-  level?: HeadingLevel;
 }) {
   const hasExpected = !isBlank(expected);
   const hasActual = !isBlank(actual);
@@ -202,10 +166,8 @@ export function ExpectedActualSections({
   if (!hasExpected || !hasActual) {
     return (
       <>
-        <ExpectedSection level={level} icon={expectedIcon}>
-          {expected}
-        </ExpectedSection>
-        <ActualSection level={level} outcome={outcome} icon={actualIcon}>
+        <ExpectedSection icon={expectedIcon}>{expected}</ExpectedSection>
+        <ActualSection outcome={outcome} icon={actualIcon}>
           {actual}
         </ActualSection>
       </>
@@ -213,10 +175,8 @@ export function ExpectedActualSections({
   }
   return (
     <div className="grid grid-cols-2 items-stretch gap-3">
-      <ExpectedSection level={level} icon={expectedIcon}>
-        {expected}
-      </ExpectedSection>
-      <ActualSection level={level} outcome={outcome} icon={actualIcon}>
+      <ExpectedSection icon={expectedIcon}>{expected}</ExpectedSection>
+      <ActualSection outcome={outcome} icon={actualIcon}>
         {actual}
       </ActualSection>
     </div>
@@ -226,22 +186,18 @@ export function ExpectedActualSections({
 function BehaviorClaim({
   title,
   tone,
-  level,
   icon,
   children,
 }: {
   title: string;
   tone: keyof typeof BEHAVIOR_TONES;
-  level: HeadingLevel;
   icon?: ReactNode;
   children: ReactNode;
 }) {
   if (isBlank(children)) return null;
   return (
     <section className={cn("flex flex-col gap-2 rounded-lg border-l-2 px-4 py-3", BEHAVIOR_TONES[tone])}>
-      <VerdictSectionTitle level={level} icon={icon}>
-        {title}
-      </VerdictSectionTitle>
+      <VerdictSectionTitle icon={icon}>{title}</VerdictSectionTitle>
       <p className="text-sm leading-relaxed text-text-primary">{children}</p>
     </section>
   );
@@ -264,20 +220,10 @@ export function ObservedAppIssuesNote({ icon, children }: { icon?: ReactNode; ch
 }
 
 /** The verbatim classifier error, shown in place of the verdict fields when the model failed to classify. */
-export function ClassificationErrorBlock({
-  level = 3,
-  icon,
-  error,
-}: {
-  level?: HeadingLevel;
-  icon?: ReactNode;
-  error: string;
-}) {
+export function ClassificationErrorBlock({ icon, error }: { icon?: ReactNode; error: string }) {
   return (
     <section className="flex flex-col gap-2">
-      <VerdictSectionTitle level={level} icon={icon}>
-        Classification error
-      </VerdictSectionTitle>
+      <VerdictSectionTitle icon={icon}>Classification error</VerdictSectionTitle>
       <pre className="overflow-x-auto whitespace-pre-wrap rounded-md bg-surface-void p-4 font-mono text-2xs text-text-secondary">
         {error}
       </pre>
@@ -292,14 +238,12 @@ export function ClassificationErrorBlock({
  */
 export function VerdictEvidence({
   evidence,
-  level = 3,
   collapsible = false,
   icon,
   repoFullName,
   commitSha,
 }: {
   evidence: InvestigationEvidence[];
-  level?: HeadingLevel;
   collapsible?: boolean;
   icon?: ReactNode;
   repoFullName?: string;
@@ -319,9 +263,7 @@ export function VerdictEvidence({
   if (!collapsible) {
     return (
       <section className="flex flex-col gap-2">
-        <VerdictSectionTitle level={level} icon={icon}>
-          Evidence
-        </VerdictSectionTitle>
+        <VerdictSectionTitle icon={icon}>Evidence</VerdictSectionTitle>
         {items}
       </section>
     );
@@ -335,9 +277,7 @@ export function VerdictEvidence({
         aria-expanded={open}
         className="flex items-center gap-2 text-left"
       >
-        <VerdictSectionTitle level={level} icon={icon}>
-          Evidence
-        </VerdictSectionTitle>
+        <VerdictSectionTitle icon={icon}>Evidence</VerdictSectionTitle>
         <span className="font-mono text-3xs text-text-secondary">{evidence.length}</span>
         <CaretDownIcon size={12} className={cn("text-text-secondary transition-transform", open && "rotate-180")} />
       </button>

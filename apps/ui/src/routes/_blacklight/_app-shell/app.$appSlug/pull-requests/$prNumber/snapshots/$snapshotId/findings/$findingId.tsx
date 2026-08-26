@@ -1,71 +1,14 @@
-import type { AnalysisFindingView } from "@autonoma/types";
-import { ArrowLeftIcon } from "@phosphor-icons/react/ArrowLeft";
-import { ArrowUpRightIcon } from "@phosphor-icons/react/ArrowUpRight";
-import { createFileRoute } from "@tanstack/react-router";
-import { SelfHealHistory } from "components/analysis/self-heal-history";
-import { FindingDetail } from "components/investigation/finding-detail";
-import { useAnalysisReport } from "lib/query/branches.queries";
-import { AppLink } from "routes/_blacklight/_app-shell/-app-link";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
+/**
+ * The old snapshot-nested finding URL. A finding now has one canonical render - the app-scoped test-result page,
+ * keyed by finding id alone - so this route only redirects there, keeping external deep-links (PR comments, the
+ * `replayUrl` / findingKey contract) resolving. Redirect in `beforeLoad` so it fires before any loader runs.
+ */
 export const Route = createFileRoute(
   "/_blacklight/_app-shell/app/$appSlug/pull-requests/$prNumber/snapshots/$snapshotId/findings/$findingId",
 )({
-  component: AnalysisFindingDetailPage,
+  beforeLoad: ({ params: { appSlug, findingId } }) => {
+    throw redirect({ to: "/app/$appSlug/findings/$findingId", params: { appSlug, findingId }, replace: true });
+  },
 });
-
-function AnalysisFindingDetailPage() {
-  const { prNumber, snapshotId, findingId } = Route.useParams();
-  const { data } = useAnalysisReport(snapshotId);
-  const backLink = <BackLink prNumber={prNumber} snapshotId={snapshotId} />;
-
-  const finding = data?.findings.find((f) => f.id === findingId);
-
-  if (finding == null) {
-    return (
-      <div className="flex flex-col gap-4">
-        {backLink}
-        <p className="rounded-lg border border-border-dim bg-surface-base px-5 py-6 text-sm text-text-secondary">
-          This finding could not be found in the report.
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <FindingDetail
-      finding={finding}
-      backLink={backLink}
-      issueLink={<IssueUpLink finding={finding} prNumber={prNumber} />}
-      footer={<SelfHealHistory classifications={finding.classifications} />}
-    />
-  );
-}
-
-// Link UP from a finding to the branch-scoped issue it was clustered into. Findings that carry no issue (a passing
-// or coverage-plane check, or a run before the Reporter attributed it) render nothing.
-function IssueUpLink({ finding, prNumber }: { finding: AnalysisFindingView; prNumber: number }) {
-  if (finding.issueId == null) return null;
-  return (
-    <AppLink
-      to="/app/$appSlug/pull-requests/$prNumber/issues/$issueId"
-      params={{ prNumber, issueId: finding.issueId }}
-      className="inline-flex items-center gap-1 self-start font-mono text-2xs font-semibold uppercase tracking-widest text-text-secondary transition-colors hover:text-text-primary"
-    >
-      <ArrowUpRightIcon size={12} />
-      Part of issue{finding.issueTitle != null ? `: ${finding.issueTitle}` : ""}
-    </AppLink>
-  );
-}
-
-function BackLink({ prNumber, snapshotId }: { prNumber: number; snapshotId: string }) {
-  return (
-    <AppLink
-      to="/app/$appSlug/pull-requests/$prNumber/snapshots/$snapshotId"
-      params={{ prNumber, snapshotId }}
-      aria-label="Back to the checkpoint report"
-      className="inline-flex size-5 shrink-0 items-center justify-center rounded text-text-secondary transition-colors hover:bg-surface-raised hover:text-text-primary"
-    >
-      <ArrowLeftIcon size={12} />
-    </AppLink>
-  );
-}

@@ -27,15 +27,10 @@ export function AnalysisReportBody({
       <PrVerdictHeadline run={report.run} />
       {report.reportMarkdown != null && (
         <Suspense fallback={<Skeleton className="h-48 w-full" />}>
-          <SnapshotReportProse
-            markdown={report.reportMarkdown}
-            report={report}
-            prNumber={prNumber}
-            snapshotId={snapshotId}
-          />
+          <SnapshotReportProse markdown={report.reportMarkdown} report={report} prNumber={prNumber} />
         </Suspense>
       )}
-      <AnalysisFindingsPanel findings={report.findings} prNumber={prNumber} snapshotId={snapshotId} />
+      <AnalysisFindingsPanel findings={report.findings} />
       <Suspense fallback={<SnapshotIssueChangesSkeleton />}>
         <SnapshotIssueChanges snapshotId={snapshotId} prNumber={prNumber} />
       </Suspense>
@@ -53,12 +48,10 @@ function SnapshotReportProse({
   markdown,
   report,
   prNumber,
-  snapshotId,
 }: {
   markdown: string;
   report: AnalysisReportData;
   prNumber: number;
-  snapshotId: string;
 }) {
   const { data: issues } = useAnalysisIssues(report.branchId);
   const issueIds = new Set(issues.map((issue) => issue.id));
@@ -68,7 +61,6 @@ function SnapshotReportProse({
       markdown={markdown}
       evidence={report.reportEvidence}
       prNumber={prNumber}
-      snapshotId={snapshotId}
       findings={report.findings}
       issueIds={issueIds}
     />

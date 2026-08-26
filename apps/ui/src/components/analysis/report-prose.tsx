@@ -17,7 +17,6 @@ export function AnalysisReportProse({
   markdown,
   evidence,
   prNumber,
-  snapshotId,
   findings,
   issueIds,
   variant = "panel",
@@ -25,15 +24,14 @@ export function AnalysisReportProse({
   markdown: string;
   evidence: ResolvedEvidenceAsset[];
   prNumber: number;
-  snapshotId: string;
   findings: AnalysisFindingView[];
   /** The ids of issues this PR knows about, so a token to a real issue links and a fabricated one stays text. */
   issueIds: ReadonlySet<string>;
   /** `bare` renders only the resolved markdown (the drawer supplies its own chrome); `panel` wraps it in a "Report" panel. */
   variant?: "panel" | "bare";
 }) {
-  // The Reporter writes `finding:<slug>` tokens because slugs are what it reasons in; the route is keyed on the
-  // finding's own id, so resolve one to the other here.
+  // The Reporter writes `finding:<slug>` tokens because slugs are what it reasons in; the test-result page is keyed on
+  // the finding's own id, so resolve one to the other here.
   const findingIdBySlug = new Map(findings.map((finding) => [finding.slug, finding.id]));
 
   const renderIssueLink = (issueId: string, children: ReactNode): ReactNode => {
@@ -53,11 +51,7 @@ export function AnalysisReportProse({
     const findingId = findingIdBySlug.get(slug);
     if (findingId == null) return children;
     return (
-      <AppLink
-        to="/app/$appSlug/pull-requests/$prNumber/snapshots/$snapshotId/findings/$findingId"
-        params={{ prNumber, snapshotId, findingId }}
-        className="text-primary hover:underline"
-      >
+      <AppLink to="/app/$appSlug/findings/$findingId" params={{ findingId }} className="text-primary hover:underline">
         {children}
       </AppLink>
     );

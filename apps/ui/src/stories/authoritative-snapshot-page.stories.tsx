@@ -203,31 +203,26 @@ const analysisReportData: AnalysisReportFixture = {
   testRuns: [
     {
       id: "checkout-place-order",
-      generationId: "gen_checkout-place-order",
       testCase: { name: "checkout-place-order.md", slug: "checkout-place-order" },
       category: "client_bug",
     },
     {
       id: "coupon-apply",
-      generationId: "gen_coupon-apply",
       testCase: { name: "coupon-apply.md", slug: "coupon-apply" },
       category: "scenario_issue",
     },
     {
       id: "payment-iframe",
-      generationId: "gen_payment-iframe",
       testCase: { name: "payment-iframe.md", slug: "payment-iframe" },
       category: "engine_artifact",
     },
     {
       id: "guest-add-to-cart",
-      generationId: "gen_guest-add-to-cart",
       testCase: { name: "guest-add-to-cart.md", slug: "guest-add-to-cart" },
       category: "passed",
     },
     {
       id: "cart-badge-count",
-      generationId: "gen_cart-badge-count",
       testCase: { name: "cart-badge-count.md", slug: "cart-badge-count" },
       category: "passed",
     },
@@ -1106,13 +1101,6 @@ export const DrawerPlanDiff: Story = {
 export const RemovedStub: Story = {
   args: {
     path: `/app/${baseApplication.slug}/pull-requests/${PR_NUMBER}/snapshots/${SNAPSHOT_ID}/running/removed/tc_legacy_quote_flow`,
-  },
-};
-
-/** A single finding's evidence detail, reached by clicking a finding row - with the up-link to its issue. */
-export const Finding: Story = {
-  args: {
-    path: `/app/${baseApplication.slug}/pull-requests/${PR_NUMBER}/snapshots/${SNAPSHOT_ID}/findings/checkout-place-order`,
   },
 };
 

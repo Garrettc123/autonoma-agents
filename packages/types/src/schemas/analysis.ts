@@ -791,10 +791,8 @@ export type AnalysisFindingView = z.infer<typeof analysisFindingViewSchema>;
  * values fall back gracefully, matching the finding display contract).
  */
 export const analysisTestRunSchema = z.object({
-    /** The finding id behind this outcome - what a later repoint to the merged test-result page keys on. */
+    /** The finding id behind this outcome - the id the row's test-result page link keys on. */
     id: z.string(),
-    /** The generation the test's latest verdict judged - the row's link today (its video, steps and trace). */
-    generationId: z.string(),
     testCase: z.object({ name: z.string(), slug: z.string() }),
     category: z.string(),
 });

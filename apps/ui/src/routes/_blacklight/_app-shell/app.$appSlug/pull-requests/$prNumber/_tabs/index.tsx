@@ -249,20 +249,13 @@ function AuthoritativeReportColumn({
               markdown={report.reportMarkdown}
               evidence={report.reportEvidence}
               prNumber={prNumber}
-              snapshotId={snapshotId}
               findings={report.findings}
               issueIds={issueIds}
             />
           ) : undefined
         }
       />
-      <IssuesAndFlows
-        openIssues={openIssues}
-        flows={report.flows}
-        findings={report.findings}
-        prNumber={prNumber}
-        snapshotId={snapshotId}
-      />
+      <IssuesAndFlows openIssues={openIssues} flows={report.flows} findings={report.findings} prNumber={prNumber} />
       <AnalysisTestsRunSection testRuns={report.testRuns} />
       <LatestSnapshotLink prNumber={prNumber} snapshotId={snapshotId} />
     </>
@@ -278,18 +271,16 @@ function IssuesAndFlows({
   flows,
   findings,
   prNumber,
-  snapshotId,
 }: {
   openIssues: AnalysisIssueSummary[];
   flows: AnalysisFlow[];
   findings: AnalysisFindingView[];
   prNumber: number;
-  snapshotId: string;
 }) {
   // AnalysisFlowList self-nulls when it has no flows; the open-issues list would instead render an empty-state panel,
   // so that one is guarded here. Built once so the two return branches can't drift as props change.
   const issuesPanel = openIssues.length > 0 ? <AnalysisOpenIssuesList issues={openIssues} prNumber={prNumber} /> : null;
-  const flowsPanel = <AnalysisFlowList flows={flows} findings={findings} prNumber={prNumber} snapshotId={snapshotId} />;
+  const flowsPanel = <AnalysisFlowList flows={flows} findings={findings} />;
 
   if (issuesPanel != null && flows.length > 0) {
     // `items-start` keeps each panel at its natural height rather than stretching the shorter one to match the

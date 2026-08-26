@@ -19,8 +19,8 @@ import { AppLink } from "routes/_blacklight/_app-shell/-app-link";
  * screenshot, expected/actual, the grounded narrative (with inline evidence + `finding:` links resolved), the
  * suspected code-level cause, and the issue's finding instances across the branch's snapshots.
  *
- * A finding instance is reachable only through its PR, so an issue on main - which has no pull request, hence no
- * `prNumber` - renders its instances (and the narrative's `finding:` tokens) as plain rows instead of links.
+ * The finding's test-result page is app-scoped (keyed by finding id alone), so an instance links whether or not the
+ * issue has a PR - an issue on main links its instances and `finding:` tokens just like a PR-scoped one.
  */
 export function AnalysisIssueDetail({ issue, prNumber }: { issue: AnalysisIssueDetail; prNumber?: number }) {
   const kindMeta = analysisIssueKindMeta(issue.kind);
@@ -28,18 +28,18 @@ export function AnalysisIssueDetail({ issue, prNumber }: { issue: AnalysisIssueD
   const statusMeta = analysisIssueStatusMeta(issue.status);
 
   // `finding:<slug>` tokens in the narrative resolve to the most recent instance of that test (instances are
-  // newest-first), linking to its per-snapshot finding page; an unknown slug renders as plain text.
+  // newest-first), linking to its test-result page; an unknown slug renders as plain text.
   const instanceBySlug = new Map<string, AnalysisIssueFindingInstance>();
   for (const instance of issue.findingInstances) {
     if (!instanceBySlug.has(instance.slug)) instanceBySlug.set(instance.slug, instance);
   }
   const renderFindingLink = (slug: string, children: ReactNode): ReactNode => {
     const instance = instanceBySlug.get(slug);
-    if (instance == null || prNumber == null) return children;
+    if (instance == null) return children;
     return (
       <AppLink
-        to="/app/$appSlug/pull-requests/$prNumber/snapshots/$snapshotId/findings/$findingId"
-        params={{ prNumber, snapshotId: instance.snapshotId, findingId: instance.findingId }}
+        to="/app/$appSlug/findings/$findingId"
+        params={{ findingId: instance.findingId }}
         className="text-primary hover:underline"
       >
         {children}
@@ -135,11 +135,7 @@ export function AnalysisIssueDetail({ issue, prNumber }: { issue: AnalysisIssueD
         ) : (
           <ul className="flex flex-col gap-2">
             {issue.findingInstances.map((instance) => (
-              <FindingInstanceRow
-                key={`${instance.snapshotId}-${instance.findingId}`}
-                instance={instance}
-                prNumber={prNumber}
-              />
+              <FindingInstanceRow key={`${instance.snapshotId}-${instance.findingId}`} instance={instance} />
             ))}
           </ul>
         )}
@@ -148,35 +144,23 @@ export function AnalysisIssueDetail({ issue, prNumber }: { issue: AnalysisIssueD
   );
 }
 
-function FindingInstanceRow({ instance, prNumber }: { instance: AnalysisIssueFindingInstance; prNumber?: number }) {
-  const body = (
-    <>
-      <VerdictBadge verdict={instance.category} />
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm text-text-primary">{instance.headline}</p>
-        <p className="truncate font-mono text-2xs text-text-secondary">
-          {instance.slug}
-          {instance.headSha != null ? ` · ${instance.headSha.slice(0, 7)}` : ""} ·{" "}
-          {formatRelativeTime(instance.snapshotCreatedAt)}
-        </p>
-      </div>
-    </>
-  );
-
-  if (prNumber == null) {
-    return (
-      <li className="flex items-center gap-4 rounded-lg border border-border-dim bg-surface-void px-4 py-3">{body}</li>
-    );
-  }
-
+function FindingInstanceRow({ instance }: { instance: AnalysisIssueFindingInstance }) {
   return (
     <li>
       <AppLink
-        to="/app/$appSlug/pull-requests/$prNumber/snapshots/$snapshotId/findings/$findingId"
-        params={{ prNumber, snapshotId: instance.snapshotId, findingId: instance.findingId }}
+        to="/app/$appSlug/findings/$findingId"
+        params={{ findingId: instance.findingId }}
         className="flex items-center gap-4 rounded-lg border border-border-dim bg-surface-void px-4 py-3 transition-colors hover:border-border-mid hover:bg-surface-raised"
       >
-        {body}
+        <VerdictBadge verdict={instance.category} />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm text-text-primary">{instance.headline}</p>
+          <p className="truncate font-mono text-2xs text-text-secondary">
+            {instance.slug}
+            {instance.headSha != null ? ` · ${instance.headSha.slice(0, 7)}` : ""} ·{" "}
+            {formatRelativeTime(instance.snapshotCreatedAt)}
+          </p>
+        </div>
         <CaretRightIcon size={14} className="shrink-0 text-text-secondary" />
       </AppLink>
     </li>

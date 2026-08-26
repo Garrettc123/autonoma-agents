@@ -20,15 +20,7 @@ import { AppLink } from "routes/_blacklight/_app-shell/-app-link";
  * `needs_review` in a visible group (non-blocking, but those tests need a human eye), then `coverage` and `passed`
  * together behind a toggle. Which verdict lands in which tier is the taxonomy's call, never this component's.
  */
-export function AnalysisFindingsPanel({
-  findings,
-  prNumber,
-  snapshotId,
-}: {
-  findings: AnalysisFindingView[];
-  prNumber: number;
-  snapshotId: string;
-}) {
+export function AnalysisFindingsPanel({ findings }: { findings: AnalysisFindingView[] }) {
   const [showCollapsed, setShowCollapsed] = useState(false);
 
   // Grouped by the taxonomy's own presentation tier, never by verdict literals here - so the groups this panel shows
@@ -62,7 +54,7 @@ export function AnalysisFindingsPanel({
             ) : (
               <ul className="flex flex-col gap-2">
                 {actionable.map((finding) => (
-                  <FindingRow key={finding.id} finding={finding} prNumber={prNumber} snapshotId={snapshotId} />
+                  <FindingRow key={finding.id} finding={finding} />
                 ))}
               </ul>
             )}
@@ -74,7 +66,7 @@ export function AnalysisFindingsPanel({
                 </span>
                 <ul className="flex flex-col gap-2">
                   {needsReview.map((finding) => (
-                    <FindingRow key={finding.id} finding={finding} prNumber={prNumber} snapshotId={snapshotId} />
+                    <FindingRow key={finding.id} finding={finding} />
                   ))}
                 </ul>
               </div>
@@ -92,7 +84,7 @@ export function AnalysisFindingsPanel({
                 {showCollapsed && (
                   <ul className="flex flex-col gap-2">
                     {collapsed.map((finding) => (
-                      <FindingRow key={finding.id} finding={finding} prNumber={prNumber} snapshotId={snapshotId} />
+                      <FindingRow key={finding.id} finding={finding} />
                     ))}
                   </ul>
                 )}
@@ -105,20 +97,12 @@ export function AnalysisFindingsPanel({
   );
 }
 
-function FindingRow({
-  finding,
-  prNumber,
-  snapshotId,
-}: {
-  finding: AnalysisFindingView;
-  prNumber: number;
-  snapshotId: string;
-}) {
+function FindingRow({ finding }: { finding: AnalysisFindingView }) {
   return (
     <li>
       <AppLink
-        to="/app/$appSlug/pull-requests/$prNumber/snapshots/$snapshotId/findings/$findingId"
-        params={{ prNumber, snapshotId, findingId: finding.id }}
+        to="/app/$appSlug/findings/$findingId"
+        params={{ findingId: finding.id }}
         className="flex items-center gap-4 rounded-lg border border-border-dim bg-surface-void px-4 py-3 transition-colors hover:border-border-mid hover:bg-surface-raised"
       >
         <VerdictBadge verdict={finding.category} />

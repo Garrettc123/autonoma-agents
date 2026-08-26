@@ -83,21 +83,11 @@ const FLOW_CONCEPT_HELP =
  * the tests each flow cites; the Reporter contributes only the name and the sentence.
  *
  * `findings` are only THIS run's findings; a flow can cite tests carried from an earlier checkpoint whose finding does
- * not live at `snapshotId`. A flow shows its findings dropdown ONLY when this run resolves every test it cites, so the
+ * not live at this snapshot. A flow shows its findings dropdown ONLY when this run resolves every test it cites, so the
  * dropdown always accounts for the full set the cumulative status and composition above are computed from - a
  * partially-carried flow shows no dropdown rather than one whose contents the header would contradict.
  */
-export function AnalysisFlowList({
-  flows,
-  findings,
-  prNumber,
-  snapshotId,
-}: {
-  flows: AnalysisFlow[];
-  findings: AnalysisFindingView[];
-  prNumber: number;
-  snapshotId: string;
-}) {
+export function AnalysisFlowList({ flows, findings }: { flows: AnalysisFlow[]; findings: AnalysisFindingView[] }) {
   if (flows.length === 0) return null;
 
   const findingBySlug = new Map(findings.map((finding) => [finding.testCase.slug, finding]));
@@ -115,13 +105,7 @@ export function AnalysisFlowList({
       <PanelBody className="p-0">
         <ul className="divide-y divide-border-dim">
           {flows.map((flow) => (
-            <FlowRow
-              key={flow.title}
-              flow={flow}
-              findings={resolveFlowFindings(flow, findingBySlug)}
-              prNumber={prNumber}
-              snapshotId={snapshotId}
-            />
+            <FlowRow key={flow.title} flow={flow} findings={resolveFlowFindings(flow, findingBySlug)} />
           ))}
         </ul>
       </PanelBody>
@@ -144,17 +128,7 @@ function resolveFlowFindings(
     .sort((a, b) => analysisFindingSortKey(a.category) - analysisFindingSortKey(b.category));
 }
 
-function FlowRow({
-  flow,
-  findings,
-  prNumber,
-  snapshotId,
-}: {
-  flow: AnalysisFlow;
-  findings: AnalysisFindingView[];
-  prNumber: number;
-  snapshotId: string;
-}) {
+function FlowRow({ flow, findings }: { flow: AnalysisFlow; findings: AnalysisFindingView[] }) {
   const status = FLOW_STATUS_META[flow.status];
   const owner = FLOW_OWNER_META[flow.owner];
   const composition = analysisFlowComposition(flow);
@@ -175,7 +149,7 @@ function FlowRow({
         )}
       </div>
       <p className="text-xs leading-relaxed text-text-secondary">{flow.detail}</p>
-      {findingsBackHeader && <FlowFindings findings={findings} prNumber={prNumber} snapshotId={snapshotId} />}
+      {findingsBackHeader && <FlowFindings findings={findings} />}
     </li>
   );
 }
@@ -217,15 +191,7 @@ function HintBadge({
  * The flow's individual checks, collapsed by default. Each row is the terminal verdict of one test the flow cites,
  * linking to its finding page - the evidence, trace and self-heal history behind the one-line judgement above.
  */
-function FlowFindings({
-  findings,
-  prNumber,
-  snapshotId,
-}: {
-  findings: AnalysisFindingView[];
-  prNumber: number;
-  snapshotId: string;
-}) {
+function FlowFindings({ findings }: { findings: AnalysisFindingView[] }) {
   return (
     <details className="group mt-1">
       <summary className="flex w-fit cursor-pointer list-none items-center gap-1.5 text-text-secondary transition-colors hover:text-text-primary">
@@ -236,27 +202,19 @@ function FlowFindings({
       </summary>
       <ul className="mt-1.5 flex flex-col gap-0.5 border-l border-border-dim pl-3">
         {findings.map((finding) => (
-          <FlowFindingRow key={finding.id} finding={finding} prNumber={prNumber} snapshotId={snapshotId} />
+          <FlowFindingRow key={finding.id} finding={finding} />
         ))}
       </ul>
     </details>
   );
 }
 
-function FlowFindingRow({
-  finding,
-  prNumber,
-  snapshotId,
-}: {
-  finding: AnalysisFindingView;
-  prNumber: number;
-  snapshotId: string;
-}) {
+function FlowFindingRow({ finding }: { finding: AnalysisFindingView }) {
   return (
     <li>
       <AppLink
-        to="/app/$appSlug/pull-requests/$prNumber/snapshots/$snapshotId/findings/$findingId"
-        params={{ prNumber, snapshotId, findingId: finding.id }}
+        to="/app/$appSlug/findings/$findingId"
+        params={{ findingId: finding.id }}
         className="group/row flex items-center gap-2 py-1 transition-colors hover:text-text-primary"
       >
         <VerdictBadge verdict={finding.category} />

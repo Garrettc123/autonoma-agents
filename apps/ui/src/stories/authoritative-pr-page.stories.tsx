@@ -91,10 +91,10 @@ const analysisIssues: NonNullable<TrpcFixtures["branches"]>["analysisIssues"] = 
   },
 ];
 
-// A "Tests run" row: one test at its last-known verdict, keyed like the finding fixtures (`gen_<slug>` generation,
-// `<slug>.md` name) so a row's generation link and the withRunSignals findings stay in step.
+// A "Tests run" row: one test at its last-known verdict, keyed like the finding fixtures (`id` is the finding slug
+// the row's test-result page link resolves, `<slug>.md` name) so the row and the withRunSignals findings stay in step.
 function testRun(slug: string, category: string): AnalysisTestRun {
-  return { id: slug, generationId: `gen_${slug}`, testCase: { name: `${slug}.md`, slug }, category };
+  return { id: slug, testCase: { name: `${slug}.md`, slug }, category };
 }
 
 // The five tests THIS checkpoint investigated - the same set the findings fixture carries.

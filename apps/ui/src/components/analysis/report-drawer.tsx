@@ -22,14 +22,12 @@ export function ReportDrawer({
   markdown,
   evidence,
   prNumber,
-  snapshotId,
   findings,
   issueIds,
 }: {
   markdown: string;
   evidence: ResolvedEvidenceAsset[];
   prNumber: number;
-  snapshotId: string;
   findings: AnalysisFindingView[];
   /** The ids of issues this PR knows about, so a report token to a real issue links and a fabricated one stays text. */
   issueIds: ReadonlySet<string>;
@@ -60,7 +58,6 @@ export function ReportDrawer({
             markdown={markdown}
             evidence={evidence}
             prNumber={prNumber}
-            snapshotId={snapshotId}
             findings={findings}
             issueIds={issueIds}
             variant="bare"
