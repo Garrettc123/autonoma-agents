@@ -472,19 +472,32 @@ type Story = StoryObj<typeof meta>;
 
 const OVERVIEW_PATH = `/app/${baseApplication.slug}/pull-requests/${PR_NUMBER}`;
 
+const reportHandlers = appShellHandlers(
+  pageFixtures({
+    ...analysisReport,
+    analysisIssues,
+    analysisJob: { status: "completed", startedAt: STARTED_AT, completedAt: COMPLETED_AT },
+  }),
+);
+
 /** The authoritative PR overview: verdict headline + the latest snapshot's findings list, with the history rail. */
 export const Report: Story = {
   args: { path: OVERVIEW_PATH },
-  parameters: {
-    msw: {
-      handlers: appShellHandlers(
-        pageFixtures({
-          ...analysisReport,
-          analysisIssues,
-          analysisJob: { status: "completed", startedAt: STARTED_AT, completedAt: COMPLETED_AT },
-        }),
-      ),
-    },
+  parameters: { msw: { handlers: reportHandlers } },
+};
+
+/**
+ * The "Full report" drawer, opened from the banner header: the Reporter's holistic prose (its inline issue / finding
+ * / evidence tokens resolved) now lives only here, in a right-side drawer over a backdrop - the overview column
+ * itself is report-free.
+ */
+export const FullReport: Story = {
+  args: { path: OVERVIEW_PATH },
+  parameters: { msw: { handlers: reportHandlers } },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(await within(canvasElement).findByRole("button", { name: /full report/i }));
+    // The drawer portals to the document body; its prose renders only inside the drawer, so finding it confirms it opened.
+    await within(document.body).findByText(/one blocking bug/i);
   },
 };
 
@@ -687,7 +700,7 @@ export const FlowsExpanded: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await canvas.findByText("Flows tested in this PR");
-    // Open every disclosure (the flow findings and the collapsed "Full report") rather than matching copy.
+    // Open every disclosure (the per-flow findings and the "Tests run" section) rather than matching copy.
     for (const details of canvasElement.querySelectorAll("details")) details.setAttribute("open", "");
   },
 };

@@ -46,8 +46,10 @@ const VERDICT_DESCRIPTION: Record<AnalysisVerdictState, string> = {
  * one-paragraph headline - the only always-visible prose on the page - and the three counts a reader scans first:
  * open issues, flows covered, tests run.
  *
- * The badge label and title come from the shared `@autonoma/types` helpers, so the banner can never word the same
- * verdict differently from the header pill or the GitHub comment.
+ * The three counts and an optional `reportAction` (the "Full report" drawer trigger) sit compact in the header's
+ * top-right, opposite the pill, so the banner stays one headline tall - the full report lives in the drawer, not
+ * inline. The badge label and title come from the shared `@autonoma/types` helpers, so the banner can never word
+ * the same verdict differently from the header pill or the GitHub comment.
  */
 export function VerdictBanner({
   verdict,
@@ -56,6 +58,7 @@ export function VerdictBanner({
   flows,
   openIssueCount,
   testsRunCount,
+  reportAction,
 }: {
   verdict: AnalysisVerdictSummary;
   title: string;
@@ -63,6 +66,8 @@ export function VerdictBanner({
   flows: AnalysisFlow[];
   openIssueCount: number;
   testsRunCount: number;
+  /** The "Full report" drawer trigger, rendered opposite the pill; omitted when the report has no prose. */
+  reportAction?: React.ReactNode;
 }) {
   const tone = VERDICT_TONE[verdict.state];
   const tally = tallyAnalysisFlows(flows);
@@ -71,7 +76,7 @@ export function VerdictBanner({
 
   return (
     <section className={cn("flex flex-col gap-4 border px-5 py-5", STATUS_TINT[tone.dot])}>
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <Badge variant={tone.variant} className="gap-1 font-mono uppercase tracking-wider">
           <StatusDot status={tone.dot} />
           {badgeLabel}
@@ -79,14 +84,22 @@ export function VerdictBanner({
         <InfoHint ariaLabel="What this verdict means" size={14} className="text-text-secondary">
           {VERDICT_DESCRIPTION[verdict.state]}
         </InfoHint>
+
+        <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-2">
+          <VerdictCounts openIssueCount={openIssueCount} flowsCovered={tally.total} testsRunCount={testsRunCount} />
+          {reportAction != null && (
+            <>
+              <div className="h-6 w-px bg-border-dim/60" aria-hidden />
+              {reportAction}
+            </>
+          )}
+        </div>
       </div>
 
       <div className="min-w-0">
         <h2 className="text-xl font-semibold tracking-tight text-text-primary">{resolvedTitle}</h2>
         <p className="mt-1.5 text-sm text-text-secondary">{headline}</p>
       </div>
-
-      <VerdictCounts openIssueCount={openIssueCount} flowsCovered={tally.total} testsRunCount={testsRunCount} />
     </section>
   );
 }
@@ -101,7 +114,7 @@ function VerdictCounts({
   testsRunCount: number;
 }) {
   return (
-    <div className="flex flex-wrap gap-x-8 gap-y-3 border-t border-border-dim/60 pt-4">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
       <VerdictCount value={openIssueCount} label={openIssueCount === 1 ? "open issue" : "open issues"} />
       <VerdictCount value={flowsCovered} label={flowsCovered === 1 ? "flow covered" : "flows covered"} />
       <VerdictCount value={testsRunCount} label={testsRunCount === 1 ? "test run" : "tests run"} />
@@ -111,8 +124,8 @@ function VerdictCounts({
 
 function VerdictCount({ value, label }: { value: number; label: string }) {
   return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-2xl font-semibold leading-none tabular-nums text-text-primary">{value}</span>
+    <div className="flex items-baseline gap-1.5">
+      <span className="text-base font-semibold leading-none tabular-nums text-text-primary">{value}</span>
       <span className="font-mono text-2xs uppercase tracking-wider text-text-secondary">{label}</span>
     </div>
   );

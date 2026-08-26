@@ -1,18 +1,17 @@
 import { Panel, PanelBody, PanelHeader, PanelTitle } from "@autonoma/blacklight";
 import type { AnalysisFindingView, ResolvedEvidenceAsset } from "@autonoma/types";
-import { CollapsiblePanel } from "components/analysis/collapsible-panel";
 import { ReasoningMarkdown } from "components/snapshot/reasoning-block";
 import type { ReactNode } from "react";
 import { AppLink } from "routes/_blacklight/_app-shell/-app-link";
 
 /**
- * The Reporter's holistic PR report prose - the hero of the PR page and the snapshot per-job view. Renders the
- * Markdown with its inline tokens resolved: `evidence:<assetId>` images against the report's signed evidence, and
- * `issue:<id>` / `finding:<slug>` links against this PR's known issues and this report's findings. A token that
- * references an unknown id/slug renders as plain text (a fabricated reference resolves to nothing).
+ * The Reporter's holistic PR report prose - the hero of the PR page's "Full report" drawer and the snapshot per-job
+ * view. Renders the Markdown with its inline tokens resolved: `evidence:<assetId>` images against the report's signed
+ * evidence, and `issue:<id>` / `finding:<slug>` links against this PR's known issues and this report's findings. A
+ * token that references an unknown id/slug renders as plain text (a fabricated reference resolves to nothing).
  *
- * On the PR overview the prose is demoted behind a collapsed "Full report" expander (`collapsible`) so the verdict
- * banner's headline is the only always-visible prose; the snapshot per-job view keeps it open as the "Report" panel.
+ * The `bare` variant returns just the resolved markdown, for the PR overview's "Full report" drawer which supplies
+ * its own header and scroll chrome; the default `panel` variant wraps it as the snapshot per-job view's "Report" panel.
  */
 export function AnalysisReportProse({
   markdown,
@@ -21,7 +20,7 @@ export function AnalysisReportProse({
   snapshotId,
   findings,
   issueIds,
-  collapsible = false,
+  variant = "panel",
 }: {
   markdown: string;
   evidence: ResolvedEvidenceAsset[];
@@ -30,8 +29,8 @@ export function AnalysisReportProse({
   findings: AnalysisFindingView[];
   /** The ids of issues this PR knows about, so a token to a real issue links and a fabricated one stays text. */
   issueIds: ReadonlySet<string>;
-  /** When set, render collapsed behind a "Full report" expander instead of an always-open "Report" panel. */
-  collapsible?: boolean;
+  /** `bare` renders only the resolved markdown (the drawer supplies its own chrome); `panel` wraps it in a "Report" panel. */
+  variant?: "panel" | "bare";
 }) {
   // The Reporter writes `finding:<slug>` tokens because slugs are what it reasons in; the route is keyed on the
   // finding's own id, so resolve one to the other here.
@@ -73,8 +72,8 @@ export function AnalysisReportProse({
     />
   );
 
-  if (collapsible) {
-    return <CollapsiblePanel title="Full report">{body}</CollapsiblePanel>;
+  if (variant === "bare") {
+    return body;
   }
 
   return (

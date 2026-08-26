@@ -9,7 +9,7 @@ import { AnalysisJobStatus } from "components/analysis/analysis-job-status";
 import { AnalyzingBanner } from "components/analysis/analyzing-banner";
 import { AnalysisFlowList } from "components/analysis/flow-list";
 import { AnalysisOpenIssuesList } from "components/analysis/open-issues-list";
-import { AnalysisReportProse } from "components/analysis/report-prose";
+import { ReportDrawer } from "components/analysis/report-drawer";
 import { AnalysisTestsRunSection } from "components/analysis/tests-run-section";
 import { VerdictBanner } from "components/analysis/verdict-banner";
 import { CheckpointSummaryPill } from "components/pr-status/checkpoint-summary-pill";
@@ -136,9 +136,10 @@ function PrOverview({
   );
 }
 
-// The authoritative PR overview: the latest completed report leads with its verdict banner, then issues, coverage
-// and a collapsed report. While a run is live the banner becomes an "Analyzing..." hero into the checkpoint's
-// staged view; the last settled report stays below it. No live progress here - that is the checkpoint page's job.
+// The authoritative PR overview: the latest completed report leads with its verdict banner (its full prose a drawer
+// off the banner header), then issues, coverage and the tests run. While a run is live the banner becomes an
+// "Analyzing..." hero into the checkpoint's staged view; the last settled report stays below it. No live progress
+// here - that is the checkpoint page's job.
 function AuthoritativePrOverview({
   branchId,
   prNumber,
@@ -215,7 +216,7 @@ function SettledReportColumn({
 
 // The issues-first report column, split from the overview so it (and its open-issues query) only loads once the
 // report has landed - a still-running run never pays for it. Ordered banner -> open issues -> coverage -> tests run
-// -> collapsed report -> impact link, leading with the answer and demoting the prose.
+// -> impact link, leading with the answer; the full report prose is a drawer off the banner.
 function AuthoritativeReportColumn({
   branchId,
   prNumber,
@@ -242,6 +243,18 @@ function AuthoritativeReportColumn({
         flows={report.flows}
         openIssueCount={openIssues.length}
         testsRunCount={report.testRuns.length}
+        reportAction={
+          report.reportMarkdown != null ? (
+            <ReportDrawer
+              markdown={report.reportMarkdown}
+              evidence={report.reportEvidence}
+              prNumber={prNumber}
+              snapshotId={snapshotId}
+              findings={report.findings}
+              issueIds={issueIds}
+            />
+          ) : undefined
+        }
       />
       <IssuesAndFlows
         openIssues={openIssues}
@@ -251,17 +264,6 @@ function AuthoritativeReportColumn({
         snapshotId={snapshotId}
       />
       <AnalysisTestsRunSection testRuns={report.testRuns} />
-      {report.reportMarkdown != null && (
-        <AnalysisReportProse
-          markdown={report.reportMarkdown}
-          evidence={report.reportEvidence}
-          prNumber={prNumber}
-          snapshotId={snapshotId}
-          findings={report.findings}
-          issueIds={issueIds}
-          collapsible
-        />
-      )}
       <LatestSnapshotLink prNumber={prNumber} snapshotId={snapshotId} />
     </>
   );
