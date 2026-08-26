@@ -1,4 +1,5 @@
-import { Drawer, DrawerContent } from "@autonoma/blacklight";
+import { Drawer, DrawerClose, DrawerContent } from "@autonoma/blacklight";
+import { XIcon } from "@phosphor-icons/react/X";
 import { Navigate, createFileRoute } from "@tanstack/react-router";
 import { FindingDrawer, FindingDrawerSkeleton } from "components/analysis/finding-drawer/finding-drawer";
 import { FINDING_DRAWER_TABS } from "components/analysis/finding-drawer/finding-drawer-types";
@@ -68,6 +69,11 @@ function FindingDrawerContent() {
     <FindingDrawer
       view={view}
       tab={tab}
+      headerAction={
+        <DrawerClose className="text-text-secondary transition-colors hover:text-text-primary" aria-label="Close">
+          <XIcon size={16} />
+        </DrawerClose>
+      }
       onTabChange={(next) => void navigate({ search: (prev) => ({ ...prev, tab: next }), replace: true })}
       onIterationChange={(next) =>
         void navigate({ search: (prev) => ({ ...prev, iteration: next, tab: undefined }), replace: true })

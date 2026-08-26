@@ -24,23 +24,26 @@ import type { FindingDetailClassification, FindingDetailGeneration } from "./fin
 const ICON = 13;
 
 /**
- * The drawer's summary tab: one media frame (recording by default, toggling to the classifier's key frame via
- * the control-row slot) followed by the verdict story - the same sections the finding evidence page renders,
- * driven by whichever fields this verdict carries.
+ * The verdict story: a media frame (recording by default, toggling to the classifier's key frame via the
+ * control-row slot) followed by the verdict sections the finding evidence page renders, driven by whichever
+ * fields this verdict carries. `hideMedia` drops the leading frame for a surface that hosts the recording
+ * elsewhere (the result page's media rail), leaving just the story.
  */
 export function FindingDrawerSummary({
   classification,
   generation,
+  hideMedia = false,
 }: {
   classification: FindingDetailClassification;
   generation?: FindingDetailGeneration;
+  hideMedia?: boolean;
 }) {
   const failure = generation?.failure;
   return (
     <div className="flex flex-col gap-5">
       {isSystemFailure(failure) && <SystemFailurePanel failure={failure} />}
 
-      <MediaPanel classification={classification} generation={generation} />
+      {!hideMedia && <FindingMediaPanel classification={classification} generation={generation} />}
 
       <ExpectedActualSections
         expected={classification.expectedBehavior}
@@ -83,7 +86,10 @@ export function FindingDrawerSummary({
 
 type MediaMode = "recording" | "keyframe";
 
-function MediaPanel({
+/** The finding's one media frame - the run recording, toggling to the classifier's key frame when both exist.
+ * Exported so the result page's media rail can host it beside the verdict story instead of inside it. Renders
+ * nothing when the run captured neither. */
+export function FindingMediaPanel({
   classification,
   generation,
 }: {

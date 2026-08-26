@@ -22,3 +22,18 @@ export function availableDrawerTabs(view: FindingDetailView): FindingDrawerTab[]
     if (view.generation?.debug != null) tabs.push("debug");
     return tabs;
 }
+
+/**
+ * The result page's rail tabs: every drawer tab except the summary (the result page renders that as its own main
+ * column, not a tab). Both the constant and the per-state availability are derived from the drawer's, so a new
+ * drawer tab flows into the rail automatically instead of being silently dropped by a hand-maintained copy.
+ */
+export type FindingRailTab = Exclude<FindingDrawerTab, "summary">;
+
+const isRailTab = (tab: FindingDrawerTab): tab is FindingRailTab => tab !== "summary";
+
+export const FINDING_RAIL_TABS = FINDING_DRAWER_TABS.filter(isRailTab);
+
+export function availableRailTabs(view: FindingDetailView): FindingRailTab[] {
+    return availableDrawerTabs(view).filter(isRailTab);
+}

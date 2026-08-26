@@ -4,6 +4,7 @@ import type { Logger } from "@autonoma/logger";
 import type { StorageProvider } from "@autonoma/storage";
 import type { TestSuiteStore } from "@autonoma/test-suite";
 import {
+    type AnalysisClassificationSummary,
     type AnalysisSuiteChangeKind,
     type AnalysisTestOrigin,
     type InvestigationEvidence,
@@ -32,16 +33,6 @@ export interface AnalysisFindingDetailStep {
     screenshotAfter?: string;
     /** Where the agent acted, in the screenshot's own pixel space. */
     overlayPoints?: OverlayPoint[];
-}
-
-/** One entry of the finding's iteration history - enough for the drawer's attempt toggle. */
-export interface AnalysisFindingDetailIteration {
-    number: number;
-    category: string;
-    headline: string;
-    createdAt: Date;
-    /** Signed classifier-conversation URL; admin-only, absent otherwise. */
-    conversationUrl?: string;
 }
 
 /** The selected iteration's verdict story - the drawer's summary tab. */
@@ -96,10 +87,16 @@ export interface AnalysisFindingDetailView {
     origin?: AnalysisTestOrigin;
     selfHealed: boolean;
     contained: boolean;
+    /** The branch issue this finding was clustered into (analysis findings only), for the up-link. */
+    issueId?: string;
+    issueTitle?: string;
+    /** The PR this finding's run belongs to, needed to address the PR-scoped issue up-link. */
+    prNumber?: number;
     /** What this PR did to the test's plan; absent when the PR left it untouched. */
     change?: AnalysisSuiteChangeKind;
-    /** Oldest first. Empty until the first classification lands. */
-    iterations: AnalysisFindingDetailIteration[];
+    /** The finding's classification history, oldest first (the canonical summary the report exposes), so the full
+     * page can link each iteration to the run it judged. Empty until the first classification lands. */
+    iterations: AnalysisClassificationSummary[];
     /** The selected iteration (the current one unless `iteration` picked an earlier attempt); absent while the
      * test is unjudged. */
     classification?: AnalysisFindingDetailClassification;
@@ -156,6 +153,9 @@ export async function loadAnalysisFindingDetail(
         origin: analysisTestOriginSchema.safeParse(record.origin).data,
         selfHealed: record.classifications.length > 1,
         contained: record.failure != null,
+        issueId: record.issue?.id,
+        issueTitle: record.issue?.title,
+        prNumber: record.prNumber,
         change: suiteChange?.kind,
         iterations,
         classification,
@@ -287,10 +287,12 @@ async function signIterations(
     storage: StorageProvider,
     classifications: FindingDetailClassification[],
     isAdmin: boolean,
-): Promise<AnalysisFindingDetailIteration[]> {
+): Promise<AnalysisClassificationSummary[]> {
     return Promise.all(
         classifications.map(async (entry) => ({
+            id: entry.id,
             number: entry.number,
+            generationId: entry.generationId,
             category: entry.category,
             headline: entry.headline,
             createdAt: entry.createdAt,

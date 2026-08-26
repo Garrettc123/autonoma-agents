@@ -2,7 +2,7 @@ import { ApplicationArchitecture } from "@autonoma/db";
 import { expect } from "vitest";
 import { apiTestSuite } from "../api-test";
 import type { APITestHarness } from "../harness";
-import { seedAnalysisFindings } from "../seed-analysis-findings";
+import { seedAnalysisFindings, seedAnalysisIssue } from "../seed-analysis-findings";
 
 apiTestSuite({
     name: "branches.analysisFindingDetail",
@@ -141,6 +141,57 @@ apiTestSuite({
             expect(asAdmin?.generation?.debug).toBeDefined();
         });
 
+        test("carries the issue up-link, the PR number, and a generation id per iteration", async ({ harness }) => {
+            const { snapshotId, branchId, applicationId } = await createAuthoritativeSnapshot(harness);
+            await harness.db.featureBranchInfo.create({
+                data: { branchId, applicationId, prNumber: 482 },
+            });
+            const findingFor = await seedAnalysisFindings(harness.db, snapshotId, [
+                {
+                    slug: "checkout-submit",
+                    category: "client_bug",
+                    headline: "Submit never enables",
+                    superseded: [{ category: "plan_mismatch", headline: "Asserts the old copy" }],
+                },
+            ]);
+            const findingId = findingFor("checkout-submit");
+            const issueId = await seedAnalysisIssue(harness.db, {
+                branchId,
+                organizationId: harness.organizationId,
+                title: "Place order button never enables",
+            });
+            await harness.db.analysisFinding.update({ where: { id: findingId }, data: { issueId } });
+
+            const detail = await harness.request().branches.analysisFindingDetail({ findingId });
+
+            expect(detail?.issueId).toBe(issueId);
+            expect(detail?.issueTitle).toBe("Place order button never enables");
+            expect(detail?.prNumber).toBe(482);
+            // Each iteration links to the run it judged; a self-heal ran a fresh generation, so the two differ.
+            const generationIds = detail?.iterations.map((entry) => entry.generationId) ?? [];
+            expect(generationIds).toHaveLength(2);
+            expect(generationIds.every((id) => typeof id === "string" && id.length > 0)).toBe(true);
+            expect(new Set(generationIds).size).toBe(2);
+            expect(detail?.iterations.at(-1)?.generationId).toBe(detail?.generation?.id);
+        });
+
+        test("omits the issue up-link and PR number for an unattributed finding on a PR-less branch", async ({
+            harness,
+        }) => {
+            const { snapshotId } = await createAuthoritativeSnapshot(harness);
+            const findingFor = await seedAnalysisFindings(harness.db, snapshotId, [
+                { slug: "order-history", category: "passed" },
+            ]);
+
+            const detail = await harness
+                .request()
+                .branches.analysisFindingDetail({ findingId: findingFor("order-history") });
+
+            expect(detail?.issueId).toBeUndefined();
+            expect(detail?.issueTitle).toBeUndefined();
+            expect(detail?.prNumber).toBeUndefined();
+        });
+
         test("returns null for an unknown finding and an unknown iteration", async ({ harness }) => {
             const { snapshotId } = await createAuthoritativeSnapshot(harness);
             const findingFor = await seedAnalysisFindings(harness.db, snapshotId, [
@@ -159,7 +210,9 @@ apiTestSuite({
 });
 
 /** An active snapshot with an AnalysisJob - the shape an analysis run leaves behind. */
-async function createAuthoritativeSnapshot(harness: APITestHarness): Promise<{ snapshotId: string }> {
+async function createAuthoritativeSnapshot(
+    harness: APITestHarness,
+): Promise<{ snapshotId: string; branchId: string; applicationId: string }> {
     const application = await harness.services.applications.createApplication({
         name: `Finding Detail ${crypto.randomUUID()}`,
         organizationId: harness.organizationId,
@@ -169,7 +222,7 @@ async function createAuthoritativeSnapshot(harness: APITestHarness): Promise<{ s
     });
     const branch = await harness.db.branch.findFirstOrThrow({
         where: { applicationId: application.id },
-        select: { activeSnapshotId: true },
+        select: { id: true, activeSnapshotId: true },
     });
     if (branch.activeSnapshotId == null) throw new Error("Expected createApplication to create an active snapshot");
 
@@ -181,7 +234,7 @@ async function createAuthoritativeSnapshot(harness: APITestHarness): Promise<{ s
         data: { snapshotId: branch.activeSnapshotId, status: "running", organizationId: harness.organizationId },
     });
 
-    return { snapshotId: branch.activeSnapshotId };
+    return { snapshotId: branch.activeSnapshotId, branchId: branch.id, applicationId: application.id };
 }
 
 /** The generation pinned by the finding's current classification. */

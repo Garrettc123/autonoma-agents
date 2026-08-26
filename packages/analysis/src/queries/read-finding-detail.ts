@@ -37,6 +37,10 @@ export interface FindingDetailRecord {
     origin?: string;
     selectionReason?: string;
     failure?: PrismaJson.AnalysisFindingFailure;
+    /** The branch issue this finding was attributed to, if any; `title` is its current restatement. */
+    issue?: { id: string; title?: string };
+    /** The PR this finding's run belongs to, for the (PR-scoped) issue up-link. Absent on a non-PR branch. */
+    prNumber?: number;
     /** Absent between creation and first classification, or permanently on a contained investigation. */
     currentClassificationId?: string;
     /** Oldest first, the current one included. */
@@ -66,6 +70,8 @@ export async function readFindingDetail(
         origin: row.origin ?? undefined,
         selectionReason: row.selectionReason ?? undefined,
         failure: row.failure ?? undefined,
+        issue: row.issue != null ? { id: row.issue.id, title: row.issue.currentVersion?.title } : undefined,
+        prNumber: row.job.snapshot.branch.prInfo?.prNumber ?? undefined,
         currentClassificationId: row.currentClassificationId ?? undefined,
         classifications: row.classifications.map(toClassification),
     };
@@ -79,6 +85,8 @@ const detailSelect = {
     failure: true,
     currentClassificationId: true,
     testCase: { select: { id: true, name: true, slug: true, description: true } },
+    issue: { select: { id: true, currentVersion: { select: { title: true } } } },
+    job: { select: { snapshot: { select: { branch: { select: { prInfo: { select: { prNumber: true } } } } } } } },
     classifications: {
         orderBy: { number: "asc" },
         select: {

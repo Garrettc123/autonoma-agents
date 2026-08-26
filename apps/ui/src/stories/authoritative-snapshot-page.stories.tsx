@@ -300,9 +300,14 @@ const findingDetailData: AnalysisFindingDetailFixture = {
   selfHealed: false,
   contained: false,
   change: undefined,
+  issueId: "issue_place_order",
+  issueTitle: "Place order button never enables on checkout",
+  prNumber: PR_NUMBER,
   iterations: [
     {
+      id: "cls_checkout-place-order-1",
       number: 1,
+      generationId: "gen_checkout-place-order",
       category: "client_bug",
       headline: "Place order button never enables on the checkout page",
       createdAt: RUN_AT,
@@ -412,7 +417,9 @@ const findingDetailEngineArtifact: AnalysisFindingDetailFixture = {
   },
   iterations: [
     {
+      id: "cls_documents-upload-attachment-1",
       number: 1,
+      generationId: "gen_documents-upload-attachment",
       category: "engine_artifact",
       headline: "Native file picker blocked the upload before any document was selected",
       createdAt: RUN_AT,
@@ -491,7 +498,9 @@ const findingDetailSetupFailure: AnalysisFindingDetailFixture = {
   },
   iterations: [
     {
+      id: "cls_documents-setup-failure-1",
       number: 1,
+      generationId: "gen_documents-upload-attachment",
       category: "environment_failure",
       headline: "Scenario setup failed before the app was exercised",
       createdAt: RUN_AT,
@@ -545,7 +554,9 @@ const findingDetailPassed: AnalysisFindingDetailFixture = {
   },
   iterations: [
     {
+      id: "cls_create-physical-card-1",
       number: 1,
+      generationId: "gen_create-physical-card",
       category: "passed",
       headline: "Physical card creation increments the pending count",
       createdAt: RUN_AT,
@@ -1103,6 +1114,19 @@ export const Finding: Story = {
   args: {
     path: `/app/${baseApplication.slug}/pull-requests/${PR_NUMBER}/snapshots/${SNAPSHOT_ID}/findings/checkout-place-order`,
   },
+};
+
+/**
+ * The canonical, app-scoped test-result page: the same finding-drawer body flowing in a full page with no
+ * snapshot chrome, keyed by finding id alone, with the up-link to the finding's issue above it. Summary tab.
+ */
+export const TestResultPage: Story = {
+  args: { path: `/app/${baseApplication.slug}/findings/checkout-place-order` },
+};
+
+/** The test-result page on its Steps / execution tab, addressed by the shared `?tab=` search param. */
+export const TestResultPageSteps: Story = {
+  args: { path: `/app/${baseApplication.slug}/findings/checkout-place-order?tab=steps` },
 };
 
 /** The PR-level issue detail: narrative + evidence + suspected cause + the issue's finding instances. */
