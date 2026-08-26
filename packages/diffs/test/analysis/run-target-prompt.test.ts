@@ -23,6 +23,7 @@ function reporterInput(target: AnalysisRunTarget): ReporterInput {
         existingIssues: [],
         priorReports: [],
         scenarioIndex: [],
+        messages: [],
         // The prompt builder never reads the checkout - only the tools the agent would call do.
         codebase: new Codebase("/tmp/run-target-prompt-test"),
     };

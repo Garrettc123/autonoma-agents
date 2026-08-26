@@ -4,7 +4,6 @@ import { NotFoundError } from "@autonoma/errors";
 import { logger as rootLogger } from "@autonoma/logger";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
 import { env } from "../env";
 import { userPromptHttpResponse } from "./analysis-http-response";
@@ -45,7 +44,7 @@ export const analysisHttpRouter = new Hono<{ Variables: UserAuthVariables }>()
                 source: "http",
             });
             const { status, body: responseBody } = userPromptHttpResponse(receipt);
-            return ctx.json(responseBody, status as ContentfulStatusCode);
+            return ctx.json(responseBody, status);
         } catch (error) {
             if (error instanceof NotFoundError) return ctx.json({ error: error.message }, 404);
             logger.fatal("Failed to deliver analysis message", error, {

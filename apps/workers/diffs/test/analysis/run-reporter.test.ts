@@ -213,6 +213,7 @@ integrationTestSuite({
                     produceResult: fixedResult({
                         reportMarkdown: "## Report\nCheckout is broken.",
                         reportEvidenceManifest: [],
+                        addressedMessages: [],
                         title: "Autonoma checked this PR",
                         headline: "One bug: the app misbehaves.",
                         flows: [],
@@ -258,6 +259,7 @@ integrationTestSuite({
                     produceResult: fixedResult({
                         reportMarkdown: "## Report\nLogin works now.",
                         reportEvidenceManifest: [],
+                        addressedMessages: [],
                         title: "Autonoma checked this PR",
                         headline: "One bug: the app misbehaves.",
                         flows: [],
@@ -299,6 +301,7 @@ integrationTestSuite({
                     produceResult: fixedResult({
                         reportMarkdown: "## Report\nStill broken.",
                         reportEvidenceManifest: [],
+                        addressedMessages: [],
                         title: "Autonoma checked this PR",
                         headline: "One bug: the app misbehaves.",
                         flows: [],
@@ -331,6 +334,7 @@ integrationTestSuite({
                     produceResult: fixedResult({
                         reportMarkdown: "## Report\nStill broken.",
                         reportEvidenceManifest: [],
+                        addressedMessages: [],
                         title: "Autonoma checked this PR",
                         headline: "One bug: the app misbehaves.",
                         flows: [],
@@ -369,6 +373,7 @@ integrationTestSuite({
                     produceResult: fixedResult({
                         reportMarkdown: "## Report\nStill broken.",
                         reportEvidenceManifest: [],
+                        addressedMessages: [],
                         title: "Autonoma checked this PR",
                         headline: "One bug: the app misbehaves.",
                         flows: [],
@@ -407,6 +412,7 @@ integrationTestSuite({
                     produceResult: fixedResult({
                         reportMarkdown: "## Report\nAll green.",
                         reportEvidenceManifest: [],
+                        addressedMessages: [],
                         title: "Autonoma checked this PR",
                         headline: "One bug: the app misbehaves.",
                         flows: [],
@@ -444,6 +450,7 @@ integrationTestSuite({
                     produceResult: fixedResult({
                         reportMarkdown: "## Report",
                         reportEvidenceManifest: [],
+                        addressedMessages: [],
                         title: "Autonoma checked this PR",
                         headline: "Nothing here needed testing.",
                         flows: [],
@@ -476,6 +483,7 @@ integrationTestSuite({
                         produceResult: fixedResult({
                             reportMarkdown: "## Report",
                             reportEvidenceManifest: [],
+                            addressedMessages: [],
                             title: "Autonoma checked this PR",
                             headline: "Everything held up.",
                             flows: [],
@@ -509,6 +517,7 @@ integrationTestSuite({
                         return {
                             reportMarkdown: "## Report\nStale evidence.",
                             reportEvidenceManifest: [],
+                            addressedMessages: [],
                             title: "The run",
                             headline: "Stale.",
                             flows: [],
@@ -543,6 +552,7 @@ integrationTestSuite({
             const produceResult = fixedResult({
                 reportMarkdown: "## Report",
                 reportEvidenceManifest: [],
+                addressedMessages: [],
                 title: "The run",
                 headline: "One bug.",
                 flows: [],
@@ -569,6 +579,7 @@ integrationTestSuite({
                     produceResult: fixedResult({
                         reportMarkdown: "## Report",
                         reportEvidenceManifest: [],
+                        addressedMessages: [],
                         title: "The run",
                         headline: "Fixed.",
                         flows: [],
@@ -607,6 +618,7 @@ integrationTestSuite({
                         produceResult: fixedResult({
                             reportMarkdown: "## Report",
                             reportEvidenceManifest: [],
+                            addressedMessages: [],
                             title: "Autonoma checked this PR",
                             headline: "Nothing ran.",
                             flows: [],

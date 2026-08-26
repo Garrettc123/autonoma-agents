@@ -114,6 +114,7 @@ function makeInput(overrides: Partial<ReporterInput>): ReporterInput {
         existingIssues: [],
         priorReports: [],
         scenarioIndex: [],
+        messages: [],
         codebase: new Codebase(root),
         screenshotLoader,
         ...overrides,

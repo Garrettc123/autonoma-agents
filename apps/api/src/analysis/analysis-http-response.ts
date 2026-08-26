@@ -1,11 +1,14 @@
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type {
     DeliverUserPromptDeferralReason,
     DeliverUserPromptReceipt,
     DeliverUserPromptRefusal,
 } from "./deliver-user-prompt.service";
+import { describeDeferralReason, describeRefusal } from "./user-prompt-outcomes";
 
 export interface UserPromptHttpResponse {
-    status: 202 | 409 | 422;
+    /** Typed as Hono's status so the route can pass it straight to `ctx.json` with no assertion. */
+    status: ContentfulStatusCode;
     body: Record<string, unknown>;
 }
 
@@ -21,23 +24,12 @@ function refusalStatus(reason: DeliverUserPromptRefusal): 409 | 422 {
 }
 
 function refusalMessage(reason: DeliverUserPromptRefusal): string {
-    switch (reason) {
-        case "pr_closed":
-            return "The pull request is closed, so its branch will not run again; nothing was enqueued.";
-        case "pr_merged":
-            return "The pull request is merged, so its branch will not run again; nothing was enqueued.";
-        case "not_onboarded":
-            return "The application has not finished onboarding, so there is no test suite to direct.";
-    }
+    const clause = describeRefusal(reason, { pullRequest: "The pull request", application: "The application" });
+    return `${clause}; nothing was enqueued.`;
 }
 
 function deferralMessage(reason: DeliverUserPromptDeferralReason): string {
-    switch (reason) {
-        case "activation_gated":
-            return "The message was recorded; the organization runs analysis only on an explicit request, so it will be addressed by this PR's next run.";
-        case "out_of_credits":
-            return "The message was recorded; the organization is out of analysis credits, so it will be addressed by this PR's next run once credits are restored.";
-    }
+    return `The message was recorded; ${describeDeferralReason(reason)}, so it will be addressed by this PR's next run.`;
 }
 
 export function userPromptHttpResponse(receipt: DeliverUserPromptReceipt): UserPromptHttpResponse {

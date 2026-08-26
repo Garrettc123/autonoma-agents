@@ -4,6 +4,7 @@ import path from "node:path";
 import type {
     AgentLogEntrySchema,
     analysisEventBodySchema,
+    addressedMessageSchema,
     analysisFlowSchema,
     Blueprint as PreviewkitConfigBlueprint,
     Build as PreviewkitBuild,
@@ -166,6 +167,8 @@ declare global {
         export type SuspectedCause = z.infer<typeof suspectedCauseSchema>;
         /** The Reporter's flow itemization stored on `AnalysisReport.flows` (display-only, re-derived each run). */
         export type AnalysisFlows = z.infer<typeof analysisFlowSchema>[];
+        /** The Reporter's per-message acknowledgments stored on `AnalysisReport.addressedMessages`. */
+        export type AddressedMessages = z.infer<typeof addressedMessageSchema>[];
         export type ScenarioAuth = {
             cookies?: Array<{
                 name: string;

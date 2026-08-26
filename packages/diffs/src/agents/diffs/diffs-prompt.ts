@@ -49,7 +49,12 @@ export function buildDiffsUserPrompt(input: DiffsPromptInput): string {
         testScopeGuidelines,
     });
 
-    let prompt = `${planAuthoringContext}
+    let prompt = planAuthoringContext;
+
+    const directivesSection = renderDirectives(input.events);
+    if (directivesSection !== "") prompt += `\n\n${directivesSection}`;
+
+    prompt += `
 
 Analyze the following code changes.
 
@@ -61,8 +66,8 @@ ${listAffectedFiles(analysis.affectedFiles)}
 
 ${renderRangeSection(range)}`;
 
-    const eventsSection = renderEvents(input.events);
-    if (eventsSection !== "") prompt += `\n\n${eventsSection}`;
+    const movementSection = renderMovementEvents(input.events);
+    if (movementSection !== "") prompt += `\n\n${movementSection}`;
 
     if (merges.length > 0) {
         prompt += "\n\n## Merges in this range\n";
@@ -191,13 +196,46 @@ Explore the patch yourself with \`bash\`, scoping to what you need rather than p
 - \`git log ${range.baseSha}..${range.headSha} --name-only\` for which commit touched what`;
 }
 
-/** Collapses to `""` when the run claimed nothing, so an event-less run's prompt is byte-identical. */
-function renderEvents(events: ResolvedAnalysisEvent[]): string {
-    if (events.length === 0) return "";
-    const lines = events.map((event) => renderEvent(event)).join("\n");
+/**
+ * The user-prompt directives this run claimed. Collapses to `""` when the run claimed no directive, so a
+ * directive-less run's prompt is byte-identical.
+ */
+function renderDirectives(events: ResolvedAnalysisEvent[]): string {
+    const directives = events.flatMap((event) => (event.type === "user_prompt" ? [event] : []));
+    if (directives.length === 0) return "";
+    const lines = directives
+        .map((event) => `- [${event.createdAt.toISOString()}, from ${event.payload.author}] ${event.payload.text}`)
+        .join("\n");
+    return (
+        "## Directives - HIGHEST PRIORITY\n" +
+        "Instructions a person or agent addressed to THIS analysis, oldest first. They OUTRANK the diff below: the " +
+        "diff is the ground truth of what the code is; a directive is what you were asked to do about it. Your " +
+        "selection MUST serve each directive, or your finish reasoning MUST say why it cannot.\n\n" +
+        "Serve a directive that asks for COVERAGE - a flow to re-check, a risk to exercise - by selecting (or " +
+        "authoring) the tests it points at. A directive that asks you to EDIT the suite itself (rewrite a plan, " +
+        "delete a test, change an existing test) is OUT OF SCOPE for this stage today: do NOT misread it as a " +
+        "selection hint and do NOT act on it - select on the code as usual and note in your reasoning that the run " +
+        "can only re-analyze, not edit. The report then answers the person honestly.\n\n" +
+        lines
+    );
+}
+
+/**
+ * The movement events this run claimed (pushes), oldest first. Collapses to `""` when the run claimed no push, so
+ * an event-less run's prompt is byte-identical.
+ */
+function renderMovementEvents(events: ResolvedAnalysisEvent[]): string {
+    const pushes = events.flatMap((event) => (event.type === "commits_pushed" ? [event] : []));
+    if (pushes.length === 0) return "";
+    const lines = pushes
+        .map((event) => {
+            const base = event.payload.baseSha != null ? `, base \`${event.payload.baseSha}\`` : "";
+            return `- ${event.createdAt.toISOString()} [${event.source}] commits pushed: head \`${event.payload.headSha}\`${base}`;
+        })
+        .join("\n");
     return (
         "## Triggering events\n" +
-        "The recorded events this run is answering, oldest first. The diff is the ground truth for what the code " +
+        "The recorded pushes this run is answering, oldest first. The diff is the ground truth for what the code " +
         "looks like NOW; the events are the record of how and why it got there. Use them to understand the " +
         "branch's movement - a push burst, a rebase, a force push - and never count a change twice because it " +
         "shows up both in the diff and in an event.\n\n" +
@@ -207,17 +245,6 @@ function renderEvents(events: ResolvedAnalysisEvent[]): string {
         "them apart. A recorded sha may or may not still be present in the clone - check with " +
         "`git cat-file -e <sha>` before diffing against one."
     );
-}
-
-function renderEvent(event: ResolvedAnalysisEvent): string {
-    switch (event.type) {
-        case "commits_pushed": {
-            const base = event.payload.baseSha != null ? `, base \`${event.payload.baseSha}\`` : "";
-            return `- ${event.createdAt.toISOString()} [${event.source}] commits pushed: head \`${event.payload.headSha}\`${base}`;
-        }
-        case "user_prompt":
-            return `- ${event.createdAt.toISOString()} [${event.source}] message from ${event.payload.author}: ${event.payload.text}`;
-    }
 }
 
 /**

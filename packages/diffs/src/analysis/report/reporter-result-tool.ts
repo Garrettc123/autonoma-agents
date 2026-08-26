@@ -49,6 +49,27 @@ const reporterFinishInputSchema = z.object({
         .describe(
             "The holistic PR report in Markdown, for the PR page. This is the DEPTH the flow list cannot carry: what this PR does, the open bugs walked through with their evidence, why the gaps happened, and what changed since the last commit. Do NOT re-list the flows - they are rendered above this from `flows`, and repeating them makes the page read as a duplicate of itself. You may embed a fetched screenshot with `![caption](evidence:<assetId>)` - only fetched ids survive. Never manufacture a problem without a finding.",
         ),
+    addressedMessages: z
+        .array(
+            z.object({
+                eventId: z
+                    .string()
+                    .min(1)
+                    .describe(
+                        "The id of the message you are answering, exactly as listed under 'Messages to address'.",
+                    ),
+                response: z
+                    .string()
+                    .min(1)
+                    .describe(
+                        "Your reply to the person who sent it: what you did about their instruction, or - if it asked for something out of scope, like editing the test suite - why you could not. Plain prose.",
+                    ),
+            }),
+        )
+        .optional()
+        .describe(
+            "One entry per message listed under 'Messages to address', addressing each exactly once. Omit or pass [] only when that section is absent. Finish is rejected until every listed message is covered.",
+        ),
 });
 
 type ReporterFinishInput = z.infer<typeof reporterFinishInputSchema>;
@@ -134,6 +155,8 @@ export class ReporterResultTool extends ReportResultTool<ReporterFinishInput, Re
         const violations = loop.checkCoverage();
         if (hasCoverageViolations(violations)) throw new CoverageError(violations);
 
+        const addressedMessages = loop.resolveAddressedMessages(input.addressedMessages ?? []);
+
         const issues = loop.issueActions.map((action) => this.resolveIssue(action, loop));
         const { markdown, manifest } = loop.groundNarrative(input.reportMarkdown);
         const { flows, ...flowCorrections } = loop.partitionFlows(input.flows);
@@ -151,6 +174,7 @@ export class ReporterResultTool extends ReportResultTool<ReporterFinishInput, Re
             reportMarkdown: markdown,
             reportEvidenceManifest: manifest,
             issues,
+            addressedMessages,
         };
     }
 

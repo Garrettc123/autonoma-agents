@@ -58,9 +58,11 @@ await events.hasPending(branchId);                          // is there a reason
 await events.claimPending(tx, branchId, snapshotId);        // steals from superseded/cancelled/failed claims
 await events.listForSnapshot(snapshotId);                   // what this run analyzed
 
-// The read-side interpreter over the inbox - what consumers (the impact agent, later the Reporter) see:
-const resolved = await new AnalysisEventResolver(events).resolveForSnapshot(snapshotId);
+// The read-side interpreter over the inbox - what consumers (the impact agent, the Reporter) see:
+const resolver = new AnalysisEventResolver(events);
+const resolved = await resolver.resolveForSnapshot(snapshotId);   // every claimed event (impact agent's directives + movement)
 recordedEventShas(resolved, [headSha, baseSha]);            // the recorded heads a checkout should fetch best-effort
+await resolver.resolveClaimedUserPrompts(snapshotId);      // just the messages, WITH their event ids, for the Reporter to address
 
 // The one deriving site for the already-analyzed skip (API triggers + the run's open step): skip only when the
 // head is already analyzed AND the inbox is empty - a pending event un-suppresses it.

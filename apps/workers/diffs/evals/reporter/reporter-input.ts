@@ -46,6 +46,7 @@ export function rehydrateReporterInput(
         existingIssues: parsed.existingIssues,
         priorReports: parsed.priorReports,
         scenarioIndex: parsed.scenarioIndex,
+        messages: parsed.messages,
         codebase,
         screenshotLoader,
         // Only advertise the scenario loader when there are scenarios to load, matching production: the agent is

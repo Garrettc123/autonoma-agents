@@ -1,6 +1,6 @@
 export { AnalysisStore, type OpenAnalysisInput } from "./analysis-store";
 export { AnalysisEventStore, type AnalysisEventRecord, type EnqueueAnalysisEventInput } from "./analysis-event-store";
-export { AnalysisEventResolver, type ResolvedAnalysisEvent } from "./analysis-event-resolver";
+export { AnalysisEventResolver, type ResolvedAnalysisEvent, type ResolvedUserPrompt } from "./analysis-event-resolver";
 export { recordedEventShas } from "./recorded-event-shas";
 export { AnalysisRunGate, type AnalysisRunGateResult } from "./analysis-run-gate";
 export {

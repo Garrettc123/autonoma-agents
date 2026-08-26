@@ -42,6 +42,7 @@ function promptText(
         existingIssues,
         priorReports: [],
         scenarioIndex: [],
+        messages: [],
         // The prompt never reads the repo - only the tools do - so an unused root is enough.
         codebase: new Codebase("/tmp/reporter-prompt-test"),
     };
@@ -49,6 +50,40 @@ function promptText(
     const content = message?.content;
     return typeof content === "string" ? content : "";
 }
+
+function promptTextWithMessages(messages: ReporterInput["messages"]): string {
+    const input: ReporterInput = {
+        appSlug: "acme",
+        target: { kind: "pull_request", prNumber: 42, prTitle: "Add coupon codes" },
+        range: { baseSha: "aaaaaaa", headSha: "bbbbbbb" },
+        findings: [finding("checkout", "passed")],
+        branchTests: [branchTest("checkout", "passed")],
+        existingIssues: [],
+        priorReports: [],
+        scenarioIndex: [],
+        messages,
+        codebase: new Codebase("/tmp/reporter-prompt-test"),
+    };
+    const [message] = buildReporterPrompt(input);
+    const content = message?.content;
+    return typeof content === "string" ? content : "";
+}
+
+describe("reporter prompt messages", () => {
+    it("renders no messages section on a commits-only run", () => {
+        expect(promptTextWithMessages([])).not.toContain("Messages to address");
+    });
+
+    it("lists each claimed message by id for the report to address", () => {
+        const text = promptTextWithMessages([
+            { eventId: "evt-1", text: "Re-check the checkout flow.", author: "conversation-agent" },
+        ]);
+        expect(text).toContain("Messages to address");
+        expect(text).toContain("evt-1");
+        expect(text).toContain("Re-check the checkout flow.");
+        expect(text).toContain("out of scope");
+    });
+});
 
 /**
  * The constraint text IS the product here: what the Reporter is told is the only thing standing between a reader and

@@ -1,5 +1,6 @@
 import { type AgentConfig, AgentLoop, FixableToolError, type InlineImage } from "@autonoma/ai";
 import {
+    type AddressedMessage,
     analysisFindingBucket,
     type EvidenceManifestEntry,
     type PrimaryScreenshot,
@@ -12,6 +13,7 @@ import { type CoverageViolations, computeCoverageViolations } from "./coverage";
 import { groundNarrative, resolvePrimaryScreenshot, validateSuspectedCause } from "./evidence";
 import { type AuthoredFlow, type FlowPartition, partitionFlows } from "./flows";
 import type { RecordedIssueAction } from "./issue-actions";
+import { resolveAddressedMessages } from "./message-coverage";
 import type {
     ReporterBranchTest,
     ReporterEvidenceAsset,
@@ -21,6 +23,7 @@ import type {
     ReporterScenarioLoader,
     ReporterScenarioRecipe,
     ReporterScenarioSummary,
+    ReporterUserMessage,
 } from "./types";
 
 interface ReporterAgentLoopParams extends AgentConfig<ReporterResult> {
@@ -31,6 +34,7 @@ interface ReporterAgentLoopParams extends AgentConfig<ReporterResult> {
     branchTests: readonly ReporterBranchTest[];
     existingIssues: readonly ReporterExistingIssue[];
     scenarioIndex: readonly ReporterScenarioSummary[];
+    messages: readonly ReporterUserMessage[];
 }
 
 /**
@@ -50,6 +54,8 @@ export class ReporterAgentLoop extends AgentLoop<ReporterResult> implements Code
     private readonly branchTests: readonly ReporterBranchTest[];
     private readonly existingIssues: readonly ReporterExistingIssue[];
     private readonly scenarioIndex: readonly ReporterScenarioSummary[];
+    /** The event ids of the `user_prompt` messages this run claimed - what `addressedMessages` must cover exactly. */
+    private readonly claimedMessageIds: ReadonlySet<string>;
 
     /** This job's findings, keyed by slug - the set of tests that ran, for tool validation + coverage checks. */
     private readonly findingsBySlug: ReadonlyMap<string, ReporterFinding>;
@@ -78,6 +84,7 @@ export class ReporterAgentLoop extends AgentLoop<ReporterResult> implements Code
         branchTests,
         existingIssues,
         scenarioIndex,
+        messages,
         ...config
     }: ReporterAgentLoopParams) {
         super(config);
@@ -88,6 +95,7 @@ export class ReporterAgentLoop extends AgentLoop<ReporterResult> implements Code
         this.branchTests = branchTests;
         this.existingIssues = existingIssues;
         this.scenarioIndex = scenarioIndex;
+        this.claimedMessageIds = new Set(messages.map((message) => message.eventId));
 
         this.findingsBySlug = new Map(findings.map((f) => [f.slug, f]));
         this.assetsById = new Map(findings.flatMap((f) => f.screenshots.map((a) => [a.assetId, a])));
@@ -121,6 +129,13 @@ export class ReporterAgentLoop extends AgentLoop<ReporterResult> implements Code
      */
     public checkCoverage(): CoverageViolations {
         return computeCoverageViolations(this.findings, this.existingIssues, this.recordedActions);
+    }
+
+    // --- Messages: address every claimed user_prompt, exactly once ------------------------------------------
+
+    /** Validate the finish's `addressedMessages` against the messages this run claimed and return the normalized entries to persist. */
+    public resolveAddressedMessages(addressed: readonly AddressedMessage[]): AddressedMessage[] {
+        return resolveAddressedMessages(this.claimedMessageIds, addressed);
     }
 
     // --- Flows ------------------------------------------------------------------------------------------------

@@ -9,6 +9,7 @@ import {
     reporterPriorReportSchema,
     reporterScenarioRecipeSchema,
     reporterScenarioSummarySchema,
+    reporterUserMessageSchema,
 } from "./types";
 
 /**
@@ -40,6 +41,8 @@ export const reporterInputPayloadSchema = z.object({
     priorReports: z.array(reporterPriorReportSchema),
     scenarioIndex: z.array(reporterScenarioSummarySchema),
     scenarioRecipes: z.array(reporterScenarioRecipeSchema),
+    // Defaulted, so a case captured before this field existed rehydrates as a message-less run rather than failing.
+    messages: z.array(reporterUserMessageSchema).default([]),
 });
 
 export type ReporterInputPayload = z.infer<typeof reporterInputPayloadSchema>;
@@ -104,5 +107,6 @@ export async function serializeReporterInput(
         priorReports: input.priorReports,
         scenarioIndex: input.scenarioIndex,
         scenarioRecipes,
+        messages: input.messages,
     });
 }

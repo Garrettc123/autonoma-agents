@@ -10,6 +10,17 @@ export type ResolvedAnalysisEvent = AnalysisEventBody & {
 };
 
 /**
+ * A claimed `user_prompt` resolved for the Reporter to address. Carries the event `id` (the other resolutions drop
+ * it) because the report's `addressedMessages` must reference each message one-for-one.
+ */
+export interface ResolvedUserPrompt {
+    eventId: string;
+    text: string;
+    author: string;
+    createdAt: Date;
+}
+
+/**
  * Resolves the events a run claimed into the shape consumers reason about. Resolution only reads; acting on the
  * resolved context (fetching referenced shas into a checkout, rendering a prompt) belongs to the consumer.
  */
@@ -30,6 +41,32 @@ export class AnalysisEventResolver {
             extra: { count: resolved.length },
         });
         return resolved;
+    }
+
+    /**
+     * The `user_prompt` messages a snapshot's run claimed, oldest first, each with its event id - what the Reporter
+     * must address one-for-one. Empty on a commits-only run.
+     */
+    public async resolveClaimedUserPrompts(snapshotId: string): Promise<ResolvedUserPrompt[]> {
+        this.logger.info("Resolving claimed user prompts", { snapshot: { snapshotId } });
+        const records = await this.events.listForSnapshot(snapshotId);
+        const prompts = records.flatMap((record) =>
+            record.type === "user_prompt"
+                ? [
+                      {
+                          eventId: record.id,
+                          text: record.payload.text,
+                          author: record.payload.author,
+                          createdAt: record.createdAt,
+                      },
+                  ]
+                : [],
+        );
+        this.logger.info("Claimed user prompts resolved", {
+            snapshot: { snapshotId },
+            extra: { count: prompts.length },
+        });
+        return prompts;
     }
 }
 

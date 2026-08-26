@@ -2,6 +2,7 @@ import type { Prisma } from "@autonoma/db";
 import { type PrismaClient } from "@autonoma/db";
 import { logger as rootLogger } from "@autonoma/logger";
 import {
+    type AddressedMessage,
     type AnalysisFlow,
     ANALYSIS_VERDICT,
     type AnalysisIssueKind,
@@ -50,6 +51,7 @@ export interface ReportContent {
     flows: AnalysisFlow[];
     reportMarkdown: string;
     evidenceManifest: EvidenceManifestEntry[];
+    addressedMessages: AddressedMessage[];
 }
 
 export interface ReportSettlement {
@@ -140,6 +142,7 @@ export async function settleAnalysisReport(
                 flows: settlement.content.flows,
                 reportMarkdown: settlement.content.reportMarkdown,
                 evidenceManifest: settlement.content.evidenceManifest,
+                addressedMessages: settlement.content.addressedMessages,
             },
         });
 

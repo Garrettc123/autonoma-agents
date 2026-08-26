@@ -90,5 +90,37 @@ analysisSuite({
                 },
             ]);
         });
+
+        test("resolveClaimedUserPrompts returns only the claimed messages, each with its event id", async ({
+            harness,
+        }) => {
+            const run = await harness.seedAnalysis();
+            const resolver = new AnalysisEventResolver(harness.eventStore);
+            await enqueueCommitsAt(harness, run, "sha-1", new Date("2026-01-01T00:00:00Z"));
+            const { id: messageId } = await harness.eventStore.enqueue({
+                branchId: run.branchId,
+                organizationId: run.organizationId,
+                source: "mcp",
+                event: { type: "user_prompt", payload: { text: "Cover billing.", author: "plugin" } },
+            });
+
+            const snapshotId = await harness.addSnapshotWithStatus(run.branchId, "processing");
+            await claim(harness, run.branchId, snapshotId);
+
+            expect(await resolver.resolveClaimedUserPrompts(snapshotId)).toEqual([
+                { eventId: messageId, text: "Cover billing.", author: "plugin", createdAt: expect.any(Date) },
+            ]);
+        });
+
+        test("resolveClaimedUserPrompts is empty for a commits-only run", async ({ harness }) => {
+            const run = await harness.seedAnalysis();
+            const resolver = new AnalysisEventResolver(harness.eventStore);
+            await enqueueCommitsAt(harness, run, "sha-1", new Date("2026-01-01T00:00:00Z"));
+
+            const snapshotId = await harness.addSnapshotWithStatus(run.branchId, "processing");
+            await claim(harness, run.branchId, snapshotId);
+
+            expect(await resolver.resolveClaimedUserPrompts(snapshotId)).toEqual([]);
+        });
     },
 });

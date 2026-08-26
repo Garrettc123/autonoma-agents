@@ -1,6 +1,6 @@
 import { type PrismaClient, type SnapshotStatus, createClient } from "@autonoma/db";
 import { createTestDatabase, type IntegrationHarness, integrationTestSuite } from "@autonoma/integration-test";
-import { analysisVerdictSchema } from "@autonoma/types";
+import { type AddressedMessage, analysisVerdictSchema } from "@autonoma/types";
 import type { TestAPI } from "vitest";
 import { AnalysisEventStore } from "../src/analysis-event-store";
 import { AnalysisStore } from "../src/analysis-store";
@@ -206,7 +206,7 @@ export class AnalysisHarness implements IntegrationHarness {
     }
 
     /** A minimal settlement whose reconciliations are the interesting part. */
-    settlement(issues: IssueReconciliation[] = []): ReportSettlement {
+    settlement(issues: IssueReconciliation[] = [], addressedMessages: AddressedMessage[] = []): ReportSettlement {
         return {
             content: {
                 title: "The run",
@@ -214,6 +214,7 @@ export class AnalysisHarness implements IntegrationHarness {
                 flows: [],
                 reportMarkdown: "## Report",
                 evidenceManifest: [],
+                addressedMessages,
             },
             issues,
         };

@@ -2768,6 +2768,10 @@ model AnalysisReport {
   /// [EvidenceManifest]
   evidenceManifest Json? @map("evidence_manifest")
 
+  /// The Reporter's acknowledgment of each `user_prompt` message the run claimed; absent/[] on a commits-only run.
+  /// [AddressedMessages]
+  addressedMessages Json? @map("addressed_messages")
+
   createdAt      DateTime     @default(now()) @map("created_at")
   updatedAt      DateTime     @updatedAt @map("updated_at")
   organizationId String       @map("organization_id")

@@ -92,6 +92,7 @@ export class ReporterAgent extends Agent<ReporterInput, ReporterResult, Reporter
             branchTests: input.branchTests,
             existingIssues: input.existingIssues,
             scenarioIndex: input.scenarioIndex,
+            messages: input.messages,
         });
     }
 }

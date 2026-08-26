@@ -1,4 +1,5 @@
 import {
+    type AddressedMessage,
     type AnalysisFlow,
     type AnalysisIssueKind,
     analysisIssueKindSchema,
@@ -105,6 +106,14 @@ export const reporterExistingIssueSchema = z.object({
 });
 export type ReporterExistingIssue = z.infer<typeof reporterExistingIssueSchema>;
 
+/** One `user_prompt` message the run claimed, for the Reporter to address; `eventId` is what `addressedMessages` must reference. */
+export const reporterUserMessageSchema = z.object({
+    eventId: z.string(),
+    text: z.string(),
+    author: z.string(),
+});
+export type ReporterUserMessage = z.infer<typeof reporterUserMessageSchema>;
+
 /** A previous snapshot's holistic report prose, given as context so the Reporter writes a cumulative narrative. */
 export const reporterPriorReportSchema = z.object({
     snapshotId: z.string(),
@@ -184,6 +193,8 @@ export interface ReporterInput {
     existingIssues: ReporterExistingIssue[];
     priorReports: ReporterPriorReport[];
     scenarioIndex: ReporterScenarioSummary[];
+    /** The `user_prompt` messages this run claimed, oldest first - each MUST be addressed in `addressedMessages`. Empty on a commits-only run. */
+    messages: ReporterUserMessage[];
     /** The checked-out repo, for the read-only `bash` tool. */
     codebase: Codebase;
     /** Rehydrates a screenshot's bytes for `fetch_evidence`; absent degrades that tool to text-only. */
@@ -249,4 +260,6 @@ export interface ReporterResult {
     /** The assets `reportMarkdown` may embed inline by `evidence:<assetId>` token. */
     reportEvidenceManifest: EvidenceManifestEntry[];
     issues: ReporterIssueResult[];
+    /** One acknowledgment per claimed `user_prompt` message; empty on a commits-only run. */
+    addressedMessages: AddressedMessage[];
 }

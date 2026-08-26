@@ -13,6 +13,7 @@ import type {
     DeliverUserPromptDeferralReason,
     DeliverUserPromptRefusal,
 } from "../analysis/deliver-user-prompt.service";
+import { describeDeferralReason, describeRefusal } from "../analysis/user-prompt-outcomes";
 import type { MergeGateService } from "../github/merge-gate.service";
 import { type DeployFreshness, deployFreshness } from "../previewkit/deploy-freshness";
 import { MAX_WAIT_SECONDS } from "../previewkit/previewkit-environments.service";
@@ -202,29 +203,16 @@ function noLinkedRepositoryMessage(repoFullName: string): string {
 
 function deferredMessageText(repoFullName: string, prNumber: number, reason: DeliverUserPromptDeferralReason): string {
     const tail = `It will be addressed by the next analysis run of ${repoFullName} PR ${prNumber}.`;
-    switch (reason) {
-        case "activation_gated":
-            return (
-                `Recorded your message, but this organization runs analysis only on an explicit request, so no run ` +
-                `started now. ${tail}`
-            );
-        case "out_of_credits":
-            return `Recorded your message, but the organization is out of analysis credits, so no run started. ${tail}`;
-    }
+    return `Recorded your message, but ${describeDeferralReason(reason)}, so no run started now. ${tail}`;
 }
 
 function refusedMessageText(repoFullName: string, prNumber: number, reason: DeliverUserPromptRefusal): string {
-    switch (reason) {
-        case "pr_closed":
-            return `${repoFullName} PR ${prNumber} is closed, so its branch will not run again. Nothing was enqueued.`;
-        case "pr_merged":
-            return `${repoFullName} PR ${prNumber} is merged, so its branch will not run again. Nothing was enqueued.`;
-        case "not_onboarded":
-            return (
-                `${repoFullName} has not finished onboarding, so there is no test suite for Autonoma to direct. ` +
-                `Finish setup first, then send the message.`
-            );
-    }
+    const clause = describeRefusal(reason, {
+        pullRequest: `${repoFullName} PR ${prNumber}`,
+        application: repoFullName,
+    });
+    const tail = reason === "not_onboarded" ? "Finish setup first, then send the message." : "Nothing was enqueued.";
+    return `${clause}. ${tail}`;
 }
 
 /** The `unavailable` result for a PR Autonoma has not analyzed. */

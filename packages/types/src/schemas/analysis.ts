@@ -380,6 +380,19 @@ export const analysisFlowSchema = z.object({
 export type AnalysisFlow = z.infer<typeof analysisFlowSchema>;
 
 /**
+ * The Reporter's acknowledgment of one `user_prompt` message the run claimed: the event it answers and the
+ * response the person reads. Persisted on `AnalysisReport.addressedMessages` and rendered by the UI against the
+ * message it names.
+ */
+export const addressedMessageSchema = z.object({
+    /** The `analysis_event.id` of the `user_prompt` message this entry answers. */
+    eventId: z.string().min(1),
+    /** The Reporter's reply to the person who sent it - what it did about the instruction, or why it could not. */
+    response: z.string().min(1),
+});
+export type AddressedMessage = z.infer<typeof addressedMessageSchema>;
+
+/**
  * A flow's status from the verdicts it cites. Derived over the bucket partition rather than verdict literals, so a
  * new verdict is placed once, in `VERDICT_TIER`, and reaches this automatically.
  *

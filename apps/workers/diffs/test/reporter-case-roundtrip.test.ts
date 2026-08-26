@@ -91,6 +91,7 @@ const SOURCE: ReporterInput = {
     ],
     priorReports: [{ snapshotId: "snap-prev", reportMarkdown: "The prior run verified login." }],
     scenarioIndex: [{ id: "scn-1", name: "Seeded orders", summary: "Three paid orders" }],
+    messages: [{ eventId: "evt-1", text: "Re-check the orders page.", author: "agent" }],
     codebase: new Codebase("/tmp/source-not-read-in-this-test"),
     // The screenshot loader is dropped by serialize and rebuilt from storage by rehydrate, so the fixture needs
     // none of its own; leaving it unset keeps the fixture free of the evolving Screenshot shape.

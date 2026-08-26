@@ -8,6 +8,7 @@ import type {
     ReporterInput,
     ReporterPriorReport,
     ReporterScenarioSummary,
+    ReporterUserMessage,
 } from "./types";
 
 /** How much of a test plan to show per finding before truncating - enough to reason, not a wall of text. */
@@ -115,13 +116,14 @@ When a finding was reached after a self-heal (the Investigator rewrote the plan 
 export function buildReporterPrompt(input: ReporterInput): ModelMessage[] {
     const sections = [
         renderTargetHeader(input),
+        renderMessages(input.messages),
         renderBranchTests(input.branchTests),
         renderImpactReasoning(input.impactReasoning),
         renderFindings(input.findings),
         renderExistingIssues(input.existingIssues),
         renderScenarioIndex(input.scenarioIndex),
         renderPriorReports(input.priorReports),
-        renderInstruction(),
+        renderInstruction(input.messages.length > 0),
     ];
     return [{ role: "user", content: sections.filter((s) => s.length > 0).join("\n\n") }];
 }
@@ -179,6 +181,24 @@ function renderBranchTest(test: ReporterBranchTest): string {
     const when = test.checkedThisRun ? "this commit" : `carried from ${test.fromSha ?? "an earlier commit"}`;
     const headline = test.headline != null && test.headline !== "" ? ` - ${test.headline}` : "";
     return `- ${test.slug} [${test.category}, ${when}] ${test.name}${headline}`;
+}
+
+/**
+ * The messages a person or agent addressed to this run. Collapses to `""` on a commits-only run, so its prompt is
+ * unchanged.
+ */
+function renderMessages(messages: readonly ReporterUserMessage[]): string {
+    if (messages.length === 0) return "";
+    const rows = messages.map((message) => `- ${message.eventId} [from ${message.author}]: ${message.text}`).join("\n");
+    return (
+        "# Messages to address (answer each in addressedMessages)\n" +
+        "A person or agent sent these instructions to this analysis. For EACH, add one `addressedMessages` entry " +
+        "keyed by its id, replying to the sender: what you did about it (which flows/tests it maps to, what the " +
+        "run found), or - when it asks for something this run cannot do, like editing the test suite (write a " +
+        "test, change a plan, delete a test) - say plainly that today the run can only re-analyze, not edit, so " +
+        "the ask is out of scope. Never silently ignore one; finish is rejected until every id below is answered.\n" +
+        rows
+    );
 }
 
 function renderImpactReasoning(impactReasoning: string | undefined): string {
@@ -253,6 +273,9 @@ function renderPriorReports(priorReports: readonly ReporterPriorReport[]): strin
     return `# Prior reports for this branch (for continuity; the branch's tests above are the authority on what holds now)\n${rows}`;
 }
 
-function renderInstruction(): string {
-    return "# Do\nReconcile every finding and existing issue with the tools, then call finish with the title, headline, flows and report. Cluster every one of the branch's tests into exactly one flow. Ground every screenshot and code reference in what you actually fetched or read.";
+function renderInstruction(hasMessages: boolean): string {
+    const base =
+        "# Do\nReconcile every finding and existing issue with the tools, then call finish with the title, headline, flows and report. Cluster every one of the branch's tests into exactly one flow. Ground every screenshot and code reference in what you actually fetched or read.";
+    if (!hasMessages) return base;
+    return `${base} Also add one addressedMessages entry per message listed above, answering the person who sent it.`;
 }

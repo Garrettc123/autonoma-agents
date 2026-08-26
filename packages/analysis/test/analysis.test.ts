@@ -45,6 +45,36 @@ analysisSuite({
             expect(finding.issueId).toBe(issues[0]?.id);
         });
 
+        test("persists the report's addressedMessages with the report", async ({ harness }) => {
+            const run = await harness.seedAnalysis();
+            await harness.recordVerdict(run, "checkout", "passed");
+            const scope = harness.store.forAnalysis(run.snapshotId);
+
+            const addressed = [{ eventId: "evt-1", response: "Re-ran checkout; it passed." }];
+            const settled = await scope.settleReport(harness.settlement([], addressed));
+            expect(settled.settled).toBe(true);
+
+            const report = await harness.db.analysisReport.findUniqueOrThrow({
+                where: { snapshotId: run.snapshotId },
+                select: { addressedMessages: true },
+            });
+            expect(report.addressedMessages).toEqual(addressed);
+        });
+
+        test("persists an empty addressedMessages on a commits-only run", async ({ harness }) => {
+            const run = await harness.seedAnalysis();
+            await harness.recordVerdict(run, "checkout", "passed");
+            const scope = harness.store.forAnalysis(run.snapshotId);
+
+            await scope.settleReport(harness.settlement());
+
+            const report = await harness.db.analysisReport.findUniqueOrThrow({
+                where: { snapshotId: run.snapshotId },
+                select: { addressedMessages: true },
+            });
+            expect(report.addressedMessages).toEqual([]);
+        });
+
         test("a failure between the issue writes and the report leaves neither", async ({ harness }) => {
             const run = await harness.seedAnalysis();
             await harness.recordVerdict(run, "checkout", "client_bug");

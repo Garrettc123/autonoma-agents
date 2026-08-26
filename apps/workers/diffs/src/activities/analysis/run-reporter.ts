@@ -1,4 +1,10 @@
-import { type Finding, type Issue, type IssueReconciliation, PRIOR_REPORTS_LIMIT } from "@autonoma/analysis";
+import {
+    AnalysisEventResolver,
+    type Finding,
+    type Issue,
+    type IssueReconciliation,
+    PRIOR_REPORTS_LIMIT,
+} from "@autonoma/analysis";
 import { persistAiCosts } from "@autonoma/billing";
 import { db } from "@autonoma/db";
 import { StorageEvidenceLoader, resolveScenarioRecipesForSnapshot, summarizeScenarioRecipes } from "@autonoma/diffs";
@@ -20,7 +26,7 @@ import { analysisFindingSortKey, analysisVerdictSchema } from "@autonoma/types";
 import type { RunReporterInput, RunReporterOutput } from "@autonoma/workflow/activities";
 import { resolveRunTarget } from "../../codebase/run-target";
 import { type SnapshotContext, withSnapshotContext } from "../../codebase/snapshot-context";
-import { createModelSession, getAnalysisStore, getStorage } from "../../services";
+import { createModelSession, getAnalysisEventStore, getAnalysisStore, getStorage } from "../../services";
 import { uploadConversation } from "../../upload-conversation";
 import { rethrowIfCreditsExhausted } from "../rethrow-credits-exhausted";
 import { loadBranchTests } from "./branch-tests";
@@ -66,6 +72,7 @@ export async function runReporter(input: RunReporterInput, deps: RunReporterDeps
                 flows: result.flows,
                 reportMarkdown: result.reportMarkdown,
                 evidenceManifest: result.reportEvidenceManifest,
+                addressedMessages: result.addressedMessages,
             },
             issues: result.issues.map(toReconciliation),
         });
@@ -188,15 +195,17 @@ async function buildReporterInput(input: RunReporterInput, context: SnapshotCont
     const logger = rootLogger.child({ name: "buildReporterInput" });
     const store = getAnalysisStore();
     const ledger = store.forBranch(context.branchId);
-    const [target, findings, lifecycle, branchTests, existingIssues, priorReports, scenario] = await Promise.all([
-        resolveRunTarget(context),
-        store.forAnalysis(snapshotId).findings(),
-        store.forAnalysis(snapshotId).lifecycle(),
-        loadBranchTests(context.branchId, snapshotId, logger),
-        ledger.issues(),
-        ledger.priorReports({ excludeSnapshotId: snapshotId, limit: PRIOR_REPORTS_LIMIT }),
-        loadScenarioContext(snapshotId),
-    ]);
+    const [target, findings, lifecycle, branchTests, existingIssues, priorReports, scenario, messages] =
+        await Promise.all([
+            resolveRunTarget(context),
+            store.forAnalysis(snapshotId).findings(),
+            store.forAnalysis(snapshotId).lifecycle(),
+            loadBranchTests(context.branchId, snapshotId, logger),
+            ledger.issues(),
+            ledger.priorReports({ excludeSnapshotId: snapshotId, limit: PRIOR_REPORTS_LIMIT }),
+            loadScenarioContext(snapshotId),
+            new AnalysisEventResolver(getAnalysisEventStore()).resolveClaimedUserPrompts(snapshotId),
+        ]);
 
     return {
         appSlug: context.appSlug,
@@ -208,6 +217,11 @@ async function buildReporterInput(input: RunReporterInput, context: SnapshotCont
         existingIssues: existingIssues.map(toReporterExistingIssue),
         priorReports,
         scenarioIndex: scenario.index,
+        messages: messages.map((message) => ({
+            eventId: message.eventId,
+            text: message.text,
+            author: message.author,
+        })),
         codebase: context.codebase,
         screenshotLoader: new StorageEvidenceLoader(getStorage()),
         scenarioLoader: scenario.loader,
