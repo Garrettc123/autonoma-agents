@@ -9,8 +9,11 @@ import {
 
 /**
  * A claim is "live" while its snapshot is still in flight (`processing`) or is the branch's settled active suite
- * (`active`). Any other terminal - `superseded`, `cancelled`, `failed` - means the claiming run's work was thrown
- * away (a terminated run executes no cleanup code), so its events return to pending for a successor to steal.
+ * (`active`). Any other status - `superseded`, `cancelled`, `failed` - is only reclaimable when the claiming run
+ * ALSO never completed its pipeline (`analysisJob.status != "completed"`): a terminated run executes no cleanup
+ * code, so its events must return to pending for a successor to steal. `superseded` alone is NOT enough - a
+ * completed run's snapshot is later superseded by the NEXT promotion, and treating its events as pending again
+ * resurrects them at every end-of-run drain check, re-triggering runs forever.
  *
  * Derived as the complement of the live set over the whole {@link SnapshotStatus} enum rather than hardcoded, so a
  * new status can never silently land in the reclaimable bucket without a deliberate choice here.
@@ -183,7 +186,16 @@ export class AnalysisEventStore {
     private pendingClause(): Prisma.AnalysisEventWhereInput[] {
         return [
             { claimedBySnapshotId: null },
-            { claimedBySnapshot: { is: { status: { in: RECLAIMABLE_CLAIM_STATUSES } } } },
+            {
+                claimedBySnapshot: {
+                    is: {
+                        status: { in: RECLAIMABLE_CLAIM_STATUSES },
+                        // The claiming run must also never have completed: a completed run handled its events for
+                        // good, even after the next promotion flips its snapshot to `superseded`.
+                        OR: [{ analysisJob: { is: null } }, { analysisJob: { status: { not: "completed" } } }],
+                    },
+                },
+            },
         ];
     }
 

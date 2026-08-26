@@ -161,6 +161,47 @@ analysisSuite({
             });
         }
 
+        // The promotion-resurrection loop: a COMPLETED run's snapshot is flipped to `superseded` by the NEXT
+        // promotion. Its events must stay handled - treating them as pending again re-triggers a run at every
+        // end-of-run drain check, forever.
+        test("a claim by a completed run's superseded snapshot is never stolen", async ({ harness }) => {
+            const run = await harness.seedAnalysis();
+            const eventId = await enqueueCommits(harness, run, "sha-a");
+            const completedSnapshot = await harness.addSnapshot(run.branchId, run.organizationId);
+            await claim(harness, run.branchId, completedSnapshot);
+            await harness.db.analysisJob.update({
+                where: { snapshotId: completedSnapshot },
+                data: { status: "completed" },
+            });
+            await harness.db.branchSnapshot.update({
+                where: { id: completedSnapshot },
+                data: { status: "superseded" },
+            });
+
+            expect(await harness.eventStore.hasPending(run.branchId)).toBe(false);
+            const successor = await harness.addSnapshotWithStatus(run.branchId, "processing");
+            expect(await claim(harness, run.branchId, successor)).toBe(0);
+            expect(await claimedBy(harness, eventId)).toBe(completedSnapshot);
+        });
+
+        // A terminated run's job never reaches "completed" (settlement does not run on terminate), so the steal
+        // must still work even though both this and the completed case read `superseded` on the snapshot.
+        test("a claim by a superseded snapshot whose job never completed is still stolen", async ({ harness }) => {
+            const run = await harness.seedAnalysis();
+            const eventId = await enqueueCommits(harness, run, "sha-a");
+            const terminatedSnapshot = await harness.addSnapshot(run.branchId, run.organizationId);
+            await claim(harness, run.branchId, terminatedSnapshot);
+            await harness.db.branchSnapshot.update({
+                where: { id: terminatedSnapshot },
+                data: { status: "superseded" },
+            });
+
+            expect(await harness.eventStore.hasPending(run.branchId)).toBe(true);
+            const successor = await harness.addSnapshotWithStatus(run.branchId, "processing");
+            expect(await claim(harness, run.branchId, successor)).toBe(1);
+            expect(await claimedBy(harness, eventId)).toBe(successor);
+        });
+
         // A pending event on a terminally closed PR must not read as a standing reason to run, or it would hold
         // the already-analyzed skip open forever on a branch that can never run again.
         test("hasPending ignores events on a closed PR but sees open, cold-cache and PR-less ones", async ({
