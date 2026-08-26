@@ -1,4 +1,5 @@
 import { Badge, Panel, PanelBody, Skeleton, StatusDot } from "@autonoma/blacklight";
+import type { AnalysisFindingView, AnalysisFlow, AnalysisIssueSummary } from "@autonoma/types";
 import { ArrowRightIcon } from "@phosphor-icons/react/ArrowRight";
 import { CaretRightIcon } from "@phosphor-icons/react/CaretRight";
 import { GitPullRequestIcon } from "@phosphor-icons/react/GitPullRequest";
@@ -242,9 +243,13 @@ function AuthoritativeReportColumn({
         openIssueCount={openIssues.length}
         testsRunCount={report.testRuns.length}
       />
-      {/* A clean PR shows the green banner and its coverage alone - never an empty "Open issues (0)" panel. */}
-      {openIssues.length > 0 && <AnalysisOpenIssuesList issues={openIssues} prNumber={prNumber} />}
-      <AnalysisFlowList flows={report.flows} findings={report.findings} prNumber={prNumber} snapshotId={snapshotId} />
+      <IssuesAndFlows
+        openIssues={openIssues}
+        flows={report.flows}
+        findings={report.findings}
+        prNumber={prNumber}
+        snapshotId={snapshotId}
+      />
       <AnalysisTestsRunSection testRuns={report.testRuns} />
       {report.reportMarkdown != null && (
         <AnalysisReportProse
@@ -258,6 +263,50 @@ function AuthoritativeReportColumn({
         />
       )}
       <LatestSnapshotLink prNumber={prNumber} snapshotId={snapshotId} />
+    </>
+  );
+}
+
+// Open issues ("what's wrong") and the flow coverage ("what was checked") sit side by side so the reader takes in
+// both at once. A container query splits them only once the report column is genuinely wide enough for two readable
+// panels; below that - or when only one of the two has anything to show - they stack full-width as before. A clean PR
+// shows the green banner and its coverage alone, never an empty "Open issues (0)" panel.
+function IssuesAndFlows({
+  openIssues,
+  flows,
+  findings,
+  prNumber,
+  snapshotId,
+}: {
+  openIssues: AnalysisIssueSummary[];
+  flows: AnalysisFlow[];
+  findings: AnalysisFindingView[];
+  prNumber: number;
+  snapshotId: string;
+}) {
+  // AnalysisFlowList self-nulls when it has no flows; the open-issues list would instead render an empty-state panel,
+  // so that one is guarded here. Built once so the two return branches can't drift as props change.
+  const issuesPanel = openIssues.length > 0 ? <AnalysisOpenIssuesList issues={openIssues} prNumber={prNumber} /> : null;
+  const flowsPanel = <AnalysisFlowList flows={flows} findings={findings} prNumber={prNumber} snapshotId={snapshotId} />;
+
+  if (issuesPanel != null && flows.length > 0) {
+    // `items-start` keeps each panel at its natural height rather than stretching the shorter one to match the
+    // taller. A lopsided PR - many issues and few flows, or the reverse - would otherwise inflate the short panel
+    // into a large empty bordered box; here the two simply end where their content ends.
+    return (
+      <div className="@container">
+        <div className="grid items-start gap-4 @2xl:grid-cols-2">
+          {issuesPanel}
+          {flowsPanel}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {issuesPanel}
+      {flowsPanel}
     </>
   );
 }
