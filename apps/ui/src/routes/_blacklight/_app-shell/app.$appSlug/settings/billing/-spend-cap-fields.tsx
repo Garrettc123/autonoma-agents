@@ -29,12 +29,10 @@ function SpendCapFieldsContent() {
 
   return (
     <div className="space-y-4">
-      <p className="font-mono text-2xs uppercase tracking-widest text-text-secondary">Spend cap</p>
-
       <p className="text-sm text-text-secondary">
-        Cap how much this organization can spend on top-ups (manual purchases and auto top-up combined) each calendar
-        month. Purchases and auto top-ups over the cap are blocked until the period rolls over, and we email your
-        organization's owners as the cap fills up.
+        Cap how much this organization can spend on credits each calendar month, across every purchase it makes.
+        Purchases over the cap are blocked until the period rolls over, and we email your organization's owners as the
+        cap fills up.
       </p>
 
       <div className="space-y-2">

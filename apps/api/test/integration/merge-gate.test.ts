@@ -6,6 +6,7 @@ import type { TriggerDiffsResult, TriggerPrDiffsParams } from "../../src/diffs/d
 import { MergeGateService } from "../../src/github/merge-gate.service";
 import { apiTestSuite } from "../api-test";
 import type { APITestHarness } from "../harness";
+import { nextRepoId } from "../next-repo-id";
 import { seedAnalysisFindings } from "../seed-analysis-findings";
 
 interface CapturedEvent {
@@ -1113,7 +1114,7 @@ async function createRepoApp(
     options: { live?: boolean } = {},
 ): Promise<RepoAppFixture> {
     const fakeClient = harness.githubApp.defaultClient;
-    const repoId = Math.floor(Math.random() * 1_000_000) + 500_000;
+    const repoId = nextRepoId();
     const repoFullName = `org/${seed}-${repoId}`;
     fakeClient.addRepository({
         id: repoId,

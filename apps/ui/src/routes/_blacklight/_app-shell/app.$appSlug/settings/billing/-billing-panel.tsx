@@ -15,7 +15,6 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Separator,
 } from "@autonoma/blacklight";
 import { CreditCardIcon } from "@phosphor-icons/react/CreditCard";
 import { GiftIcon } from "@phosphor-icons/react/Gift";
@@ -302,14 +301,22 @@ export function BillingPanel() {
               >
                 Save auto top-up
               </Button>
-
-              <Separator />
-
-              <SpendCapFields />
             </PanelBody>
           </Panel>
         )}
       </div>
+
+      {/* Its own panel rather than a section of "Top-up controls": the cap applies to credit
+          purchases on BOTH rails, and the Vercel side has no top-up panel to host it - VercelOveragePanel
+          renders nothing at all unless the plan carries a pay-per-usage rate. */}
+      <Panel>
+        <PanelHeader>
+          <PanelTitle>Spend cap</PanelTitle>
+        </PanelHeader>
+        <PanelBody>
+          <SpendCapFields />
+        </PanelBody>
+      </Panel>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Panel>

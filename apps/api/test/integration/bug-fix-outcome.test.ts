@@ -6,6 +6,7 @@ import { BranchContributorService } from "../../src/github/branch-contributor.se
 import { BugFixOutcomeService } from "../../src/github/bug-fix-outcome.service";
 import { apiTestSuite } from "../api-test";
 import type { APITestHarness } from "../harness";
+import { nextRepoId } from "../next-repo-id";
 import { seedAnalysisIssue } from "../seed-analysis-findings";
 
 interface CapturedEvent {
@@ -367,7 +368,7 @@ interface RepoAppFixture {
 
 /** Create a fresh repo + linked application per test so rows never collide on the shared integration DB. */
 async function createRepoApp(harness: APITestHarness, seed: string): Promise<RepoAppFixture> {
-    const repoId = Math.floor(Math.random() * 1_000_000) + 500_000;
+    const repoId = nextRepoId();
     const repoFullName = `org/${seed}-${repoId}`;
     const app = await harness.services.applications.createApplication({
         name: `${seed}-${repoId}`,
