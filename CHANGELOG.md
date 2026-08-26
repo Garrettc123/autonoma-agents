@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.260826.2](https://github.com/Autonoma-AI/agent/compare/v1.260826.1...v1.260826.2) (2026-08-26)
+
+
+### Features
+
+* app-scoped test-result page with a verdict + media-rail layout ([#2775](https://github.com/Autonoma-AI/agent/issues/2775)) ([d361c4e](https://github.com/Autonoma-AI/agent/commit/d361c4ef455a442c92d070dcf92c94484263e156))
+* **evals:** classifier eval reports precision/recall by plane + category ([#2817](https://github.com/Autonoma-AI/agent/issues/2817)) ([20aa79a](https://github.com/Autonoma-AI/agent/commit/20aa79a3485f0a008cd943b60ed6ca040687611a))
+* **platform:** move KEDA server components to their own static node pool ([#2823](https://github.com/Autonoma-AI/agent/issues/2823)) ([2f373a6](https://github.com/Autonoma-AI/agent/commit/2f373a6877bfc7e810de2792c9da5015b85128b3))
+* remove subscription sales ([#2719](https://github.com/Autonoma-AI/agent/issues/2719)) ([ee00bd7](https://github.com/Autonoma-AI/agent/commit/ee00bd75fe6fc388ddc7d91e0f3488042664b9f4))
+* restyle open issues visual-first with owner/kind info tooltips ([#2793](https://github.com/Autonoma-AI/agent/issues/2793)) ([e08c0a9](https://github.com/Autonoma-AI/agent/commit/e08c0a953a91424d48a3a294998c0567c4f24801))
+* show open issues and flows side by side on the PR page ([#2827](https://github.com/Autonoma-AI/agent/issues/2827)) ([acc7643](https://github.com/Autonoma-AI/agent/commit/acc76431380a425d2d43509ef1354a3e86e9f47f))
+* **terraform:** import the 7 IAM roles behind the 9 self-managed EC2 instances ([#2814](https://github.com/Autonoma-AI/agent/issues/2814)) ([3b1a4ff](https://github.com/Autonoma-AI/agent/commit/3b1a4ff1c1b874ad540636114c9e7ad729aeaeb1))
+* **ui:** add collapsed "Tests run" section to the PR overview ([#2798](https://github.com/Autonoma-AI/agent/issues/2798)) ([ae1f08a](https://github.com/Autonoma-AI/agent/commit/ae1f08a78d270bdfadda55c6e516038f0e541ae4))
+* **ui:** visual-first flows list with coverage-status and flow tooltips ([#2792](https://github.com/Autonoma-AI/agent/issues/2792)) ([09d5e4e](https://github.com/Autonoma-AI/agent/commit/09d5e4eb78b640dd3f39f8226dfd44ec261604cc))
+
+
+### Bug Fixes
+
+* **analysis:** stop resurrecting events claimed by completed runs ([#2838](https://github.com/Autonoma-AI/agent/issues/2838)) ([089e8ef](https://github.com/Autonoma-AI/agent/commit/089e8efc38ec709e84b994379446e04757b4eaa3))
+
 ## [1.260826.1](https://github.com/Autonoma-AI/agent/compare/v1.260824.2...v1.260826.1) (2026-08-26)
 
 
