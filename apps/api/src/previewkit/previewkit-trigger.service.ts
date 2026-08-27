@@ -44,6 +44,10 @@ export interface PreviewkitRunRequest {
     source: AnalysisEventSource;
     /** The commit a run diffs against, when the trigger read one from GitHub. */
     baseSha?: string | undefined;
+    /** The branch head this push replaced, when the webhook reported one - stamped on the analysis event. */
+    beforeSha?: string | undefined;
+    /** The GitHub webhook delivery id, when the request came from a webhook - stamped on the analysis event. */
+    deliveryId?: string | undefined;
     /** The autonoma Branch this environment deploys (PR feature branch, or main branch for env 0). */
     branchId?: string | undefined;
 }
@@ -96,6 +100,8 @@ interface MainBranchPushTarget {
     repoFullName: string;
     branch: string;
     headSha: string;
+    /** The branch head this push replaced, when the payload carried one. */
+    beforeSha?: string;
     githubRepositoryId: number;
 }
 
@@ -105,8 +111,12 @@ export type PreviewkitGitHubReader = Pick<
     "getRepository" | "getBranchHead" | "getPullRequest" | "postComment" | "updateComment" | "deleteComment"
 >;
 
-/** The pull_request webhook fields the preview lifecycle needs. */
+/**
+ * The pull_request webhook fields the preview lifecycle needs. The top-level `before` - the branch head the
+ * push replaced - is present only on `synchronize` deliveries.
+ */
 const pullRequestWebhookSchema = z.object({
+    before: z.string().optional(),
     pull_request: z.object({
         number: z.number().int().positive(),
         draft: z.boolean().optional(),
@@ -123,6 +133,7 @@ const pullRequestWebhookSchema = z.object({
 /** The push webhook fields the main-branch environment update needs. */
 const pushWebhookSchema = z.object({
     ref: z.string(),
+    before: z.string().optional(),
     after: z.string(),
     deleted: z.boolean().optional(),
     repository: z.object({
@@ -185,6 +196,8 @@ export class PreviewkitTriggerService extends Service {
             source: request.source,
             headSha: request.headSha,
             baseSha: request.baseSha,
+            beforeSha: request.beforeSha,
+            deliveryId: request.deliveryId,
         };
 
         await this.enqueueEventIfWarranted(request, launch);
@@ -319,6 +332,7 @@ export class PreviewkitTriggerService extends Service {
         action: PreviewDeployAction,
         organizationId: string,
         payload: Record<string, unknown>,
+        deliveryId?: string,
     ): Promise<void> {
         const parsed = pullRequestWebhookSchema.safeParse(payload);
         if (!parsed.success) {
@@ -414,6 +428,8 @@ export class PreviewkitTriggerService extends Service {
                 source: "webhook",
                 headSha: pr.head.sha,
                 baseSha: pr.base.sha,
+                beforeSha: parsed.data.before,
+                deliveryId,
             });
             return;
         }
@@ -427,6 +443,8 @@ export class PreviewkitTriggerService extends Service {
                 headSha: pr.head.sha,
                 headRef: pr.head.ref,
                 baseSha: pr.base.sha,
+                beforeSha: parsed.data.before,
+                deliveryId,
                 branchId,
                 source: "webhook",
             },
@@ -712,7 +730,11 @@ export class PreviewkitTriggerService extends Service {
      * Environment 0 has no pull request, so `push` is the only signal that its branch moved - and it fires for
      * every branch of every connected repo, which is why most deliveries here resolve to nothing.
      */
-    async startMainBranchRunFromPushWebhook(organizationId: string, payload: Record<string, unknown>): Promise<void> {
+    async startMainBranchRunFromPushWebhook(
+        organizationId: string,
+        payload: Record<string, unknown>,
+        deliveryId?: string,
+    ): Promise<void> {
         // Correcting the deploy ref is bookkeeping rather than a build, so it runs even
         // with main-branch builds switched off - otherwise the kill switch quietly
         // leaves apps pinned to branches that no longer exist.
@@ -746,6 +768,8 @@ export class PreviewkitTriggerService extends Service {
                 headSha: target.headSha,
                 headRef: target.branch,
                 baseSha: target.headSha,
+                beforeSha: target.beforeSha,
+                deliveryId,
                 branchId,
                 source: "webhook",
             },
@@ -846,7 +870,7 @@ export class PreviewkitTriggerService extends Service {
             return undefined;
         }
 
-        const { ref, after, deleted, repository } = parsed.data;
+        const { ref, before, after, deleted, repository } = parsed.data;
         if (!ref.startsWith("refs/heads/")) return undefined;
         if (deleted === true || ZERO_SHA.test(after)) return undefined;
 
@@ -870,10 +894,13 @@ export class PreviewkitTriggerService extends Service {
             return undefined;
         }
 
+        // A branch-creation push reports a zero `before`: there was no replaced head, so record none.
+        const beforeSha = before != null && !ZERO_SHA.test(before) ? before : undefined;
         return {
             repoFullName: repository.full_name,
             branch,
             headSha: after,
+            beforeSha,
             githubRepositoryId: repository.id,
         };
     }

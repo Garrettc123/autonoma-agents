@@ -138,8 +138,9 @@ function gateTestService(harness: APITestHarness): PreviewkitTriggerService {
     );
 }
 
-function pullRequestPayload(prNumber: number, draft = false): Record<string, unknown> {
+function pullRequestPayload(prNumber: number, draft = false, before?: string): Record<string, unknown> {
     return {
+        before,
         pull_request: {
             number: prNumber,
             draft,
@@ -154,9 +155,10 @@ function pullRequestPayload(prNumber: number, draft = false): Record<string, unk
     };
 }
 
-function pushPayload(branch: string, sha: string, deleted = false): Record<string, unknown> {
+function pushPayload(branch: string, sha: string, deleted = false, before?: string): Record<string, unknown> {
     return {
         ref: `refs/heads/${branch}`,
+        before,
         after: sha,
         deleted,
         repository: {
@@ -247,7 +249,12 @@ apiTestSuite({
         }) => {
             harness.triggerWorkflow.mockClear();
 
-            await service.startRunFromPullRequestWebhook("synchronize", harness.organizationId, pullRequestPayload(7));
+            await service.startRunFromPullRequestWebhook(
+                "synchronize",
+                harness.organizationId,
+                pullRequestPayload(7, false, "old-head-7"),
+                "delivery-guid-7",
+            );
 
             // A snapshot-less branch is created before any diff runs.
             const branch = await harness.db.branch.findFirst({
@@ -271,7 +278,12 @@ apiTestSuite({
             expect(events[0]!.type).toBe("commits_pushed");
             expect(events[0]!.source).toBe("webhook");
             expect(events[0]!.claimedBySnapshotId).toBeNull();
-            expect(events[0]!.payload).toMatchObject({ headSha: "head-7", baseSha: "main-sha-2" });
+            expect(events[0]!.payload).toMatchObject({
+                headSha: "head-7",
+                baseSha: "main-sha-2",
+                beforeSha: "old-head-7",
+                deliveryId: "delivery-guid-7",
+            });
         });
 
         // A re-delivered same-head webhook must not enqueue: its own event would defeat the already-analyzed skip
@@ -901,18 +913,48 @@ apiTestSuite({
             await setMainBranchEnvironment(harness, "main", "ready");
             harness.triggerWorkflow.mockClear();
 
-            await service.startMainBranchRunFromPushWebhook(harness.organizationId, pushPayload("main", "push-sha-1"));
-
             const appRow = await harness.db.application.findFirstOrThrow({
                 where: { organizationId: harness.organizationId, githubRepositoryId: REPO_ID },
                 select: { mainBranchId: true },
             });
+            // An analyzed state at the previous head: without one, the self-base fallback reads the push as
+            // already analyzed and deliberately enqueues nothing.
+            const analyzed = await harness.db.branchSnapshot.create({
+                data: {
+                    branchId: appRow.mainBranchId!,
+                    status: "active",
+                    source: TriggerSource.WEBHOOK,
+                    headSha: "main-sha-1",
+                },
+            });
+            await harness.db.branch.update({
+                where: { id: appRow.mainBranchId! },
+                data: { activeSnapshotId: analyzed.id },
+            });
+
+            await service.startMainBranchRunFromPushWebhook(
+                harness.organizationId,
+                pushPayload("main", "push-sha-1", false, "main-sha-1"),
+                "delivery-guid-main",
+            );
             expect(harness.triggerWorkflow).not.toHaveBeenCalled();
             expect(harness.startAnalysisRun).toHaveBeenCalledWith({
                 branchId: appRow.mainBranchId,
                 headSha: "push-sha-1",
                 baseSha: "push-sha-1",
             });
+
+            // The event records the push's true range start, never the self-referential base the run falls back on.
+            const events = await harness.db.analysisEvent.findMany({
+                where: { branchId: appRow.mainBranchId ?? undefined },
+            });
+            expect(events).toHaveLength(1);
+            expect(events[0]!.payload).toMatchObject({
+                headSha: "push-sha-1",
+                beforeSha: "main-sha-1",
+                deliveryId: "delivery-guid-main",
+            });
+            expect(events[0]!.payload).not.toHaveProperty("baseSha");
         });
 
         test("deleting the deploy branch returns the base preview to the app's trunk", async ({

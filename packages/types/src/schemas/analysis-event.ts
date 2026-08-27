@@ -23,10 +23,16 @@ export const analysisEventSourceSchema = z.enum([
 ]);
 export type AnalysisEventSource = z.infer<typeof analysisEventSourceSchema>;
 
-/** The payload a `commits_pushed` event carries: the head being analyzed, its base, and the webhook delivery id for forensics. */
+/**
+ * The payload a `commits_pushed` event carries. `headSha` is the head being analyzed; `baseSha` is the PR's
+ * target-branch tip when the trigger read one (a drifting tip, not a fork point). `beforeSha` is the branch head
+ * the push replaced - the one fact git cannot reconstruct after a force-push, so it is captured at enqueue when
+ * the webhook carries it. `deliveryId` is the GitHub webhook delivery id, for forensics.
+ */
 export const commitsPushedPayloadSchema = z.object({
     headSha: z.string(),
     baseSha: z.string().optional(),
+    beforeSha: z.string().optional(),
     deliveryId: z.string().optional(),
 });
 export type CommitsPushedPayload = z.infer<typeof commitsPushedPayloadSchema>;

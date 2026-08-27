@@ -246,14 +246,20 @@ githubHttpRouter.post("/webhook", async (ctx) => {
     // GitHub's 10s webhook delivery timeout and surface as failed deliveries.
     // The dispatched work is durable (Temporal), so a thrown error only needs
     // logging: GitHub gets 200 either way, and redelivery would not help.
-    void dispatchWebhookEvent(eventType, installationId, organizationId, githubService, prCacheService, payload).catch(
-        (error) => {
-            // undici's `fetch failed` puts the real reason (DNS / ECONNREFUSED / etc) in .cause.
-            const cause = error instanceof Error ? (error as { cause?: unknown }).cause : undefined;
-            const causeMessage = cause instanceof Error ? cause.message : cause != null ? String(cause) : undefined;
-            logger.fatal("Error processing GitHub webhook", error, { event, deliveryId, cause: causeMessage });
-        },
-    );
+    void dispatchWebhookEvent(
+        eventType,
+        installationId,
+        organizationId,
+        githubService,
+        prCacheService,
+        payload,
+        deliveryId,
+    ).catch((error) => {
+        // undici's `fetch failed` puts the real reason (DNS / ECONNREFUSED / etc) in .cause.
+        const cause = error instanceof Error ? (error as { cause?: unknown }).cause : undefined;
+        const causeMessage = cause instanceof Error ? cause.message : cause != null ? String(cause) : undefined;
+        logger.fatal("Error processing GitHub webhook", error, { event, deliveryId, cause: causeMessage });
+    });
 
     return ctx.json({ ok: true });
 });
@@ -265,6 +271,7 @@ async function dispatchWebhookEvent(
     githubService: GitHubInstallationService,
     prCacheService: PullRequestCacheService,
     payload: Record<string, unknown>,
+    deliveryId: string,
 ): Promise<void> {
     switch (type) {
         case "installation_created":
@@ -280,19 +287,19 @@ async function dispatchWebhookEvent(
             return;
         case "pull_request_opened":
             await prCacheService.updateFromWebhook(organizationId, payload);
-            await startPullRequestDeploy("opened", organizationId, payload);
+            await startPullRequestDeploy("opened", organizationId, payload, deliveryId);
             await mergeGateService.postPendingFromWebhook(organizationId, payload);
             await branchContributorService.refreshFromWebhook(organizationId, payload);
             return;
         case "pull_request_synchronize":
             await prCacheService.updateFromWebhook(organizationId, payload);
-            await startPullRequestDeploy("synchronize", organizationId, payload);
+            await startPullRequestDeploy("synchronize", organizationId, payload, deliveryId);
             await mergeGateService.postPendingFromWebhook(organizationId, payload);
             await branchContributorService.refreshFromWebhook(organizationId, payload);
             return;
         case "pull_request_reopened":
             await prCacheService.updateFromWebhook(organizationId, payload);
-            await startPullRequestDeploy("reopened", organizationId, payload);
+            await startPullRequestDeploy("reopened", organizationId, payload, deliveryId);
             await mergeGateService.postPendingFromWebhook(organizationId, payload);
             await branchContributorService.refreshFromWebhook(organizationId, payload);
             return;
@@ -305,7 +312,7 @@ async function dispatchWebhookEvent(
             // so the run would find no preview. It fires later, once the preview
             // is live, from the shared PR-diffs trigger (see `autoRunsOnReady`).
             await prCacheService.updateFromWebhook(organizationId, payload);
-            await startPullRequestDeploy("ready_for_review", organizationId, payload);
+            await startPullRequestDeploy("ready_for_review", organizationId, payload, deliveryId);
             await mergeGateService.postPendingFromWebhook(organizationId, payload);
             await branchContributorService.refreshFromWebhook(organizationId, payload);
             return;
@@ -327,7 +334,7 @@ async function dispatchWebhookEvent(
             // Independent of the deploy: one corrects bookkeeping, the other builds.
             await Promise.all([
                 githubService.reconcileTrunkFromPushWebhook(organizationId, payload),
-                startMainBranchPushDeploy(organizationId, payload),
+                startMainBranchPushDeploy(organizationId, payload, deliveryId),
             ]);
             return;
         default:
@@ -348,9 +355,10 @@ async function startPullRequestDeploy(
     action: PreviewDeployAction,
     organizationId: string,
     payload: Record<string, unknown>,
+    deliveryId: string,
 ): Promise<void> {
     try {
-        await previewkitTriggerService.startRunFromPullRequestWebhook(action, organizationId, payload);
+        await previewkitTriggerService.startRunFromPullRequestWebhook(action, organizationId, payload, deliveryId);
     } catch (error) {
         if (!(error instanceof InsufficientPreviewCreditsError)) throw error;
         logger.info("Skipped preview deploy: organization is out of credits", { action, organizationId });
@@ -366,9 +374,13 @@ async function startPullRequestTeardown(organizationId: string, payload: Record<
  * Deploy path for push: redeploys the main-branch preview environment at the
  * pushed head, the same way `synchronize` updates a PR environment.
  */
-async function startMainBranchPushDeploy(organizationId: string, payload: Record<string, unknown>): Promise<void> {
+async function startMainBranchPushDeploy(
+    organizationId: string,
+    payload: Record<string, unknown>,
+    deliveryId: string,
+): Promise<void> {
     try {
-        await previewkitTriggerService.startMainBranchRunFromPushWebhook(organizationId, payload);
+        await previewkitTriggerService.startMainBranchRunFromPushWebhook(organizationId, payload, deliveryId);
     } catch (error) {
         if (!(error instanceof InsufficientPreviewCreditsError)) throw error;
         logger.info("Skipped main-branch push deploy: organization is out of credits", { organizationId });

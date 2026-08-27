@@ -9,6 +9,10 @@ export interface AnalysisRunLaunch {
     source: AnalysisEventSource;
     headSha: string;
     baseSha?: string;
+    /** The branch head this push replaced, when the webhook reported one. */
+    beforeSha?: string;
+    /** The GitHub webhook delivery id, when the launch came from a webhook. */
+    deliveryId?: string;
 }
 
 interface AnalysisRunStarter<T> {
@@ -27,11 +31,23 @@ export async function enqueueAnalysisEvent(events: AnalysisEventStore, launch: A
         branch: { branchId: launch.branchId },
         extra: { source: launch.source, headSha: launch.headSha },
     });
+    // A base equal to the head carries no range information - main-branch launches pass their own head as a
+    // deliberate already-analyzed fallback for the run - so the event records nothing rather than a
+    // self-referential base.
+    const baseSha = launch.baseSha === launch.headSha ? undefined : launch.baseSha;
     await events.enqueue({
         branchId: launch.branchId,
         organizationId: launch.organizationId,
         source: launch.source,
-        event: { type: "commits_pushed", payload: { headSha: launch.headSha, baseSha: launch.baseSha } },
+        event: {
+            type: "commits_pushed",
+            payload: {
+                headSha: launch.headSha,
+                baseSha,
+                beforeSha: launch.beforeSha,
+                deliveryId: launch.deliveryId,
+            },
+        },
     });
 }
 
