@@ -7,6 +7,7 @@ import {
 import { RouteErrorState } from "components/route-error-state";
 import { Suspense } from "react";
 import { OrgScopeNote } from "../-org-scope-note";
+import { SettingsScroll } from "../-settings-scroll";
 
 /**
  * Reachable for every organization, deliberately.
@@ -24,12 +25,12 @@ export const Route = createFileRoute("/_blacklight/_app-shell/app/$appSlug/setti
 
 function UsersPage() {
   return (
-    <div className="flex flex-col gap-4">
+    <SettingsScroll className="flex flex-col gap-4">
       <OrgScopeNote>Members can see and change every application here.</OrgScopeNote>
       <MembersPanel />
       <Suspense fallback={<YourOrganizationsPanelSkeleton />}>
         <YourOrganizationsPanel />
       </Suspense>
-    </div>
+    </SettingsScroll>
   );
 }

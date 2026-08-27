@@ -48,15 +48,15 @@ export function ServiceView({ service }: { service: ServiceDraft }) {
   );
 
   return (
-    <Tabs value={tab} onValueChange={handleTabChange} className="gap-0">
-      <header className="flex items-center border-b border-border-dim px-4 py-3 lg:px-6">
+    <Tabs value={tab} onValueChange={handleTabChange} className="gap-0 lg:min-h-0 lg:flex-1 lg:overflow-hidden">
+      <header className="flex shrink-0 items-center border-b border-border-dim px-4 py-3 lg:px-6">
         <TabsList variant="line">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
       </header>
 
-      <TabsContent value="overview" className="flex max-w-2xl flex-col gap-6 p-4 lg:p-6">
+      <TabsContent value="overview" className="flex max-w-2xl flex-col gap-6 p-4 lg:min-h-0 lg:overflow-y-auto lg:p-6">
         <Alert variant="info">
           <AlertTitle>Shared service</AlertTitle>
           <AlertDescription>
@@ -129,7 +129,7 @@ export function ServiceView({ service }: { service: ServiceDraft }) {
         </div>
       </TabsContent>
 
-      <TabsContent value="settings" className="max-w-2xl p-4 lg:p-6">
+      <TabsContent value="settings" className="max-w-2xl p-4 lg:min-h-0 lg:overflow-y-auto lg:p-6">
         <ServiceCard
           service={service}
           onUpdate={(patch) =>

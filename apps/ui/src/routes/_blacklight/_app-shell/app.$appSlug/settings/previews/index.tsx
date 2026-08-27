@@ -31,11 +31,11 @@ function PreviewConfigPage() {
   const resolved = resolveSelection(selection, draft);
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6 lg:min-h-0 lg:flex-1 lg:overflow-hidden">
       <ConfigureWithAgentPanel />
-      <div className="flex flex-col gap-6 lg:flex-row lg:items-stretch">
+      <div className="flex flex-col gap-6 lg:min-h-0 lg:flex-1 lg:flex-row lg:items-stretch lg:overflow-hidden">
         <PreviewRail selection={resolved} onSelect={setSelection} onAddFromAnotherRepo={() => setAddAppOpen(true)} />
-        <main className="min-w-0 flex-1 lg:border-l lg:border-border-dim">
+        <main className="flex min-w-0 flex-1 flex-col lg:min-h-0 lg:overflow-hidden lg:border-l lg:border-border-dim">
           {/* Pane-level boundary: a pane that suspends (Repos fetches the GitHub
               repo list on first mount) must not blank the rail with it. */}
           <Suspense fallback={<SelectionPaneSkeleton />}>
@@ -68,7 +68,7 @@ function PreviewConfigPage() {
 function ConfigureWithAgentPanel() {
   const [open, setOpen] = useState(false);
   return (
-    <div className="flex flex-col gap-4 border border-primary/40 bg-primary/[0.06] p-5 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-4 border border-primary/40 bg-primary/[0.06] p-5 sm:flex-row sm:items-center sm:justify-between lg:shrink-0">
       <div className="flex flex-col gap-1">
         <span className="font-sans text-base text-text-primary">Configure previews with a coding agent</span>
         <span className="max-w-xl text-2xs text-text-secondary">

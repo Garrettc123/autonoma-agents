@@ -1,8 +1,8 @@
-import { cn } from "@autonoma/blacklight";
+import { cn, ScrollArea } from "@autonoma/blacklight";
 import { LockIcon } from "@phosphor-icons/react/Lock";
 import { PlugsConnectedIcon } from "@phosphor-icons/react/PlugsConnected";
 import { TrashIcon } from "@phosphor-icons/react/Trash";
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import type { VariableView } from "./variable-model";
 
 interface VariableListProps {
@@ -12,47 +12,54 @@ interface VariableListProps {
   searching: boolean;
   onSelect: (rowId: number) => void;
   onDelete: (rowId: number) => void;
+  /** The editor to expand inline under the selected row. */
+  renderEditor?: (variable: VariableView) => ReactNode;
 }
 
 /**
- * The scannable key list on the left of the variable manager, split into
- * Connections (topology-wired, resolved at deploy) and Secrets (stored write-only).
+ * The scannable key list, split into Connections (topology-wired, resolved at
+ * deploy) and Secrets (stored write-only). Selecting a row expands its editor
+ * inline directly beneath it, so editing happens in place rather than in a panel.
  */
-export function VariableList({ visible, selectedRowId, searching, onSelect, onDelete }: VariableListProps) {
+export function VariableList({
+  visible,
+  selectedRowId,
+  searching,
+  onSelect,
+  onDelete,
+  renderEditor,
+}: VariableListProps) {
   const connections = visible.filter((variable) => variable.isConnection);
   const secrets = visible.filter((variable) => !variable.isConnection);
 
+  const rows = (group: VariableView[]) =>
+    group.map((variable) => (
+      <Fragment key={variable.row.id}>
+        <VariableRow
+          variable={variable}
+          selected={variable.row.id === selectedRowId}
+          onSelect={onSelect}
+          onDelete={onDelete}
+        />
+        {variable.row.id === selectedRowId ? renderEditor?.(variable) : undefined}
+      </Fragment>
+    ));
+
   return (
-    <div className="flex min-w-0 flex-col border-b border-border-dim sm:border-b-0 sm:border-r">
+    <div className="flex min-w-0 flex-col border border-border-dim lg:min-h-0 lg:flex-1 lg:overflow-hidden">
       {visible.length === 0 ? (
         <p className="px-3.5 py-4 font-mono text-2xs text-text-secondary">
           {searching ? "No variables match." : "No variables yet."}
         </p>
       ) : (
-        <div className="overflow-y-auto">
+        <ScrollArea className="lg:min-h-0 lg:flex-1">
           <Section title="Connections" count={connections.length}>
-            {connections.map((variable) => (
-              <VariableRow
-                key={variable.row.id}
-                variable={variable}
-                selected={variable.row.id === selectedRowId}
-                onSelect={onSelect}
-                onDelete={onDelete}
-              />
-            ))}
+            {rows(connections)}
           </Section>
           <Section title="Secrets" count={secrets.length}>
-            {secrets.map((variable) => (
-              <VariableRow
-                key={variable.row.id}
-                variable={variable}
-                selected={variable.row.id === selectedRowId}
-                onSelect={onSelect}
-                onDelete={onDelete}
-              />
-            ))}
+            {rows(secrets)}
           </Section>
-        </div>
+        </ScrollArea>
       )}
     </div>
   );

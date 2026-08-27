@@ -20,8 +20,12 @@ function PreviewConfigLayout() {
   return (
     <Suspense fallback={<PreviewConfigSkeleton />}>
       <PreviewDraftProvider appId={app.id}>
-        <Outlet />
-        <PreviewSaveBar />
+        {/* Fixed-height frame at `lg`: the workspace fills it and each pane scrolls on its own, while the save
+            bar stays pinned as a footer. Below `lg` it is content-height and the page scrolls. */}
+        <div className="flex min-w-0 flex-col lg:min-h-0 lg:flex-1 lg:overflow-hidden">
+          <Outlet />
+          <PreviewSaveBar />
+        </div>
       </PreviewDraftProvider>
     </Suspense>
   );

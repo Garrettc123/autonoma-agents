@@ -11,6 +11,7 @@ import { useDisconnectGithub, useGithubConfig, useGithubInstallation } from "lib
 import { Suspense, useState } from "react";
 import { z } from "zod";
 import { OrgScopeNote } from "../-org-scope-note";
+import { SettingsScroll } from "../-settings-scroll";
 
 export const Route = createFileRoute("/_blacklight/_app-shell/app/$appSlug/settings/github/")({
   // The install callback returns here with these when an install could not be completed. Without
@@ -38,7 +39,7 @@ function GitHubSettingsPage() {
   const { error, account, attempted, manageUrl } = Route.useSearch();
 
   return (
-    <div className="flex flex-col gap-4">
+    <SettingsScroll className="flex flex-col gap-4">
       <OrgScopeNote>The GitHub App is installed once.</OrgScopeNote>
       {error != null && (
         <InstallFailureBanner error={error} account={account} attempted={attempted} manageUrl={manageUrl} />
@@ -46,7 +47,7 @@ function GitHubSettingsPage() {
       <Suspense fallback={<GitHubSettingsSkeleton />}>
         <GitHubSettingsContent />
       </Suspense>
-    </div>
+    </SettingsScroll>
   );
 }
 

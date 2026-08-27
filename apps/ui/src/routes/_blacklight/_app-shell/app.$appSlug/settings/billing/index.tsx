@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { RouteErrorState } from "components/route-error-state";
 import { Suspense } from "react";
 import { OrgScopeNote } from "../-org-scope-note";
+import { SettingsScroll } from "../-settings-scroll";
 import { BillingPanel } from "./-billing-panel";
 import { BillingSkeleton } from "./-billing-skeleton";
 
@@ -16,11 +17,11 @@ export const Route = createFileRoute("/_blacklight/_app-shell/app/$appSlug/setti
  */
 function BillingPage() {
   return (
-    <div className="flex flex-col gap-4">
+    <SettingsScroll className="flex flex-col gap-4">
       <OrgScopeNote>Credits and billing are shared.</OrgScopeNote>
       <Suspense fallback={<BillingSkeleton />}>
         <BillingPanel />
       </Suspense>
-    </div>
+    </SettingsScroll>
   );
 }

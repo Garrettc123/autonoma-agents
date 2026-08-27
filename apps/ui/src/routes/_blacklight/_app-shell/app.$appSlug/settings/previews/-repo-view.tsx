@@ -28,8 +28,8 @@ export function RepoView({ repo }: { repo: RepoDraft }) {
   }
 
   return (
-    <div>
-      <header className="flex flex-wrap items-center gap-3 border-b border-border-dim px-4 py-3 lg:px-6">
+    <div className="flex min-w-0 flex-col lg:min-h-0 lg:flex-1 lg:overflow-hidden">
+      <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border-dim px-4 py-3 lg:px-6">
         <GitBranchIcon size={16} className="text-primary-ink" />
         <span className="truncate font-mono text-sm text-text-primary" title={repo.repo}>
           {repo.repo}
@@ -62,7 +62,7 @@ export function RepoView({ repo }: { repo: RepoDraft }) {
         )}
       </header>
 
-      <div className="flex max-w-2xl flex-col gap-6 p-4 lg:p-6">
+      <div className="flex max-w-2xl flex-col gap-6 p-4 lg:min-h-0 lg:overflow-y-auto lg:p-6">
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <Label htmlFor="pk-repo-fallback">Fallback branch</Label>

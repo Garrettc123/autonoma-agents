@@ -3,7 +3,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { appShellHandlers, baseApplication, branchPage } from "lib/storybook/base-fixtures";
 import { PageStory } from "lib/storybook/page-story";
 import type { TrpcFixtures } from "lib/storybook/trpc-handler";
-import { userEvent, within } from "storybook/test";
+import { screen, userEvent, within } from "storybook/test";
 
 const FIXTURE_EPOCH = new Date("2026-01-01T00:00:00.000Z");
 
@@ -161,8 +161,9 @@ export const NewVariableDefaults: Story = {
   args: { path: `/app/${baseApplication.slug}/settings/previews` },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    // Add variable opens the editor slide-over, which portals outside the story root - reach it via `screen`.
     await userEvent.click(await canvas.findByRole("button", { name: /Add variable/ }));
-    await userEvent.type(canvas.getByLabelText("Key"), "SENTRY_DSN");
+    await userEvent.type(await screen.findByLabelText("Key"), "SENTRY_DSN");
   },
 };
 
@@ -178,9 +179,10 @@ export const RetiredBuildPreset: Story = {
   args: { path: `/app/${baseApplication.slug}/settings/previews` },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    // The row is in the list (story root); the editor it opens portals out, so its controls come from `screen`.
     await userEvent.click(await canvas.findByText("STRIPE_SECRET_KEY"));
-    await userEvent.click(await canvas.findByRole("button", { name: "Replace value" }));
-    await userEvent.type(canvas.getByLabelText("Value"), "sk_live_rotated");
+    await userEvent.click(await screen.findByRole("button", { name: "Replace value" }));
+    await userEvent.type(await screen.findByLabelText("Value"), "sk_live_rotated");
   },
   parameters: {
     pageStory: true,

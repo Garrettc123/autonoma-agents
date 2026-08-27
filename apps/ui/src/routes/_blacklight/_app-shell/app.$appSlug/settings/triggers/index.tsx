@@ -16,6 +16,7 @@ import { useTriggerConfig, useUpdateTriggerConfig } from "lib/query/github.queri
 import { trpc } from "lib/trpc";
 import { Suspense, useState } from "react";
 import { isSettingsEntryVisible, toSettingsVisibility } from "../-settings-rail";
+import { SettingsScroll } from "../-settings-scroll";
 import { useCurrentApplication } from "../../../-use-current-application";
 
 export const Route = createFileRoute("/_blacklight/_app-shell/app/$appSlug/settings/triggers/")({
@@ -48,11 +49,11 @@ const START_ANALYSIS_COMMAND = "/start analysis";
 
 function AnalysisTriggersPage() {
   return (
-    <div>
+    <SettingsScroll>
       <Suspense fallback={<AnalysisTriggersSkeleton />}>
         <AnalysisTriggersContent />
       </Suspense>
-    </div>
+    </SettingsScroll>
   );
 }
 

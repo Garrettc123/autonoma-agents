@@ -14,7 +14,7 @@ import {
 } from "../../../../../onboarding/-components/previewkit/topology-draft";
 import { InjectedBlock } from "./injected-block";
 import { PasteEnvDialog } from "./paste-env-dialog";
-import { VariableDrawer } from "./variable-drawer";
+import { VariableEditor } from "./variable-editor";
 import { VariableList } from "./variable-list";
 import {
   applyVariable,
@@ -38,22 +38,21 @@ interface EnvVarManagerProps {
 }
 
 /**
- * Unified per-app variable manager: a list split into Connections + Secrets with
- * a focused editor drawer beside it. Every variable injects at runtime; build
- * time is an opt-in flag; connections wire to a service/app.
+ * Unified per-app variable manager: a list split into Connections + Secrets, with
+ * a focused editor that expands inline beneath the selected row. Every variable
+ * injects at runtime; build time is an opt-in flag; connections wire to a service/app.
  */
 export function EnvVarManager({ app, services, deployableApps, issues, updateApp }: EnvVarManagerProps) {
   const targets = bindTargets(services, deployableApps);
   const variables = variableViews(app, targets);
   const injected = injectedVars(app.primary);
 
-  const [selected, setSelected] = useState<number | undefined>(undefined);
+  // The editor expands inline under the selected row; nothing is expanded until the user picks a row or adds
+  // one, so a collapsed list is the resting state.
+  const [editingId, setEditingId] = useState<number | undefined>(undefined);
   const [search, setSearch] = useState("");
 
-  // A stale or empty selection falls back to the first variable, so the drawer
-  // always shows something once variables exist (including the async-merged
-  // stored-secret rows).
-  const selectedView = variables.find((v) => v.row.id === selected) ?? variables[0];
+  const editingView = variables.find((v) => v.row.id === editingId);
 
   const query = search.trim().toLowerCase();
   const visible = query === "" ? variables : variables.filter((v) => v.key.toLowerCase().includes(query));
@@ -65,23 +64,33 @@ export function EnvVarManager({ app, services, deployableApps, issues, updateApp
     view != null && view.key === "" && view.row.value === "";
 
   function handleChange(form: VariableForm) {
-    if (selectedView == null) return;
-    updateApp(app.id, applyVariable(app, selectedView.row.id, form).patch);
+    if (editingView == null) return;
+    updateApp(app.id, applyVariable(app, editingView.row.id, form).patch);
+  }
+
+  // Drop a still-blank row before leaving it, so an abandoned "Add variable" leaves nothing behind.
+  function discardBlankEditing() {
+    if (isBlank(editingView) && editingView != null) {
+      updateApp(app.id, removeVariable(app, editingView.row.id));
+    }
   }
 
   function selectVariable(rowId: number) {
-    if (isBlank(selectedView) && selectedView != null && selectedView.row.id !== rowId) {
-      updateApp(app.id, removeVariable(app, selectedView.row.id));
+    if (editingId === rowId) {
+      discardBlankEditing();
+      setEditingId(undefined);
+      return;
     }
-    setSelected(rowId);
+    discardBlankEditing();
+    setEditingId(rowId);
   }
 
   function addVariable() {
     const base =
-      isBlank(selectedView) && selectedView != null ? app.env.filter((row) => row.id !== selectedView.row.id) : app.env;
+      isBlank(editingView) && editingView != null ? app.env.filter((row) => row.id !== editingView.row.id) : app.env;
     const blank = envRow("", "", true, "new", NEW_VARIABLE_BUILD_TIME);
     updateApp(app.id, { env: [...base, blank] });
-    setSelected(blank.id);
+    setEditingId(blank.id);
   }
 
   function importDotenv(entries: Array<{ key: string; value: string }>) {
@@ -91,17 +100,17 @@ export function EnvVarManager({ app, services, deployableApps, issues, updateApp
 
   function deleteVariable(rowId: number) {
     updateApp(app.id, removeVariable(app, rowId));
-    if (selectedView?.row.id === rowId) setSelected(undefined);
+    if (editingId === rowId) setEditingId(undefined);
   }
 
   function handleDelete() {
-    if (selectedView == null) return;
-    deleteVariable(selectedView.row.id);
+    if (editingView == null) return;
+    deleteVariable(editingView.row.id);
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-3">
+    <div className="flex flex-col gap-3 lg:min-h-0 lg:flex-1">
+      <div className="flex flex-wrap items-center gap-3 lg:shrink-0">
         <p className="flex items-center gap-2 font-mono text-2xs font-bold uppercase tracking-wider text-text-secondary">
           <span className="size-1.5 bg-primary" />
           Environment variables
@@ -143,34 +152,32 @@ export function EnvVarManager({ app, services, deployableApps, issues, updateApp
       <InjectedBlock vars={injected} />
 
       {variables.length === 0 ? (
-        <div className="flex items-center justify-center border border-border-dim px-6 py-14 text-center">
+        <div className="flex items-center justify-center border border-border-dim px-6 py-14 text-center lg:min-h-0 lg:flex-1">
           <p className="font-mono text-2xs uppercase tracking-widest text-text-secondary">No variables yet</p>
         </div>
       ) : (
-        <div className="grid border border-border-dim sm:grid-cols-[18rem_minmax(0,1fr)] sm:items-start">
-          <VariableList
-            visible={visible}
-            selectedRowId={selectedView?.row.id}
-            searching={query !== ""}
-            onSelect={selectVariable}
-            onDelete={deleteVariable}
-          />
-          <div className="sm:sticky sm:top-4 sm:max-h-[calc(100vh-2rem)] sm:self-start sm:overflow-y-auto">
-            {selectedView != null ? (
-              <VariableDrawer
-                key={selectedView.row.id}
+        <VariableList
+          visible={visible}
+          selectedRowId={editingId}
+          searching={query !== ""}
+          onSelect={selectVariable}
+          onDelete={deleteVariable}
+          renderEditor={(variable) => (
+            <div className="border-l-2 border-l-primary bg-surface-base">
+              <VariableEditor
+                key={variable.row.id}
                 app={app}
-                view={selectedView}
+                view={variable}
                 targets={targets}
                 onChange={handleChange}
                 onDelete={handleDelete}
               />
-            ) : undefined}
-          </div>
-        </div>
+            </div>
+          )}
+        />
       )}
 
-      {envIssue != null ? <p className="text-2xs text-status-critical">{envIssue}</p> : undefined}
+      {envIssue != null ? <p className="text-2xs text-status-critical lg:shrink-0">{envIssue}</p> : undefined}
     </div>
   );
 }

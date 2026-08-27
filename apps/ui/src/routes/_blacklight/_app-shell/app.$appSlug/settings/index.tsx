@@ -43,6 +43,7 @@ import {
 } from "lib/query/github.queries";
 import { Suspense, useEffect, useState } from "react";
 import { useCurrentApplication } from "../../-use-current-application";
+import { SettingsScroll } from "./-settings-scroll";
 
 export const Route = createFileRoute("/_blacklight/_app-shell/app/$appSlug/settings/")({
   component: SettingsPage,
@@ -135,7 +136,7 @@ function SettingsPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <SettingsScroll className="space-y-4">
       <WebDeploymentPanel />
       <LinkedRepositoryPanel />
 
@@ -278,7 +279,7 @@ function SettingsPage() {
       </Alert>
 
       <DangerZonePanel />
-    </div>
+    </SettingsScroll>
   );
 }
 

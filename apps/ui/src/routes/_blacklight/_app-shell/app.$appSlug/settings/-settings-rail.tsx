@@ -126,7 +126,7 @@ export function SettingsRail({ appSlug }: { appSlug: string }) {
   const visibility = toSettingsVisibility(activeOrg);
 
   return (
-    <nav aria-label="Settings sections" className="flex shrink-0 flex-col gap-5 lg:w-56">
+    <nav aria-label="Settings sections" className="flex shrink-0 flex-col gap-5 lg:w-56 lg:min-h-0 lg:overflow-y-auto">
       <RailGroup label="This application">
         {APPLICATION_ENTRIES.filter((entry) => isSettingsEntryVisible(entry.id, visibility)).map((entry) => (
           <RailItem key={entry.id} entry={entry} appSlug={appSlug} />

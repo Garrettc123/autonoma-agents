@@ -74,7 +74,7 @@ function referencedTokens(value: string, targets: BindTarget[]): ReferenceStatus
   return [...seen.values()];
 }
 
-interface VariableDrawerProps {
+interface VariableEditorProps {
   app: AppDraft;
   /** The variable being edited (a real draft row - a freshly added one starts blank). */
   view: VariableView;
@@ -89,7 +89,7 @@ interface VariableDrawerProps {
  * every other editor on this page) - there is no per-variable save; the page's
  * "Save config" bar persists the whole draft as one config revision.
  */
-export function VariableDrawer({ app, view, targets, onChange, onDelete }: VariableDrawerProps) {
+export function VariableEditor({ app, view, targets, onChange, onDelete }: VariableEditorProps) {
   const [revealed, setRevealed] = useState(false);
   // Stored secret being replaced: the user opted to type a new value over the
   // write-only stored one.
@@ -128,7 +128,7 @@ export function VariableDrawer({ app, view, targets, onChange, onDelete }: Varia
   }
 
   return (
-    <div className="flex min-w-0 flex-col gap-5 p-5">
+    <div className="flex min-w-0 flex-col gap-5 p-5 font-sans">
       <div className="flex items-center justify-between gap-2">
         <p className="flex items-center gap-2 font-mono text-2xs font-bold uppercase tracking-wider text-text-primary">
           <span className="size-1.5 bg-primary" />

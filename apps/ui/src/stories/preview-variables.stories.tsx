@@ -1,6 +1,7 @@
 import { authoringPreviewConfigSchema, previewConfigSchema, zodIssuesToConfigIssues } from "@autonoma/types";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
+import { userEvent, within } from "storybook/test";
 import { EnvVarManager } from "../routes/_blacklight/_app-shell/app.$appSlug/settings/previews/-variables/env-var-manager";
 import {
   documentFromDraft,
@@ -52,13 +53,21 @@ const webApp: AppDraft = {
 };
 
 /**
- * The manager's drawer opens on the first variable in the list, so a story picks
- * what the drawer shows by moving that row to the front.
+ * The editor opens in a slide-over when a row is clicked, so a story that shows the
+ * editor moves its row to the front (so it's the first thing in the list) and clicks
+ * it from a `play` function.
  */
-function opened(app: AppDraft, key: string): AppDraft {
+function frontmost(app: AppDraft, key: string): AppDraft {
   const selected = app.env.find((row) => row.key === key);
   if (selected == null) return app;
   return { ...app, env: [selected, ...app.env.filter((row) => row.id !== selected.id)] };
+}
+
+/** Clicks the named variable row to open its editor slide-over. */
+function openRow(key: string) {
+  return async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+    await userEvent.click(await within(canvasElement).findByText(key));
+  };
 }
 
 /**
@@ -107,17 +116,24 @@ type Story = StoryObj<typeof meta>;
  * The drawer holds a stored secret, whose value the store never returns - it renders as
  * `•••••• (set)` with the only edit that exists for it, Replace value.
  */
+/** The resting state: connections and secrets in one full-width list, no editor open. */
+export const List: Story = {
+  args: { initial: webApp },
+};
+
 export const SecretSelected: Story = {
-  args: { initial: opened(webApp, "STRIPE_SECRET_KEY") },
+  args: { initial: frontmost(webApp, "STRIPE_SECRET_KEY") },
+  play: openRow("STRIPE_SECRET_KEY"),
 };
 
 /**
- * The same list with the connection selected: source Connection, value
+ * The same list with the connection's editor open: source Connection, value
  * `{{db.url}}`, and the live "Fills in at deploy" block naming what the token
  * becomes on the preview - the service's connection string.
  */
 export const ConnectionSelected: Story = {
-  args: { initial: opened(webApp, "DATABASE_URL") },
+  args: { initial: frontmost(webApp, "DATABASE_URL") },
+  play: openRow("DATABASE_URL"),
 };
 
 /**
@@ -127,7 +143,7 @@ export const ConnectionSelected: Story = {
  */
 export const BuildTimeInjection: Story = {
   args: {
-    initial: opened(
+    initial: frontmost(
       {
         ...webApp,
         env: webApp.env.map((row) => (row.key === "STRIPE_SECRET_KEY" ? { ...row, buildTime: true } : row)),
@@ -135,4 +151,5 @@ export const BuildTimeInjection: Story = {
       "STRIPE_SECRET_KEY",
     ),
   },
+  play: openRow("STRIPE_SECRET_KEY"),
 };

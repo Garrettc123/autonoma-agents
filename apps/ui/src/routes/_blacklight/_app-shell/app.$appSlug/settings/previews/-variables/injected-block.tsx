@@ -13,7 +13,7 @@ export function InjectedBlock({ vars }: { vars: InjectedVar[] }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="border border-border-dim bg-surface-void/60">
+    <div className="border border-border-dim bg-surface-void/60 lg:shrink-0">
       <button
         type="button"
         onClick={() => setExpanded(!expanded)}

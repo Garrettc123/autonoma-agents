@@ -45,8 +45,8 @@ export function AppView({ app }: { app: AppDraft }) {
   }
 
   return (
-    <Tabs value={tab} onValueChange={handleTabChange} className="gap-0">
-      <header className="flex items-center border-b border-border-dim px-4 py-3 lg:px-6">
+    <Tabs value={tab} onValueChange={handleTabChange} className="gap-0 lg:min-h-0 lg:flex-1 lg:overflow-hidden">
+      <header className="flex shrink-0 items-center border-b border-border-dim px-4 py-3 lg:px-6">
         <TabsList variant="line">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="variables">Variables · {app.env.length}</TabsTrigger>
@@ -54,7 +54,7 @@ export function AppView({ app }: { app: AppDraft }) {
         </TabsList>
       </header>
 
-      <TabsContent value="overview" className="flex flex-col gap-5 p-4 lg:p-6">
+      <TabsContent value="overview" className="flex flex-col gap-5 p-4 lg:min-h-0 lg:overflow-y-auto lg:p-6">
         {draft.repos.length > 0 ? (
           <div className="max-w-xs">
             <p className="mb-1.5 font-mono text-4xs font-semibold uppercase tracking-widest text-text-secondary">
@@ -101,7 +101,7 @@ export function AppView({ app }: { app: AppDraft }) {
         />
       </TabsContent>
 
-      <TabsContent value="variables" className="p-4 lg:p-6">
+      <TabsContent value="variables" className="p-4 lg:flex lg:min-h-0 lg:flex-col lg:overflow-hidden lg:p-6">
         <EnvVarManager
           app={app}
           services={draft.services}
@@ -111,7 +111,7 @@ export function AppView({ app }: { app: AppDraft }) {
         />
       </TabsContent>
 
-      <TabsContent value="hooks" className="p-4 lg:p-6">
+      <TabsContent value="hooks" className="p-4 lg:min-h-0 lg:overflow-y-auto lg:p-6">
         <AppHooks app={app} />
       </TabsContent>
     </Tabs>

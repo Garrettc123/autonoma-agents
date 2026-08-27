@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { ApiKeysPanel } from "components/api-keys/api-keys-panel";
 import { RouteErrorState } from "components/route-error-state";
 import { OrgScopeNote } from "../-org-scope-note";
+import { SettingsScroll } from "../-settings-scroll";
 
 export const Route = createFileRoute("/_blacklight/_app-shell/app/$appSlug/settings/api-keys/")({
   errorComponent: ({ reset }) => <RouteErrorState message="We couldn't load your API keys." reset={reset} />,
@@ -15,9 +16,9 @@ export const Route = createFileRoute("/_blacklight/_app-shell/app/$appSlug/setti
  */
 function ApiKeysPage() {
   return (
-    <div className="flex flex-col gap-4">
+    <SettingsScroll className="flex flex-col gap-4">
       <OrgScopeNote>API keys authenticate the Autonoma CLI and API.</OrgScopeNote>
       <ApiKeysPanel />
-    </div>
+    </SettingsScroll>
   );
 }

@@ -33,7 +33,10 @@ export function PreviewRail({ selection, onSelect, onAddFromAnotherRepo }: Previ
   const primaryRepoShortName = primaryRepoFullName.split("/").pop();
 
   return (
-    <nav aria-label="Preview environment sections" className="flex shrink-0 flex-col gap-6 lg:w-52">
+    <nav
+      aria-label="Preview environment sections"
+      className="flex shrink-0 flex-col gap-6 lg:w-52 lg:min-h-0 lg:overflow-y-auto"
+    >
       <RailGroup label="Apps">
         {draft.apps.map((app) => (
           <RailItem

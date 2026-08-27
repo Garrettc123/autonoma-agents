@@ -19,7 +19,7 @@ export function PreviewSaveBar() {
   const blockers = fieldIssueSummaries(issues.fieldErrors, draft.apps);
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex shrink-0 flex-col gap-4">
       {issues.documentErrors.length > 0 ? (
         <div className="border-l-2 border-status-critical bg-status-critical/10 px-4 py-3">
           <p className="font-mono text-2xs uppercase tracking-widest text-status-critical">Invalid config</p>

@@ -58,6 +58,7 @@ import { ensureScenariosData } from "lib/query/scenarios.queries";
 import { type RouterOutputs, trpc } from "lib/trpc";
 import { SURFACE_COPY } from "lib/zero-state/copy";
 import { Suspense, useState } from "react";
+import { SettingsScroll } from "../-settings-scroll";
 import { useCurrentApplication } from "../../../-use-current-application";
 
 export const Route = createFileRoute("/_blacklight/_app-shell/app/$appSlug/settings/scenarios/")({
@@ -1169,12 +1170,12 @@ function ScenariosPage() {
   const hasWebhook = webhookUrl != null && webhookUrl !== "" && deploymentId != null;
 
   return (
-    <div className="flex flex-col gap-6">
+    <SettingsScroll className="flex flex-col gap-6">
       {hasWebhook ? (
         <WebhookConfiguredContent webhookUrl={webhookUrl} applicationId={app.id} deploymentId={deploymentId} />
       ) : (
         <WebhookNotConfigured applicationId={app.id} deploymentId={deploymentId} />
       )}
-    </div>
+    </SettingsScroll>
   );
 }
