@@ -89,7 +89,7 @@ Priority is the reader's, not ours: HIGH = readers get stuck without it.
 
 | # | Heading | Shot | Framing | Story | Status |
 |---|---|---|---|---|---|
-| L1 | `## How it works`, after the 1-5 list (keep `test-lifecycle.jpg`) | PR review page: verdict headline + top findings. First sight of the actual product | zoomed crop, the proven `1600x470` framing | `pages-authoritativeprpage--report` (exists) | [x] `pr-review.png` |
+| L1 | `## How it works`, after the 1-5 list (keep `test-lifecycle.jpg`) | PR overview page: verdict banner, open issues, flows tested, and the checkpoint-history rail. First sight of the actual product | full-overview crop, `1600x820` (ends on the "View impact analysis" boundary), padded to `#0a0a0a` | `pages-authoritativeprpage--report` (exists) | [x] `pr-review.png` |
 
 No screenshot on the "What you set up" cards - three cards pointing at three different surfaces would need three shots to be fair, which is spam. L1 carries the page.
 
