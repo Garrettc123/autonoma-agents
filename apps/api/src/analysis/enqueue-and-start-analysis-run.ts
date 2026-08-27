@@ -18,7 +18,8 @@ interface AnalysisRunStarter<T> {
 
 /**
  * Persist the event without waking the workflow - the deferred path for a real push the org cannot act on right now
- * (out of credits, or activation-gated). A later top-up or explicit request claims it.
+ * (out of credits, or activation-gated). It stays pending until the branch's next push or an explicit request
+ * opens a run that claims it - nothing re-pokes it on its own.
  */
 export async function enqueueAnalysisEvent(events: AnalysisEventStore, launch: AnalysisRunLaunch): Promise<void> {
     const logger = rootLogger.child({ name: "enqueueAnalysisEvent" });

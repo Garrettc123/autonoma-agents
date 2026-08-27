@@ -26,9 +26,9 @@ export interface AnalysisPokeContext {
 }
 
 /**
- * The one poke-eligibility predicate, shared by every producer and the credit-top-up sweeper (which calls it with
- * `requested`/`autoRunOnReady` false). Activation is checked before credits so an activation-gated org's deferred
- * events wait for its explicit request rather than for a top-up that would never poke them.
+ * The one poke-eligibility predicate, shared by every producer. Activation is checked before credits so an
+ * activation-gated org that is also out of credits defers as `activation_gated`, not `out_of_credits`: the reason a
+ * caller surfaces (and whether it posts an insufficient-credits notice) must name the blocker that actually holds.
  */
 export async function analysisPokeGate(
     deps: AnalysisPokeGateDeps,

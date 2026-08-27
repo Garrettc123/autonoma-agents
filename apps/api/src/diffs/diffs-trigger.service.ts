@@ -101,7 +101,8 @@ export class DiffsTriggerService extends Service {
      * gate) then throw. An already-running run is never cancelled by this, only new starts. Resolving the repo and
      * commenting are best-effort: a GitHub failure must still surface as the credits error, never a GitHub error.
      * Main-branch diffs have no PR to comment on or gate against, so this is only reached from `triggerPrDiffs`. The
-     * event is already persisted by the time this runs, so a later top-up can re-poke the deferred run.
+     * event is already persisted by the time this runs, so it is deferred rather than lost - the branch's next push
+     * or an explicit request opens a run that claims it.
      */
     private async refuseOutOfCredits(
         organizationId: string,
@@ -384,7 +385,7 @@ export class DiffsTriggerService extends Service {
     /**
      * Record the deployment the trigger carries, when it carries one. A customer-hosted push arrives WITH its live
      * URL; a previewkit push has none until its build goes live (the run records that one itself). Called BEFORE the
-     * poke gate, so a push deferred out of credits or by activation still lands the coordinate a later re-poke
+     * poke gate, so a push deferred out of credits or by activation still lands the coordinate the branch's next run
      * resolves its head from - the recording is not analysis, so it is not gated by the run.
      */
     private async recordDeploymentIfKnown(params: {

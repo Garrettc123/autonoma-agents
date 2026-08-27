@@ -25,8 +25,8 @@ const RECLAIMABLE_CLAIM_STATUSES: SnapshotStatus[] = Object.values(SnapshotStatu
 
 /**
  * PR states that mean the branch is done and will never run again, so a pending event on it is dead weight every
- * reader must skip - otherwise a credit top-up re-pokes a closed PR forever, and a stale event holds the
- * already-analyzed skip open forever. A `draft` PR is deliberately NOT here: it is temporary, and its events stay
+ * reader must skip - otherwise a stale event on a done PR holds the already-analyzed skip open forever, re-running
+ * the branch on every redelivered webhook. A `draft` PR is deliberately NOT here: it is temporary, and its events stay
  * eligible for when it reopens. A branch with no PR row at all (main) is always eligible, and an absent `prState`
  * fails open, so only these two terminal states exclude a branch.
  */
