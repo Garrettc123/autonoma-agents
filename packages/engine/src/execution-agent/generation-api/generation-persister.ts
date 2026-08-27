@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import type { CostRecord } from "@autonoma/ai";
 import type { PrismaClient } from "@autonoma/db";
 import type { Screenshot } from "@autonoma/image";
@@ -350,24 +350,34 @@ export class GenerationPersister<TSpec extends CommandSpec> {
             },
         });
 
-        this.logger.info("Uploading video", { videoPath });
-        const videoBuffer = await readFile(videoPath);
-        // Independent: the original upload sends `videoBuffer` to one key while the optimizer reads `videoPath`
-        // itself, encodes, and writes a different key. Overlap the S3 upload with the slow ffmpeg encode.
-        const [videoUrl, optimizedVideoUrl] = await Promise.all([
-            this.config.storageProvider.upload(
-                this.videoKey(this.id),
-                videoBuffer,
-                videoContentType(this.config.videoExtension),
-            ),
-            this.tryUploadOptimizedVideo(videoPath),
-        ]);
+        try {
+            this.logger.info("Uploading video", { videoPath });
+            const videoBuffer = await readFile(videoPath);
+            // Independent: the original upload sends `videoBuffer` to one key while the optimizer reads `videoPath`
+            // itself, encodes, and writes a different key. Overlap the S3 upload with the slow ffmpeg encode.
+            const [videoUrl, optimizedVideoUrl] = await Promise.all([
+                this.config.storageProvider.upload(
+                    this.videoKey(this.id),
+                    videoBuffer,
+                    videoContentType(this.config.videoExtension),
+                ),
+                this.tryUploadOptimizedVideo(videoPath),
+            ]);
 
-        this.logger.info("Saving video URL to database");
-        await this.db.testGeneration.update({
-            where: { id: this.id },
-            data: { videoUrl, optimizedVideoUrl },
-        });
+            this.logger.info("Saving video URL to database");
+            await this.db.testGeneration.update({
+                where: { id: this.id },
+                data: { videoUrl, optimizedVideoUrl },
+            });
+        } finally {
+            // Both uploads have read videoPath by now (or failed trying) - nothing else needs the local file.
+            await rm(videoPath, { force: true }).catch((error) => {
+                this.logger.warn("Failed to remove local video file after upload", {
+                    extra: { videoPath },
+                    err: error,
+                });
+            });
+        }
     }
 
     /**

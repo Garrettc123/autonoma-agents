@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -31,6 +32,12 @@ export async function finalizeWebm(inputPath: string, logger: Logger): Promise<s
     try {
         await execFileAsync(ffmpeg.path, ["-y", "-i", inputPath, "-c", "copy", outputPath]);
         logger.info("WebM finalized", { extra: { outputPath } });
+
+        // The raw recording is now superseded by outputPath - nothing else references it.
+        await rm(inputPath, { force: true }).catch((rmError) => {
+            logger.warn("Failed to remove raw recording after finalizing", { extra: { inputPath }, err: rmError });
+        });
+
         return outputPath;
     } catch (error) {
         logger.warn("Failed to finalize WebM, uploading original non-seekable recording", {
