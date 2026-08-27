@@ -127,7 +127,7 @@ jobs:
       # entry, and the prefix restore-keys pulls the newest prior one so a PR's
       # later commits only recompute the packages that actually changed.
       - name: Turbo cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .turbo
           key: turbo-${{ github.job }}-${{ github.sha }}
@@ -155,7 +155,7 @@ jobs:
         run: pnpm --filter @autonoma/engine-web exec playwright install chromium
 
       - name: Turbo cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .turbo
           key: turbo-${{ github.job }}-${{ github.sha }}
@@ -210,7 +210,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Turbo cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .turbo
           key: turbo-${{ github.job }}-${{ github.sha }}
@@ -233,7 +233,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Turbo cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .turbo
           key: turbo-${{ github.job }}-${{ github.sha }}
