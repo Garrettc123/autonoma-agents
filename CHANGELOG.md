@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.260827.1](https://github.com/Autonoma-AI/agent/compare/v1.260826.2...v1.260827.1) (2026-08-27)
+
+
+### Features
+
+* **analysis:** record the push range on commits_pushed events ([#2850](https://github.com/Autonoma-AI/agent/issues/2850)) ([9de3d49](https://github.com/Autonoma-AI/agent/commit/9de3d49037c47c3e063facc0e90d010b48feb77a))
+* **billing:** add an explicit markup on metered consumption ([#2710](https://github.com/Autonoma-AI/agent/issues/2710)) ([ded944a](https://github.com/Autonoma-AI/agent/commit/ded944a40d3c10564e0eb777d7d2bdf040abeeca))
+* compact PR verdict banner + move full report into a drawer ([#2835](https://github.com/Autonoma-AI/agent/issues/2835)) ([69e4854](https://github.com/Autonoma-AI/agent/commit/69e4854008457147a813703a9ae55365a7dd5f39))
+* **deployment:** split shared temporal Karpenter pool per worker type ([#2858](https://github.com/Autonoma-AI/agent/issues/2858)) ([54dfebc](https://github.com/Autonoma-AI/agent/commit/54dfebce7d6f94ea147b6587ec78e41c80dc457c))
+* **platform:** add the Prowler Local Server box ([#2824](https://github.com/Autonoma-AI/agent/issues/2824)) ([772dd8e](https://github.com/Autonoma-AI/agent/commit/772dd8e05953f3d3c7de3096e0020953359beea5))
+* repoint finding links to app-scoped test-result page, redirect old URL ([#2834](https://github.com/Autonoma-AI/agent/issues/2834)) ([f0e576c](https://github.com/Autonoma-AI/agent/commit/f0e576c7b7579bd5c6d84959555fa966b0dda21a))
+* restructure PR overview right rail - compact checkpoints, relocate Tests run ([#2836](https://github.com/Autonoma-AI/agent/issues/2836)) ([8e34ce2](https://github.com/Autonoma-AI/agent/commit/8e34ce22893fb469219a27256ee978c53af7cd41))
+* stop enqueueing analysis events for un-onboarded apps ([#2849](https://github.com/Autonoma-AI/agent/issues/2849)) ([f384855](https://github.com/Autonoma-AI/agent/commit/f384855b451e204ac3c339977c7e1a43f0d220aa))
+* vercel spend cap UI ([#2756](https://github.com/Autonoma-AI/agent/issues/2756)) ([0078bc4](https://github.com/Autonoma-AI/agent/commit/0078bc40199d76120418bbae6c209292e4e58af7))
+
+
+### Bug Fixes
+
+* **engine:** stop leaking video recordings and account for worker disk usage ([#2857](https://github.com/Autonoma-AI/agent/issues/2857)) ([12a87f3](https://github.com/Autonoma-AI/agent/commit/12a87f3c147e2eb9b9b4f044e31a9c9f4775f9bd))
+* hide PR header "Fix issues" button when there are no open issues ([#2862](https://github.com/Autonoma-AI/agent/issues/2862)) ([a04026e](https://github.com/Autonoma-AI/agent/commit/a04026ee5a14dfd9ed1bdc3d1a207ca398054f68))
+* **ui:** keep list markers inline in agent markdown (list-outside) ([#2840](https://github.com/Autonoma-AI/agent/issues/2840)) ([db4c96f](https://github.com/Autonoma-AI/agent/commit/db4c96f325d7438851668697117324d680f5a5e1))
+
 ## [1.260826.2](https://github.com/Autonoma-AI/agent/compare/v1.260826.1...v1.260826.2) (2026-08-26)
 
 
