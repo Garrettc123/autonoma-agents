@@ -9,9 +9,10 @@ import { RobotIcon } from "@phosphor-icons/react/Robot";
 import { useLocation } from "@tanstack/react-router";
 import { PrStatusPill } from "components/pr-status/pr-status-pill";
 import { useActiveOrg } from "lib/query/auth.queries";
-import { useBranchByPr, usePrPipelineStatus } from "lib/query/branches.queries";
+import { useAnalysisIssues, useBranchByPr, usePrPipelineStatus } from "lib/query/branches.queries";
 import { useApplicationRepositoryFromGitHub, usePullRequestFromGitHub, useRunAnalysis } from "lib/query/github.queries";
 import type { RouterOutputs } from "lib/trpc";
+import { Suspense } from "react";
 import { AppLink } from "routes/_blacklight/_app-shell/-app-link";
 import { useCurrentApplication } from "routes/_blacklight/_app-shell/-use-current-application";
 import { PRMetaRow } from "./pr-meta-row";
@@ -43,6 +44,7 @@ export function PRPageHeader({ prNumber }: { prNumber: number }) {
     <>
       <PRTopBar
         applicationId={app.id}
+        branchId={branch.id}
         prNumber={prNumber}
         prUrl={prUrl}
         title={title}
@@ -64,6 +66,7 @@ export function PRPageHeader({ prNumber }: { prNumber: number }) {
 
 function PRTopBar({
   applicationId,
+  branchId,
   prNumber,
   prUrl,
   title,
@@ -71,6 +74,7 @@ function PRTopBar({
   status,
 }: {
   applicationId: string;
+  branchId: string;
   prNumber: number;
   prUrl: string | undefined;
   title: string;
@@ -97,14 +101,9 @@ function PRTopBar({
 
       <RunAnalysisButton applicationId={applicationId} prNumber={prNumber} />
 
-      <Button
-        variant="accent"
-        size="sm"
-        render={<AppLink to="/app/$appSlug/pull-requests/$prNumber/fix" params={{ prNumber }} />}
-      >
-        <RobotIcon size={14} weight="bold" />
-        Fix issues
-      </Button>
+      <Suspense fallback={null}>
+        <FixIssuesButton branchId={branchId} prNumber={prNumber} />
+      </Suspense>
 
       {prUrl != null && (
         <a href={prUrl} target="_blank" rel="noopener noreferrer">
@@ -116,6 +115,27 @@ function PRTopBar({
         </a>
       )}
     </div>
+  );
+}
+
+// The link to the fix workflow, shown only when the branch has at least one open issue - a clean PR has nothing to
+// fix. Reads the same branch-scoped issue set as the overview's open-issues list, so the two never disagree. The
+// caller wraps this in its own Suspense (fallback null) so the top bar paints before this issue read lands.
+function FixIssuesButton({ branchId, prNumber }: { branchId: string; prNumber: number }) {
+  const { data: issues } = useAnalysisIssues(branchId);
+  const hasOpenIssues = issues.some((issue) => issue.status === "open");
+
+  if (!hasOpenIssues) return null;
+
+  return (
+    <Button
+      variant="accent"
+      size="sm"
+      render={<AppLink to="/app/$appSlug/pull-requests/$prNumber/fix" params={{ prNumber }} />}
+    >
+      <RobotIcon size={14} weight="bold" />
+      Fix issues
+    </Button>
   );
 }
 
