@@ -18,6 +18,8 @@ const DEFAULT_VIEWPORT = { width: 1440, height: 900 };
 const DEFAULT_SETTLE_MS = 500;
 const DEFAULT_WAIT_UNTIL: WaitUntil = "networkidle";
 const FIXTURE_ERROR_MARKER = "[storybook-fixtures]";
+// Breathing room kept below a `--clip-to` boundary so the anchor element never sits flush against the crop edge.
+const CLIP_BOTTOM_PADDING_PX = 24;
 
 const WAIT_UNTIL: ReadonlySet<string> = new Set(WAIT_UNTIL_VALUES);
 
@@ -49,6 +51,13 @@ interface CliOptions {
     hover?: string;
     /** CSS selector to click before capturing, for menus and popovers that only exist once opened. */
     click?: string;
+    /**
+     * Selector whose bottom edge sets the crop height: capture full-width from the page top down to just past
+     * this element, instead of a fixed viewport height. Content-anchored, so the shot ends on the same section
+     * boundary even when the page grows or shrinks - it never needs a hand-tuned pixel height. Wins over
+     * `--full-page`, which cannot expand this app's inner-scrolling shell anyway.
+     */
+    clipTo?: string;
     allowUnmocked: boolean;
 }
 
@@ -127,12 +136,38 @@ async function shootStory(
         await page.waitForTimeout(options.settleMs);
 
         const file = path.join(options.outDir, `${storyId}.png`);
-        await page.screenshot({ path: file, fullPage: options.fullPage });
+        await capture(page, file, options);
         console.log(`[storybook-shoot] saved ${file}`);
         return fixtureErrors;
     } finally {
         await context.close();
     }
+}
+
+// Writes the PNG. With `--clip-to`, the crop height comes from the anchor element's bottom edge rather than the
+// viewport, so a page that grows or shrinks still ends on the same section boundary. The clip must fit inside the
+// viewport (Playwright can only clip what it rendered without `fullPage`, which this shell's inner scroll defeats),
+// so a boundary below the fold is a loud error asking for a taller `--viewport` rather than a silently short crop.
+async function capture(page: Page, file: string, options: CliOptions): Promise<void> {
+    if (options.clipTo == null) {
+        await page.screenshot({ path: file, fullPage: options.fullPage });
+        return;
+    }
+
+    const box = await page.locator(options.clipTo).first().boundingBox();
+    if (box == null) {
+        throw new Error(`--clip-to "${options.clipTo}" matched no visible element`);
+    }
+
+    const height = Math.ceil(box.y + box.height) + CLIP_BOTTOM_PADDING_PX;
+    if (height > options.viewport.height) {
+        throw new Error(
+            `--clip-to boundary is ${height}px but the viewport is only ${options.viewport.height}px tall; ` +
+                `raise --viewport height so the whole shot fits above the fold`,
+        );
+    }
+
+    await page.screenshot({ path: file, clip: { x: 0, y: 0, width: options.viewport.width, height } });
 }
 
 function parseCliOptions(): CliOptions {
@@ -147,6 +182,7 @@ function parseCliOptions(): CliOptions {
             "wait-until": { type: "string" },
             hover: { type: "string" },
             click: { type: "string" },
+            "clip-to": { type: "string" },
             "allow-unmocked": { type: "boolean" },
         },
     });
@@ -168,6 +204,7 @@ function parseCliOptions(): CliOptions {
         waitUntil: parseWaitUntil(values["wait-until"]),
         hover: values.hover,
         click: values.click,
+        clipTo: values["clip-to"],
         allowUnmocked: values["allow-unmocked"] ?? false,
     };
 }

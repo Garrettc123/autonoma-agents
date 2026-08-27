@@ -32,7 +32,7 @@ Autonoma is an agentic end-to-end testing platform for web applications. You don
 When something breaks, you get more than a red check. Autonoma reviews the run and opens an issue on the PR: what you expected, what actually happened, the screenshot and video of the moment it failed, and the code it suspects.
 
 <p align="center">
-  <img src=".github/assets/pr-review.webp" alt="A pull request review: one open bug, the open issues and flows tested for the change, and the checkpoint history for the branch" width="100%">
+  <img src=".github/assets/pr-review.webp" alt="A pull request review: a verdict banner reading one open bug with 3 open issues, 3 flows covered and 5 tests run; an open-issues panel listing the bug alongside environment and scenario issues; a flows-tested panel with verified and not-verified flows; and the checkpoint-history rail" width="100%">
 </p>
 
 <p align="center">

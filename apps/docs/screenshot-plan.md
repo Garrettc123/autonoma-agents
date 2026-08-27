@@ -36,7 +36,7 @@ One trap when you add that padding: it comes out of the content width, so `max-w
 
 Scale the pad to the *rendered* size, not the pixel size: a 2x terminal capture is ~2150px wide and a component crop ~880px, but both render at ~768px, so a flat pixel pad lands at wildly different sizes on the page. `pad = round(56 * max(1, width / 768))`. Trim the image first so the step is idempotent and captures from different paths end up equal.
 
-The shoot script has **no `--clip` and no `--selector`** (`apps/ui/scripts/storybook-screenshot.ts`), so framing comes from two places: sizing `--viewport` to the component, and a decorator that constrains it (`mx-auto max-w-4xl p-8` is the established pattern). Crop afterwards with `cwebp -crop x y w h`, as the README assets do. Wiring `--clip` into the script is ~15 lines and worth doing if we end up wanting many tight sub-panel crops.
+The shoot script has a **`--clip-to <selector>`** (`apps/ui/scripts/storybook-screenshot.ts`) that captures full-width from the page top down to the bottom of a DOM landmark, so the crop height follows the content instead of a fixed viewport - that is what the README assets use, so their framing survives the page growing or shrinking. For a docs shot the other two levers still apply: size `--viewport` to the component, and constrain it with a decorator (`mx-auto max-w-4xl p-8` is the established pattern), cropping afterwards with `cwebp -crop x y w h` where you want a tight sub-panel the selector cannot isolate.
 
 Component stories render **without the app shell by default** - `StoryShell` gives theme, toasts, a QueryClient and a memory router, nothing else. Only `parameters: { pageStory: true }` pulls in the real route tree and its sidebar.
 
@@ -89,7 +89,7 @@ Priority is the reader's, not ours: HIGH = readers get stuck without it.
 
 | # | Heading | Shot | Framing | Story | Status |
 |---|---|---|---|---|---|
-| L1 | `## How it works`, after the 1-5 list (keep `test-lifecycle.jpg`) | PR overview page: verdict banner, open issues, flows tested, and the checkpoint-history rail. First sight of the actual product | full-overview crop, `1600x820` (ends on the "View impact analysis" boundary), padded to `#0a0a0a` | `pages-authoritativeprpage--report` (exists) | [x] `pr-review.png` |
+| L1 | `## How it works`, after the 1-5 list (keep `test-lifecycle.jpg`) | PR overview page: verdict banner, open issues, flows tested, and the checkpoint-history rail. First sight of the actual product | full-overview crop via `--clip-to` the "View impact analysis" boundary (see the `ui-screenshots` skill), padded to `#0a0a0a` | `pages-authoritativeprpage--report` (exists) | [x] `pr-review.png` |
 
 No screenshot on the "What you set up" cards - three cards pointing at three different surfaces would need three shots to be fair, which is spam. L1 carries the page.
 

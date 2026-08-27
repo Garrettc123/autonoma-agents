@@ -69,7 +69,8 @@ pnpm --filter @autonoma/ui storybook:shoot --story pages-mypage--default --url "
 - **Use an explicit port, never the default 6006.** The `storybook` package script hardcodes 6006, and with ~100 worktrees on this machine another one is usually already there - you would silently screenshot a different branch's UI. Everything you point at the server, `index.json` included, must use the port you launched.
 - `VITE_API_URL` does not affect the MSW mocking, which matches any origin - it changes only the API URL a screen *prints*. `env.VITE_API_URL` defaults to `http://localhost:4000` and `getApiOrigin()` returns it verbatim on localhost, so the MCP dialog, the planner command block, the onboarding setup steps and the deployment-signal endpoint all render a dev URL into the image unless you set it. Harmless on other screens, so it stays in the block rather than being a thing to remember per story.
 - Story id = lowercased title with `/` -> `-`, then `--`, then the **kebab-cased** export name: `Pages/MyPage` + `Default` -> `pages-mypage--default`, and `WithOptimizedToggle` -> `--with-optimized-toggle` (NOT `--withoptimizedtoggle`). A wrong id silently screenshots Storybook's "Couldn't find story" error page, so for any multi-word export confirm the id against `curl -s "localhost:$PORT/index.json"`.
-- Flags: `--story` (repeatable), `--out` (default `screenshots/`, gitignored), `--viewport 1440x900`, `--full-page`, `--settle-ms 500`, `--wait-until networkidle`, `--allow-unmocked`. Pass them straight after the script name - **no `--` separator**, which pnpm 11 forwards as a positional and the script rejects with `ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL`.
+- Flags: `--story` (repeatable), `--out` (default `screenshots/`, gitignored), `--viewport 1440x900`, `--full-page`, `--clip-to <selector>`, `--settle-ms 500`, `--wait-until networkidle`, `--allow-unmocked`. Pass them straight after the script name - **no `--` separator**, which pnpm 11 forwards as a positional and the script rejects with `ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL`.
+- `--clip-to <selector>` sets the crop height from a DOM landmark instead of the viewport: it captures full-width from the page top down to just past the first element the selector matches. Use it for committed assets that must survive a page growing or shrinking (the README shots below), so the frame stays anchored to a section boundary rather than a pixel height that silently goes stale. The `--viewport` height must still be tall enough to contain the boundary, or the shoot errors and asks for a taller one.
 - The script EXITS 1 listing any tRPC procedure that had no fixture - add the missing fixtures rather than passing `--allow-unmocked`.
 - ALWAYS Read the PNG yourself before uploading. Never post a screenshot showing an error state, empty shell, or "Something went wrong".
 
@@ -133,16 +134,17 @@ On re-runs (new commits changed the UI again): re-shoot, re-upload to the same k
 
 The root `README.md` is the public mirror's front page and embeds two product screenshots shot from this same pipeline. They are the one exception to everything above: **committed to the repo, never uploaded to S3**, because a presigned URL expires in 7 days and the README has to keep rendering forever.
 
-| Asset | Story | Viewport |
+| Asset | Story | `--clip-to` boundary |
 |---|---|---|
-| `.github/assets/pr-review.webp` | `pages-authoritativeprpage--report` | `1600x470` |
-| `.github/assets/analysis-issue.webp` | `pages-authoritativesnapshotpage--issue` | `1600x1290` |
+| `.github/assets/pr-review.webp` | `pages-authoritativeprpage--report` | `text=View impact analysis and suite changes` |
+| `.github/assets/analysis-issue.webp` | `pages-authoritativesnapshotpage--issue` | `section:has(h2:has-text("Why this is an issue"))` |
 
 **When you change the PR review page or the analysis issue page, re-shoot the one you affected and commit it in the same PR.** A stale screenshot on the front page is worse than none - it advertises a UI we no longer ship.
 
 ```bash
 pnpm --filter @autonoma/ui storybook:shoot --url "http://localhost:$PORT" \
-  --story pages-authoritativeprpage--report --viewport 1600x470 --out screenshots/readme
+  --story pages-authoritativeprpage--report --viewport 1600x2600 \
+  --clip-to 'text=View impact analysis and suite changes' --out screenshots/readme
 cwebp -q 88 apps/ui/screenshots/readme/pages-authoritativeprpage--report.png \
   -o .github/assets/pr-review.webp
 ```
@@ -150,7 +152,7 @@ cwebp -q 88 apps/ui/screenshots/readme/pages-authoritativeprpage--report.png \
 Rules for anything under `.github/assets/`:
 
 - **WebP only.** `*.png` / `*.jpg` are LFS-tracked repo-wide, and README art must not be: `sync-public.yml` clones the mirror with `GIT_LFS_SKIP_SMUDGE=1`, so an LFS-backed image lands on the public repo as pointer text, and anonymous README views bill against the LFS bandwidth quota. `.gitattributes` unsets the filters for that directory as a backstop.
-- **Pick the viewport so the shot ends on a section boundary.** These are viewport screenshots, not `--full-page`, so the height is the crop. Nudge it until nothing is cut mid-paragraph or mid-code-block rather than cropping afterwards.
+- **The height comes from `--clip-to`, not a fixed viewport.** Anchor the crop to a stable DOM landmark (the table) and the shot ends on that section boundary at whatever height the page currently renders - there is no pixel height to re-tune when the page grows or shrinks, which is exactly what kept going stale. `--viewport` now sets only the WIDTH (1600) and a tall-enough ceiling; the anchor's bottom edge (plus a small pad) is the real crop. `--full-page` is not the answer: the app shell scrolls an inner `<main>`, so a full-page capture only gets the first viewport. If the anchor sits below the `--viewport` ceiling the shoot errors loudly and asks for a taller one rather than cropping short.
 - **Look at the result before committing**, same as any other screenshot here.
 
 The banner (`.github/assets/banner.webp`) is generated art, not a screenshot - see the `documentation-authoring` skill for the image generator, and keep it on the docs palette (`#0a0a0a` background, `#C2E812` accent).
