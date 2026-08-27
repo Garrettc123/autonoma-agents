@@ -526,12 +526,9 @@ The runner drains the sink's buffer before it exits.
       throwaway minted per run - so the suite needs nothing from a developer's environment.
 - DB schema changes: edit `packages/db/prisma/schema.prisma` -> `pnpm db:migrate` -> `pnpm db:generate`.
   Prisma's generated migration for an enum-value rename is destructive; prefer `ALTER TYPE ... RENAME VALUE`.
-- `scripts/apply-standard-resources.sh [--apply] [--namespace NS]` - retrofit running preview namespaces to the
-  current `STANDARD_RESOURCES` tiers + replicas cap (existing workloads keep their old requests until their next
-  deploy; run this after changing the standards). Dry-run by default; only touches containers still requesting
-  the old 1-CPU standard, so fixed-budget containers (nginx, upstash sidecar, temporal) are never resized.
-  Patching rolls the workloads, so each touched preview briefly restarts. Needs kubectl pointed at the preview
-  cluster + jq.
+- Container sizing is a closed tier ladder, not free-form values: the app/service tiers and default
+  tier names live in `packages/types/src/schemas/previewkit-resource-tiers.ts` (`STANDARD_RESOURCES`,
+  the composed default, is in `previewkit-config.ts` next to it).
 
 ## Gotchas
 
