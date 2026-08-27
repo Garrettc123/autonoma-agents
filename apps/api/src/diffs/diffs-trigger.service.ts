@@ -333,6 +333,13 @@ export class DiffsTriggerService extends Service {
         if (app.mainBranch == null || app.mainBranchInfo == null) throw new NoMainBranchError(app.id);
 
         const branchId = app.mainBranch.id;
+
+        // The baseline snapshot is established at go-live, so a not-live main push has no base to diff against yet.
+        if (!(await this.isLive(app.id))) {
+            this.logger.info("Skipping main diffs: the application has not gone live yet", { organizationId, repoId });
+            return { branchId, skipped: true };
+        }
+
         const headSha = await this.githubInstallationService.getBranchHead(
             organizationId,
             repoId,

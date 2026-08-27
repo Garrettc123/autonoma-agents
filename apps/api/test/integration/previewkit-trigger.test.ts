@@ -390,6 +390,63 @@ apiTestSuite({
             );
         });
 
+        test("a mid-onboarding push builds the preview but enqueues no event; the first post-go-live push does both", async ({
+            harness,
+            seedResult: { app, service },
+        }) => {
+            await setMainBranchEnvironment(harness, "main", "ready");
+            const branchId = (
+                await harness.db.application.findUniqueOrThrow({
+                    where: { id: app.id },
+                    select: { mainBranchId: true },
+                })
+            ).mainBranchId;
+            if (branchId == null) throw new Error("seeded app has no main branch");
+
+            // A baseline so each push is a real diff (head != base); without it env-0's head==base lets the
+            // already-analyzed gate suppress the event on its own, masking the go-live gate under test.
+            const baseline = await harness.db.branchSnapshot.create({
+                data: { branchId, status: "active", source: TriggerSource.WEBHOOK, headSha: "baseline-sha" },
+            });
+            await harness.db.branch.update({ where: { id: branchId }, data: { activeSnapshotId: baseline.id } });
+            await harness.db.analysisEvent.deleteMany({ where: { branchId } });
+
+            try {
+                // Pre-go-live: still builds (startAnalysisRun fires) but leaves no event behind.
+                harness.startAnalysisRun.mockClear();
+                await withOnboardingInProgress(harness, app.id, async () => {
+                    await service.startMainBranchRunFromPushWebhook(
+                        harness.organizationId,
+                        pushPayload("main", "onboarding-sha"),
+                    );
+                });
+                expect(harness.startAnalysisRun).toHaveBeenCalledWith(
+                    expect.objectContaining({ branchId, headSha: "onboarding-sha" }),
+                );
+                expect(await harness.db.analysisEvent.count({ where: { branchId } })).toBe(0);
+
+                // Post-go-live (the seed leaves the app at "completed"): the next push enqueues its event and runs.
+                harness.startAnalysisRun.mockClear();
+                await service.startMainBranchRunFromPushWebhook(
+                    harness.organizationId,
+                    pushPayload("main", "post-live-sha"),
+                );
+                expect(harness.startAnalysisRun).toHaveBeenCalledWith(
+                    expect.objectContaining({ branchId, headSha: "post-live-sha" }),
+                );
+                const events = await harness.db.analysisEvent.findMany({ where: { branchId } });
+                expect(events).toHaveLength(1);
+                expect(events[0]!.type).toBe("commits_pushed");
+                expect(events[0]!.claimedBySnapshotId).toBeNull();
+                expect(events[0]!.payload).toMatchObject({ headSha: "post-live-sha" });
+            } finally {
+                // The main branch is shared across the suite (no per-test truncation); clean up so later cases see it fresh.
+                await harness.db.branch.update({ where: { id: branchId }, data: { activeSnapshotId: null } });
+                await harness.db.analysisEvent.deleteMany({ where: { branchId } });
+                await harness.db.branchSnapshot.deleteMany({ where: { branchId } });
+            }
+        });
+
         test("startRunFromPullRequestWebhook reuses the same branch across pushes to the same PR", async ({
             harness,
             seedResult: { app, service },

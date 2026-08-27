@@ -18,7 +18,7 @@ import {
 } from "@autonoma/types";
 import type { AnalysisRunWorkflowInput, PreviewBuildWorkflowInput } from "@autonoma/workflow";
 import { z } from "zod";
-import { enqueueAnalysisEvent } from "../analysis/enqueue-and-start-analysis-run";
+import { type AnalysisRunLaunch, enqueueAnalysisEvent } from "../analysis/enqueue-and-start-analysis-run";
 import { isActivationGated } from "../analysis/is-activation-gated";
 import { env } from "../env";
 import { applicationBranchRefs } from "../github/application-branch-refs";
@@ -179,13 +179,43 @@ export class PreviewkitTriggerService extends Service {
             return {};
         }
 
-        const launch = {
+        const launch: AnalysisRunLaunch = {
             branchId: request.branchId,
             organizationId: request.organizationId,
             source: request.source,
             headSha: request.headSha,
             baseSha: request.baseSha,
         };
+
+        await this.enqueueEventIfWarranted(request, launch);
+        await this.assertDeployCreditsAvailable(
+            request.organizationId,
+            request.repoFullName,
+            request.prNumber,
+            request.headSha,
+            request.branchId,
+        );
+
+        const workflowId = await this.startAnalysisRun({
+            branchId: launch.branchId,
+            headSha: launch.headSha,
+            baseSha: launch.baseSha,
+        });
+        return { workflowId };
+    }
+
+    private async enqueueEventIfWarranted(request: PreviewkitRunRequest, launch: AnalysisRunLaunch): Promise<void> {
+        if (!(await this.hasApplicationGoneLive(request.organizationId, request.githubRepositoryId))) {
+            this.logger.info(
+                "Application has not gone live; building the preview without enqueuing an analysis event",
+                {
+                    repo: request.repoFullName,
+                    pr: request.prNumber,
+                    extra: { headSha: request.headSha },
+                },
+            );
+            return;
+        }
 
         // An already-analyzed head must not enqueue: its own event would make the inbox non-empty and defeat the
         // downstream already-analyzed skip, turning every re-delivered webhook into a full re-analysis. The run
@@ -202,25 +232,19 @@ export class PreviewkitTriggerService extends Service {
                 pr: request.prNumber,
                 extra: { headSha: request.headSha },
             });
-        } else {
-            // Persist the event BEFORE the credit gate, so an out-of-credits deploy is deferred (a top-up re-pokes
-            // it) rather than lost - the same enqueue-before-throw shape the diffs trigger uses.
-            await enqueueAnalysisEvent(this.events, launch);
+            return;
         }
-        await this.assertDeployCreditsAvailable(
-            request.organizationId,
-            request.repoFullName,
-            request.prNumber,
-            request.headSha,
-            request.branchId,
-        );
 
-        const workflowId = await this.startAnalysisRun({
-            branchId: launch.branchId,
-            headSha: launch.headSha,
-            baseSha: launch.baseSha,
+        // Enqueue before the caller's credit gate throws, so an out-of-credits deploy defers the event rather than losing it.
+        await enqueueAnalysisEvent(this.events, launch);
+    }
+
+    private async hasApplicationGoneLive(organizationId: string, githubRepositoryId: number): Promise<boolean> {
+        const application = await this.db.application.findUnique({
+            where: { organizationId_githubRepositoryId: { organizationId, githubRepositoryId } },
+            select: { onboardingState: { select: { step: true } } },
         });
-        return { workflowId };
+        return hasGoneLive(application?.onboardingState?.step);
     }
 
     /** No Application, so no run to open - but lack of analysis wiring must not cost a customer their preview. */

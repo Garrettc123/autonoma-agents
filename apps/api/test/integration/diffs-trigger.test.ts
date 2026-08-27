@@ -978,6 +978,38 @@ apiTestSuite({
             );
         });
 
+        test("skips main diffs and enqueues no event while the app is still being set up", async ({
+            harness,
+            seedResult: { app, service },
+        }) => {
+            harness.startAnalysisRun.mockClear();
+            await harness.db.analysisEvent.deleteMany({ where: { branchId: app.mainBranchId! } });
+            await harness.db.onboardingState.update({
+                where: { applicationId: app.id },
+                data: { step: "previewkit_configuring" },
+            });
+
+            try {
+                const result = await service.triggerMainDiffs({
+                    source: "webhook",
+                    organizationId: harness.organizationId,
+                    repoId: 1001,
+                    url: "https://preview.example.com",
+                });
+
+                expect(result.skipped).toBe(true);
+                expect(result.branchId).toBe(app.mainBranchId);
+                expect(harness.startAnalysisRun).not.toHaveBeenCalled();
+                const events = await harness.db.analysisEvent.findMany({ where: { branchId: app.mainBranchId! } });
+                expect(events).toHaveLength(0);
+            } finally {
+                await harness.db.onboardingState.update({
+                    where: { applicationId: app.id },
+                    data: { step: "completed" },
+                });
+            }
+        });
+
         test("skips main diffs when the head already matches the active snapshot", async ({
             harness,
             seedResult: { app, service },
