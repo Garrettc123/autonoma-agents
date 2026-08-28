@@ -94,7 +94,9 @@ export function AnalysisFlowList({ flows, findings }: { flows: AnalysisFlow[]; f
 
   return (
     <Panel>
-      <PanelHeader>
+      {/* min-h matches the open-issues panel's header so the two read level side by side (that one carries a button,
+          this one only text). */}
+      <PanelHeader className="min-h-16">
         <PanelTitle>
           Flows tested in this PR
           <InfoHint ariaLabel="What a flow is" className="text-text-secondary">
@@ -131,7 +133,9 @@ function resolveFlowFindings(
 function FlowRow({ flow, findings }: { flow: AnalysisFlow; findings: AnalysisFindingView[] }) {
   const status = FLOW_STATUS_META[flow.status];
   const owner = FLOW_OWNER_META[flow.owner];
-  const composition = analysisFlowComposition(flow);
+  // This panel's whole frame is the PR's cumulative state, so the "carried from an earlier commit" note reads as
+  // noise here - keep only the "N of M checks passed" half of the composition.
+  const composition = analysisFlowComposition(flow, { includeCarriedNote: false });
   // Every cited test resolved to a finding this run, so the dropdown accounts for the whole set the header counts
   // from. When some are carried over (their findings live at an earlier snapshot), show none rather than a subset
   // the cumulative status/composition would contradict.

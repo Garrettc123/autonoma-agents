@@ -607,14 +607,21 @@ const CARRIED_NOTE = "carried from an earlier commit";
  * A partial flow always states how much of it held up - three passing checks beside one that could not run is not the
  * same reading as four that could not, and collapsing them is the pessimism the itemization exists to remove.
  * Returns undefined when there is nothing to add beyond the flow's own status, so a caller can omit the line.
+ *
+ * `includeCarriedNote` lets a surface whose whole frame is already cumulative - the PR page's flow list - omit the
+ * "carried from an earlier commit" note, which reads as noise there; the per-run surfaces (PR comment, fix prompt)
+ * keep it, so it stays one function rather than each re-deriving the "N of M passed" half.
  */
-export function analysisFlowComposition(flow: AnalysisFlow): string | undefined {
+export function analysisFlowComposition(
+    flow: AnalysisFlow,
+    { includeCarriedNote = true }: { includeCarriedNote?: boolean } = {},
+): string | undefined {
     const total = flow.testSlugs.length;
     const parts: string[] = [];
     if (flow.passedCount > 0 && flow.passedCount < total) {
         parts.push(`${flow.passedCount} of ${total} ${total === 1 ? "check" : "checks"} passed`);
     }
-    if (flow.checkedThisRunCount === 0) parts.push(CARRIED_NOTE);
+    if (includeCarriedNote && flow.checkedThisRunCount === 0) parts.push(CARRIED_NOTE);
     return parts.length > 0 ? parts.join(" \u00b7 ") : undefined;
 }
 

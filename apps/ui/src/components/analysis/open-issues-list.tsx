@@ -15,7 +15,9 @@ export function AnalysisOpenIssuesList({ issues, prNumber }: { issues: AnalysisI
 
   return (
     <Panel>
-      <PanelHeader>
+      {/* min-h matches the flows panel's header so the two read level side by side, despite this one carrying the
+          taller "Fix issues" button and that one only text. */}
+      <PanelHeader className="min-h-16">
         <PanelTitle>Open issues</PanelTitle>
         <div className="flex items-center gap-3">
           <span className="font-mono text-2xs text-text-secondary">

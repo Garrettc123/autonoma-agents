@@ -300,7 +300,8 @@ const snapshotHistory: NonNullable<TrpcFixtures["branches"]>["snapshotHistory"] 
     createdAt: RUN_AT,
     prevSnapshotId: PREV_SNAPSHOT_ID,
     tone: "critical",
-    label: "Needs attention",
+    // The real pill labels a bug-found checkpoint "N bug(s)" (derivePresentation), never a generic "Needs attention".
+    label: "1 bug",
     passing: 2,
     failing: 1,
   }),
@@ -310,7 +311,8 @@ const snapshotHistory: NonNullable<TrpcFixtures["branches"]>["snapshotHistory"] 
     createdAt: PREV_RUN_AT,
     prevSnapshotId: null,
     tone: "success",
-    label: "Healthy",
+    // A fully-verified checkpoint reads "Passing" from derivePresentation, not "Healthy".
+    label: "Passing",
     passing: 3,
     failing: 0,
   }),
