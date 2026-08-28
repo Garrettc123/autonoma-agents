@@ -151,6 +151,17 @@ export interface ScopeSelection {
 }
 
 /**
+ * Strip the cosmetic variation in how a repo-relative path gets written by hand vs how
+ * the mapper emits it - a leading `./` (`--frontend ./foo` naming the map entry `foo`)
+ * and trailing slashes (`foo/` vs `foo`) - so the comparison below sees the same string
+ * either way. The mapper always emits bare relative paths, so this only ever loosens a
+ * caller-supplied side; it never changes which real path a match resolves to.
+ */
+function normalizeMapPath(path: string): string {
+    return path.replace(/^\.\//, "").replace(/\/+$/, "");
+}
+
+/**
  * Match a requested path against the paths a mapper run actually emitted. The mapper
  * is non-deterministic about how deep it names a path (a fullstack app's backend may
  * come back as `apps/main-app` on one run and `apps/main-app/app/api` on the next), so
@@ -158,7 +169,9 @@ export interface ScopeSelection {
  * Prefer an exact hit, then accept an ancestor/descendant relationship either way.
  */
 function relatedPath(a: string, b: string): boolean {
-    return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+    const na = normalizeMapPath(a);
+    const nb = normalizeMapPath(b);
+    return na === nb || na.startsWith(`${nb}/`) || nb.startsWith(`${na}/`);
 }
 
 function matchMapPath(requested: string, candidates: string[]): string | undefined {
