@@ -19,6 +19,7 @@
         "@autonoma/db": "workspace:*",
         "@autonoma/logger": "workspace:*",
         "@autonoma/types": "workspace:*",
+        "@autonoma/utils": "workspace:*",
         "@octokit/app": "catalog:",
         "@octokit/core": "catalog:",
         "@octokit/plugin-retry": "catalog:",

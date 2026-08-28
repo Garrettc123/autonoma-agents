@@ -1,6 +1,7 @@
 import { type Logger, logger } from "@autonoma/logger";
 import type { App } from "@octokit/app";
 import { z } from "zod";
+import { cloneWithRetry } from "./clone-with-retry";
 import type { EtagStore } from "./etag-store";
 import {
     buildAuthenticatedGitEnv,
@@ -20,11 +21,10 @@ const BRANCHES_PER_PAGE = 100;
 const DEFAULT_LABEL_COLOR = "0e8a16";
 
 /**
- * Per-step timeouts for the clone path. `checkout` and `cat-file` were previously
- * unbounded, so a hang there ran to the enclosing activity timeout (~20m) and
- * surfaced as an unattributable "Activity task timed out"; they are bounded here.
+ * Per-step timeouts for the clone path. An unbounded step that hangs runs to the
+ * enclosing activity timeout (~20m) and surfaces as an unattributable "Activity
+ * task timed out".
  */
-const CLONE_TIMEOUT_MS = 120_000;
 const FETCH_TIMEOUT_MS = 60_000;
 const CHECKOUT_TIMEOUT_MS = 60_000;
 const CAT_FILE_TIMEOUT_MS = 30_000;
@@ -346,13 +346,18 @@ export class OctokitGitHubInstallationClient implements GitHubInstallationClient
 
         try {
             this.logger.info("Cloning repository", { fullName, headSha, targetDir });
-            await runGitStep(
-                "clone",
-                ["clone", `--depth=${depth}`, cloneUrl, targetDir],
-                { timeoutMs: CLONE_TIMEOUT_MS, env: gitEnv, maxBufferBytes: CLONE_MAX_BUFFER_BYTES },
-                token,
-                this.logger,
-            );
+            await cloneWithRetry({
+                targetDir,
+                logger: this.logger,
+                attempt: (timeoutMs) =>
+                    runGitStep(
+                        "clone",
+                        ["clone", `--depth=${depth}`, cloneUrl, targetDir],
+                        { timeoutMs, env: gitEnv, maxBufferBytes: CLONE_MAX_BUFFER_BYTES },
+                        token,
+                        this.logger,
+                    ),
+            });
 
             this.logger.info("Checking out commit", { headSha });
             try {

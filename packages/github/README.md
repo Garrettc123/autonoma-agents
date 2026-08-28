@@ -14,8 +14,23 @@ only on `@autonoma/db`, `@autonoma/logger`, and Octokit - no HTTP or app-server 
 | `LocalDevGitHubApp` / `LocalDevGitHubInstallationClient` | Fixed-response doubles for `LOCAL_DEV`. |
 | `parseRepoFullName` | Split `"owner/repo"`. |
 | `UnreachableBaseShaError` / `isUnreachableRefError` | Signal + classifier for a clone whose base SHA the remote will not serve (`not our ref`), distinguished from a transient timeout, so a caller can recover to a reachable base rather than fail the run. |
+| `GitCommandError` / `GitStep` / `GitFailureDetails` | A failed git step in the clone path, self-describing in its message (which step, timed out or not, exit code, elapsed) because that message is all `analysis_job.failure_reason` keeps. See [the clone path](#the-clone-path-srcgit-clone-stepts-srcclone-with-retryts). |
 | `parseCoAuthoredByTrailers` | Parse `Co-authored-by: Name <email>` trailers out of a commit message. |
 | `resolveContributorsFromCommits` / `contributorKey` | Collapse a PR's commits (+ opener) into a deduped `ResolvedContributor[]`. |
+
+### The clone path (`src/git-clone-step.ts`, `src/clone-with-retry.ts`)
+
+`cloneRepository` shells out to git step by step - clone, checkout, then the base/extra fetches a diff needs -
+with `runGitStep` bounding each one and translating any failure into a redacted, self-describing
+`GitCommandError`. The token travels as an `http.extraHeader` in the environment, never in argv or the stored
+remote, so a failing command cannot leak it.
+
+The `clone` step retries; the rest do not. It is the only step that fails in practice, and it fails one way:
+killed by its own budget, at the buzzer. So a clone that times out or dies by a signal is tried again under a
+larger budget (2, then 3, then 4 minutes), emptying the target directory first, because git refuses a non-empty
+target and a clone killed mid-transfer leaves a partial tree. A remote that actually answered - a repo the App
+cannot read, a ref that is gone - is not retried; that answer is the result. The whole ladder is sized to stay a
+fraction of the 20-minute analysis activity that owns it, which still has to run the analysis afterwards.
 
 ### Contributor resolution (`src/contributors/`)
 
