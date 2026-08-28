@@ -13,7 +13,10 @@ import {
 } from "../../src/core/dry-run-phase";
 
 const APP_ID = "app_1";
-const TIMING = { pollMs: 1, readyTimeoutMs: 50, noPreviewGraceMs: 50 };
+// Poll fast, but keep the deadlines far out of reach: these tests assert what the
+// polling loop does, not when it gives up, and a 50ms budget made them a race against
+// a loaded CI runner. The tests that need a deadline to expire set their own.
+const TIMING = { pollMs: 1, readyTimeoutMs: 10_000, noPreviewGraceMs: 10_000 };
 
 function target(overrides: Partial<DryRunTarget> = {}): DryRunTarget {
     return {
@@ -264,7 +267,11 @@ describe("runDryRunPhase", () => {
             targets: [[target({ availability: "building", sdkUrl: undefined })]],
         });
 
-        const outcome = await runDryRunPhase({ client, applicationId: APP_ID, timing: TIMING });
+        const outcome = await runDryRunPhase({
+            client,
+            applicationId: APP_ID,
+            timing: { pollMs: 1, readyTimeoutMs: 5, noPreviewGraceMs: 5 },
+        });
 
         expect(outcome.kind).toBe("no-target");
         expect(client.dryRuns).toEqual([]);

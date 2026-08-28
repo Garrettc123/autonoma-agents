@@ -1638,12 +1638,6 @@ model BillingPricing {
   usdPerVcpuHourMicros Int @default(51975) @map("usd_per_vcpu_hour_micros")
   usdPerGbHourMicros   Int @default(5906) @map("usd_per_gb_hour_micros")
 
-  // Retired by the two columns above, kept one deploy so the release this replaces - which
-  // still selects them - keeps working through a rollback window. Nothing reads them here.
-  // Their DROP rides a follow-up migration once that window has passed.
-  creditsPerVcpuHour     Int @default(0) @map("credits_per_vcpu_hour")
-  creditsPerGbMemoryHour Int @default(0) @map("credits_per_gb_memory_hour")
-
   // Margin on metered, USD-denominated consumption, in basis points (10000 = 1.0x = cost).
   // Credits are SOLD at creditsPerTopup / stripeTopupAmountCents - 1500 per USD by default - and
   // usdToCreditCost converts spend back at that same rate, so without this every metered path
