@@ -73,7 +73,7 @@ ${analysis.summary}
 ## Affected Files
 ${listAffectedFiles(analysis.affectedFiles)}
 
-${input.subject != null ? renderSubjectSection(input.subject, range) : renderRangeSection(range)}`;
+${input.subject != null ? renderSubjectSection(input.subject, range, hasNonPushEvents(input.events)) : renderRangeSection(range)}`;
 
     if (input.subject != null) {
         const inheritedSection = renderInheritedSection(input.subject);
@@ -215,7 +215,11 @@ Explore the patch yourself with \`bash\`, scoping to what you need rather than p
  * commands, followed by the ledger of everything subtracted - inherited, replayed, clean merges - so the
  * exclusion is visible rather than silent.
  */
-function renderSubjectSection(subject: RunSubject, range: { baseSha: string; headSha: string }): string {
+function renderSubjectSection(
+    subject: RunSubject,
+    range: { baseSha: string; headSha: string },
+    directed: boolean,
+): string {
     const ledgerLines = renderLedger(subject);
 
     if (subject.commits.length === 0) {
@@ -225,10 +229,16 @@ function renderSubjectSection(subject: RunSubject, range: { baseSha: string; hea
             return `## Reading the change
 This run has NO new commits: the head (\`${range.headSha}\`) brings nothing that is not already analyzed, so there is no new diff to read. The run exists because of its triggering events (below) - judge impact from those events and the current state of the code, and do not hunt for a patch.`;
         }
+        // A pushes-only empty-subject run never reaches the agent (skipSelectionForEmptySubject answers it
+        // deterministically), so the directed branch is the one production renders; the other is the honest
+        // fallback for a direct invocation.
+        const job = directed
+            ? `This run exists to serve its claimed non-push events - the directives and any other occurrences rendered in this prompt. They are its ENTIRE job. Serve each with what it asks for: one that asks to re-check existing behavior selects its existing tests; only one that asks for new coverage authors a new test. Select NOTHING beyond them: there is no diff to read, the branch's standing content was already assessed by earlier completed runs, and inherited changes are the target pipeline's responsibility.`
+            : `There is no diff to read and no event to serve: mark no tests and create none, and explain why in your finish reasoning. The branch's standing content was already assessed by earlier completed runs, and inherited changes are the target pipeline's responsibility.`;
         return `## Reading the change
-This push brought NOTHING this branch owns: every commit in the range was inherited from the target branch (an "update branch" merge) or replays already-analyzed content, and the target's own analysis pipeline is responsible for its changes.
+This push brought NOTHING this branch owns: every commit in the range was inherited from the target branch (an "update branch" merge or rebase) or replays content an earlier completed run already analyzed.
 ${ledgerLines}
-There is no owned diff to read. Select a test only if something inherited (summarized below) plausibly interferes with what THIS branch changes - never because the target changed something on its own.`;
+${job}`;
     }
 
     const commitLines = subject.commits
@@ -293,12 +303,17 @@ function renderInheritedSection(subject: RunSubject): string {
     return (
         "## Inherited from the target branch (context, NOT subject)\n" +
         "What the target branch contributed within this range. It was (or will be) analyzed by the target's own " +
-        "pipeline, so DO NOT select a test because of an inherited change on its own. An inherited change matters " +
-        "here only when it plausibly interferes with what THIS branch changes - it touches the same code, data or " +
-        "flows as the branch's own content - and any selection it justifies must be anchored on the branch's owned " +
-        "surface, with the interference named in the reasoning." +
+        "pipeline, so DO NOT select a test because of an inherited change on its own. An inherited change justifies " +
+        "a selection ONLY when it directly touches the same files or call sites as the branch's owned patch - name " +
+        "that intersection in the reasoning. Sharing a vendor, subsystem or theme with the branch's content is NOT " +
+        'interference, and "X may affect Y" without a named intersection is not either.' +
         stat
     );
+}
+
+/** `commits_pushed` is fully answered by the subject computation; every other event type is a job of its own. */
+function hasNonPushEvents(events: ResolvedAnalysisEvent[]): boolean {
+    return events.some((event) => event.type !== "commits_pushed");
 }
 
 /**

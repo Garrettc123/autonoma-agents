@@ -1,5 +1,10 @@
 import { db } from "@autonoma/db";
-import { type Codebase, computeRunSubject, resolveScenarioRecipesForSnapshot } from "@autonoma/diffs";
+import {
+    type Codebase,
+    computeRunSubject,
+    resolveScenarioRecipesForSnapshot,
+    skipSelectionForEmptySubject,
+} from "@autonoma/diffs";
 import type { GitHubApp } from "@autonoma/github";
 import { logger as rootLogger } from "@autonoma/logger";
 import { type OpenSnapshot, type Suite, TestSuiteStore } from "@autonoma/test-suite";
@@ -227,6 +232,19 @@ async function runSelection({
         branchId: snapshot.branchId,
         snapshotId: snapshot.snapshotId,
     });
+    // Nothing owned to analyze and no directives to serve: answer deterministically instead of asking an agent
+    // to do nothing - each run that talks itself into "interference" costs real test executions.
+    const skipped = skipSelectionForEmptySubject(subject, metadata.events ?? []);
+    if (skipped != null) {
+        return {
+            reasoning: skipped.reasoning,
+            affectedTests: [],
+            createdTests: [],
+            flowFolderId: () => undefined,
+            testCaseIdBySlug: new Map(),
+        };
+    }
+
     const scenarioRecipes = await resolveScenarioRecipesForSnapshot(db, snapshot.snapshotId, collectScenarioIds(suite));
 
     // An imported test is already in the run set with its plan settled, so it is withheld from the agent's list -

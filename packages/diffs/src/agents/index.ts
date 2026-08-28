@@ -5,6 +5,7 @@ export type { StepInspectionLoop } from "./tools/run-evidence/step-inspection-lo
 export type { ScenarioRecipeLoop } from "./tools/scenario/scenario-recipe-loop";
 
 export { DiffsAgent, type DiffsAgentConfig, type DiffsAgentInput, type DiffsAgentResult } from "./diffs/diffs-agent";
+export { skipSelectionForEmptySubject } from "./diffs/empty-selection";
 export { DiffsAgentLoop } from "./diffs/diffs-agent-loop";
 
 export {

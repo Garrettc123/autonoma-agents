@@ -26,6 +26,7 @@ export {
     type DiffsAgentConfig,
     type DiffsAgentInput,
     type DiffsAgentResult,
+    skipSelectionForEmptySubject,
     ListFlowsTool,
     ListScenariosTool,
     ListTestsTool,
