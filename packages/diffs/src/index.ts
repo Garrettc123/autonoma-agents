@@ -95,6 +95,15 @@ export {
 // PR-range git reads: the one implementation Impact Analysis and the classifier share.
 export { readPrChangedFiles, readPrCommitSubjects, readPrDiffStat, type PrRange } from "./pr-range";
 
+// The run's subject: the branch's own unassessed content, scoped against the assessed frontier and target tip.
+export {
+    computeRunSubject,
+    type RunSubject,
+    type RunSubjectParams,
+    type SubjectCommit,
+    type SubtractionLedger,
+} from "./run-subject";
+
 export {
     buildPlanAuthoringContext,
     type FlowSummary,

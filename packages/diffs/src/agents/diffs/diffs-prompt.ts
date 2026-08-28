@@ -3,6 +3,7 @@ import type { BranchHistory, DiffAnalysis, MergeContextInfo, PreClassifiedConfli
 import type { FlowIndex } from "../../flow-index";
 import { buildPlanAuthoringContext } from "../../plan-authoring";
 import { MAX_PRIOR_REPORT_CHARS, truncate } from "../../prompt-truncate";
+import type { RunSubject } from "../../run-subject";
 import { type ScenarioRecipeData, summarizeScenarioRecipes } from "../../scenario-recipe";
 
 /**
@@ -12,11 +13,19 @@ import { type ScenarioRecipeData, summarizeScenarioRecipes } from "../../scenari
  */
 const MAX_LISTED_FILES = 50;
 
+/**
+ * Cap on the inherited-changes `--stat` block. The target's movement inside a range is unbounded (a monorepo
+ * lockfile churn can touch thousands of files), and it is context, not subject - orientation is enough.
+ */
+const MAX_INHERITED_STAT_CHARS = 2_000;
+
 export interface DiffsPromptInput {
     analysis: DiffAnalysis;
     /** The PR's commit range. Rendered so the agent can read the patch itself; without it the only range it can
      * guess is `HEAD~1`, which on a multi-commit PR is silently a fraction of the change. */
     range: { baseSha: string; headSha: string };
+    /** The scoped subject, when the run computed one. Replaces the plain-range presentation. */
+    subject?: RunSubject | undefined;
     /** The analysis events the run claimed, oldest first. Empty renders no section at all. */
     events: ResolvedAnalysisEvent[];
     flowIndex: FlowIndex;
@@ -64,7 +73,12 @@ ${analysis.summary}
 ## Affected Files
 ${listAffectedFiles(analysis.affectedFiles)}
 
-${renderRangeSection(range)}`;
+${input.subject != null ? renderSubjectSection(input.subject, range) : renderRangeSection(range)}`;
+
+    if (input.subject != null) {
+        const inheritedSection = renderInheritedSection(input.subject);
+        if (inheritedSection !== "") prompt += `\n\n${inheritedSection}`;
+    }
 
     const movementSection = renderMovementEvents(input.events);
     if (movementSection !== "") prompt += `\n\n${movementSection}`;
@@ -194,6 +208,97 @@ Explore the patch yourself with \`bash\`, scoping to what you need rather than p
 - \`git diff ${range.baseSha}..${range.headSha} --stat\` for the full file list with change magnitude
 - \`git diff ${range.baseSha}..${range.headSha} -- <path>\` for one file or directory
 - \`git log ${range.baseSha}..${range.headSha} --name-only\` for which commit touched what`;
+}
+
+/**
+ * The scoped presentation: the subject commits (the branch's own unassessed content) with per-commit read
+ * commands, followed by the ledger of everything subtracted - inherited, replayed, clean merges - so the
+ * exclusion is visible rather than silent.
+ */
+function renderSubjectSection(subject: RunSubject, range: { baseSha: string; headSha: string }): string {
+    const ledgerLines = renderLedger(subject);
+
+    if (subject.commits.length === 0) {
+        const subtractedSomething =
+            subject.ledger.inheritedCount > 0 || subject.ledger.replayedCount > 0 || subject.ledger.cleanMergeCount > 0;
+        if (!subtractedSomething) {
+            return `## Reading the change
+This run has NO new commits: the head (\`${range.headSha}\`) brings nothing that is not already analyzed, so there is no new diff to read. The run exists because of its triggering events (below) - judge impact from those events and the current state of the code, and do not hunt for a patch.`;
+        }
+        return `## Reading the change
+This push brought NOTHING this branch owns: every commit in the range was inherited from the target branch (an "update branch" merge) or replays already-analyzed content, and the target's own analysis pipeline is responsible for its changes.
+${ledgerLines}
+There is no owned diff to read. Select a test only if something inherited (summarized below) plausibly interferes with what THIS branch changes - never because the target changed something on its own.`;
+    }
+
+    const commitLines = subject.commits
+        .map((commit) => {
+            const marker =
+                commit.conflictResolution != null ? " (merge - only its conflict resolutions are owned here)" : "";
+            return `- \`${commit.sha}\` ${commit.subject}${marker}`;
+        })
+        .join("\n");
+    const conflictStats = subject.commits
+        .filter((commit) => commit.conflictResolution != null)
+        .map((commit) => `\nConflict resolutions in \`${commit.sha}\`:\n${commit.conflictResolution?.stat ?? ""}`)
+        .join("");
+    const ownedRange =
+        subject.ownedBaseSha != null
+            ? `\n- \`git diff ${subject.ownedBaseSha} ${range.headSha}\` for the branch's WHOLE owned patch (all its commits vs the target)`
+            : "";
+
+    return `## Reading the change
+This run's subject is the branch's own unassessed content - the commits below, oldest first. Changes inherited from the target branch or replayed by a rebase are deliberately NOT part of the subject (they are accounted for underneath).
+
+${commitLines}
+${conflictStats}
+Read them yourself with \`bash\`, using these SHAs verbatim (the clone is checked out at the head and no other ref has a branch name):
+- \`git show <sha>\` for one commit's full patch, \`git show <sha> --stat\` for its shape
+- \`git diff <sha>^ <sha> -- <path>\` for one file of one commit${ownedRange}
+${ledgerLines}`;
+}
+
+/** The subtraction ledger, one line per non-zero count; `""` when nothing was subtracted. */
+function renderLedger(subject: RunSubject): string {
+    const lines: string[] = [];
+    if (subject.ledger.inheritedCount > 0) {
+        lines.push(
+            `- ${subject.ledger.inheritedCount} commit(s) inherited from the target branch via merge - already the target pipeline's responsibility (context below)`,
+        );
+    }
+    if (subject.ledger.replayedCount > 0) {
+        lines.push(
+            `- ${subject.ledger.replayedCount} commit(s) replayed by a rebase/force-push - their content was already analyzed under previous SHAs`,
+        );
+    }
+    if (subject.ledger.cleanMergeCount > 0) {
+        lines.push(
+            `- ${subject.ledger.cleanMergeCount} clean merge commit(s) - nothing hand-authored beyond the automatic merge`,
+        );
+    }
+    if (lines.length === 0) return "";
+    return `\nExcluded from the subject:\n${lines.join("\n")}\n`;
+}
+
+/**
+ * What the target branch contributed within this range - context for interference, never a subject. Collapses
+ * to `""` when nothing was inherited.
+ */
+function renderInheritedSection(subject: RunSubject): string {
+    if (subject.ledger.inheritedCount === 0) return "";
+    const stat =
+        subject.inheritedStat != null && subject.inheritedStat.trim() !== ""
+            ? `\n\n\`\`\`\n${truncate(subject.inheritedStat.trim(), MAX_INHERITED_STAT_CHARS)}\n\`\`\``
+            : "";
+    return (
+        "## Inherited from the target branch (context, NOT subject)\n" +
+        "What the target branch contributed within this range. It was (or will be) analyzed by the target's own " +
+        "pipeline, so DO NOT select a test because of an inherited change on its own. An inherited change matters " +
+        "here only when it plausibly interferes with what THIS branch changes - it touches the same code, data or " +
+        "flows as the branch's own content - and any selection it justifies must be anchored on the branch's owned " +
+        "surface, with the interference named in the reasoning." +
+        stat
+    );
 }
 
 /**

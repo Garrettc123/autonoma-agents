@@ -1,5 +1,5 @@
 import { db } from "@autonoma/db";
-import { type Codebase, resolveScenarioRecipesForSnapshot } from "@autonoma/diffs";
+import { type Codebase, computeRunSubject, resolveScenarioRecipesForSnapshot } from "@autonoma/diffs";
 import type { GitHubApp } from "@autonoma/github";
 import { logger as rootLogger } from "@autonoma/logger";
 import { type OpenSnapshot, type Suite, TestSuiteStore } from "@autonoma/test-suite";
@@ -18,6 +18,8 @@ export interface SelectImpactTargetsParams {
     snapshotId: string;
     /** The on-disk clone at base + head SHAs, owned by the activity. */
     codebase: Codebase;
+    /** The PR's target-branch tip (fetched into the clone), when the activity resolved one. Scopes the subject. */
+    targetSha?: string | undefined;
 }
 
 /**
@@ -39,6 +41,7 @@ export interface SelectImpactTargetsParams {
 export async function selectImpactTargets({
     snapshotId,
     codebase,
+    targetSha,
 }: SelectImpactTargetsParams): Promise<ImpactSelection> {
     logger.info("Impact Analysis selection started");
 
@@ -57,7 +60,7 @@ export async function selectImpactTargets({
         codebase,
     });
 
-    const agentResult = await runSelection({ snapshot, branchData, coordinates, codebase, merge });
+    const agentResult = await runSelection({ snapshot, branchData, coordinates, codebase, merge, targetSha });
 
     const selected = await materializeSelection({ snapshot, agentResult });
     const reverified = await reverifyOpenIssues({ db, snapshot });
@@ -196,13 +199,25 @@ async function runSelection({
     coordinates,
     codebase,
     merge,
+    targetSha,
 }: {
     snapshot: OpenSnapshot;
     branchData: BranchData;
     coordinates: SnapshotCoordinates;
     codebase: Codebase;
     merge: MergeFlowResult;
+    targetSha?: string | undefined;
 }): Promise<AgentSelection> {
+    // Main is its own target: merging a PR is main's own act, so its diff is not scoped down.
+    const subject = branchData.isMainBranch
+        ? undefined
+        : await computeRunSubject({
+              root: codebase.primaryDir,
+              headSha: coordinates.headSha,
+              frontierSha: coordinates.baseSha,
+              targetSha,
+          });
+
     const suite = await snapshot.read();
     const { metadata } = await loadDiffsContext({
         applicationId: branchData.applicationId,
@@ -228,6 +243,7 @@ async function runSelection({
             merges: merge.merges,
             preClassifiedConflicts: merge.preClassifiedConflicts,
             scenarioRecipes,
+            subject,
         },
         codebase,
     });

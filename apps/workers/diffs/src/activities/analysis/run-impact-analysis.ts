@@ -34,8 +34,8 @@ export async function runImpactAnalysis(input: RunImpactAnalysisInput): Promise<
     const selection = await withSnapshotContext(
         snapshotId,
         `impact-${snapshotId}`,
-        (context) => selectImpactTargets({ snapshotId, codebase: context.codebase }),
-        { extraShas: await claimedEventShas(snapshotId) },
+        (context) => selectImpactTargets({ snapshotId, codebase: context.codebase, targetSha: context.targetSha }),
+        { extraShas: await claimedEventShas(snapshotId), fetchTargetTip: true },
     );
 
     const analysis = getAnalysisStore().forAnalysis(snapshotId);

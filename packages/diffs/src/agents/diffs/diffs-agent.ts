@@ -12,6 +12,7 @@ import type {
 } from "../../diffs-agent";
 import type { FlowIndex } from "../../flow-index";
 import { readPrChangedFiles, readPrCommitSubjects } from "../../pr-range";
+import type { RunSubject } from "../../run-subject";
 import type { ScenarioIndex } from "../../scenario-index";
 import type { ScenarioRecipeData } from "../../scenario-recipe";
 import { sharedCompactor } from "../compaction";
@@ -85,6 +86,12 @@ export interface DiffsAgentInput {
      * an event-less run.
      */
     events?: ResolvedAnalysisEvent[];
+    /**
+     * The run's scoped subject - the branch's own unassessed content, with target-inherited and rebase-replayed
+     * changes subtracted. Absent (main-branch runs, or an unresolvable scope) the prompt presents the plain
+     * `base..head` range.
+     */
+    subject?: RunSubject | undefined;
 }
 
 export interface DiffsAgentResult {
@@ -127,16 +134,19 @@ export class DiffsAgent extends Agent<DiffsAgentInput, DiffsAgentResult, DiffsAg
     }
 
     protected async buildUserPrompt(input: DiffsAgentInput): Promise<ModelMessage[]> {
-        const range = { root: input.codebase.primaryDir, baseSha: input.baseSha, headSha: input.headSha };
-        const [affectedFiles, summary] = await Promise.all([readPrChangedFiles(range), readPrCommitSubjects(range)]);
-        const analysis: DiffAnalysis = { affectedFiles, summary };
+        const analysis = await this.buildDiffAnalysis(input);
         this.logger.info("Built diff analysis", {
-            extra: { affectedFiles: affectedFiles.length, summary: summary.slice(0, 200) },
+            extra: {
+                affectedFiles: analysis.affectedFiles.length,
+                summary: analysis.summary.slice(0, 200),
+                scoped: input.subject != null,
+            },
         });
 
         let prompt = buildDiffsUserPrompt({
             analysis,
             range: { baseSha: input.baseSha, headSha: input.headSha },
+            subject: input.subject,
             events: input.events ?? [],
             flowIndex: input.flowIndex,
             merges: input.merges ?? [],
@@ -154,6 +164,23 @@ export class DiffsAgent extends Agent<DiffsAgentInput, DiffsAgentResult, DiffsAg
         }
 
         return [{ role: "user", content: prompt }];
+    }
+
+    private async buildDiffAnalysis(input: DiffsAgentInput): Promise<DiffAnalysis> {
+        if (input.subject == null) {
+            const range = { root: input.codebase.primaryDir, baseSha: input.baseSha, headSha: input.headSha };
+            const [affectedFiles, summary] = await Promise.all([
+                readPrChangedFiles(range),
+                readPrCommitSubjects(range),
+            ]);
+            return { affectedFiles, summary };
+        }
+        const subjects = input.subject.commits.map((commit) => commit.subject);
+        return {
+            affectedFiles: input.subject.files,
+            // Newest first, matching what `git log` renders on the unscoped path.
+            summary: subjects.length > 0 ? [...subjects].reverse().join("\n") : "(no changes owned by this branch)",
+        };
     }
 
     protected async createLoop(input: DiffsAgentInput): Promise<DiffsAgentLoop> {

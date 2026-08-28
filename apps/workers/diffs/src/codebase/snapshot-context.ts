@@ -45,6 +45,8 @@ export interface GitHubAccess {
 /** The cloned codebase plus the snapshot metadata. */
 export interface SnapshotContext extends SnapshotMeta, GitHubAccess {
     codebase: Codebase;
+    /** The PR's target-branch tip, resolved and fetched when {@link SnapshotContextOptions.fetchTargetTip} was set. */
+    targetSha?: string;
 }
 
 /** Load only the persisted metadata a snapshot's analysis activities need. `client` defaults to the shared
@@ -191,12 +193,47 @@ export async function withSnapshotContext<T>(
     const meta = await loadSnapshotMeta(snapshotId);
     const github = await resolveGitHubAccess(meta);
     const dependencies = await resolveDependencyCheckouts(db, snapshotId);
-    return cloneWithBaseRecovery(meta, github, dependencies, targetDirSeed, body, options);
+    const targetSha = options?.fetchTargetTip === true ? await resolveTargetTipSha(meta, github) : undefined;
+    return cloneWithBaseRecovery(meta, github, dependencies, targetDirSeed, body, options, targetSha);
 }
 
 export interface SnapshotContextOptions {
     /** Further shas to fetch into the primary repo's clone, best-effort; a missing sha is skipped, never an error. */
     extraShas?: string[];
+    /**
+     * Resolve the PR's target-branch tip from GitHub, fetch it into the clone (best-effort) and expose it as
+     * {@link SnapshotContext.targetSha}. A branch with no PR (main) resolves to none.
+     */
+    fetchTargetTip?: boolean;
+}
+
+/**
+ * The current tip of the branch the PR merges into, read live from GitHub. Best-effort by design: the subject
+ * scoping it feeds degrades to the plain range without it, so a lookup failure must not sink the activity.
+ */
+async function resolveTargetTipSha(meta: SnapshotMeta, github: GitHubAccess): Promise<string | undefined> {
+    const logger = rootLogger.child({ name: "resolveTargetTipSha" });
+    try {
+        const prInfo = await db.featureBranchInfo.findUnique({
+            where: { branchId: meta.branchId },
+            select: { prNumber: true },
+        });
+        if (prInfo == null) {
+            logger.info("Branch has no pull request; no target tip to resolve");
+            return undefined;
+        }
+        const pullRequest = await github.githubClient.getPullRequest(meta.githubRepositoryId, prInfo.prNumber);
+        logger.info("Resolved the PR's target tip", {
+            extra: { prNumber: prInfo.prNumber, targetSha: pullRequest.baseSha },
+        });
+        return pullRequest.baseSha;
+    } catch (error) {
+        logger.warn("Failed to resolve the PR's target tip; subject scoping degrades to the plain range", {
+            snapshot: { snapshotId: meta.snapshotId },
+            extra: { error: String(error) },
+        });
+        return undefined;
+    }
 }
 
 /**
@@ -213,14 +250,16 @@ async function cloneWithBaseRecovery<T>(
     targetDirSeed: string,
     body: (context: SnapshotContext) => Promise<T>,
     options?: SnapshotContextOptions,
+    targetSha?: string,
 ): Promise<T> {
+    const extraShas = targetSha != null ? [...(options?.extraShas ?? []), targetSha] : options?.extraShas;
     const cloneAndRun = (snapshot: SnapshotMeta) =>
         withCheckout(
             github,
-            { headSha: snapshot.headSha, baseSha: snapshot.baseSha, extraShas: options?.extraShas },
+            { headSha: snapshot.headSha, baseSha: snapshot.baseSha, extraShas },
             dependencies,
             targetDirSeed,
-            (codebase) => body(buildSnapshotContext(snapshot, github, codebase)),
+            (codebase) => body(buildSnapshotContext(snapshot, github, codebase, targetSha)),
         );
 
     try {
@@ -260,7 +299,12 @@ async function recoverUnreachableBase(
     return recoveredBaseSha;
 }
 
-function buildSnapshotContext(meta: SnapshotMeta, github: GitHubAccess, codebase: Codebase): SnapshotContext {
+function buildSnapshotContext(
+    meta: SnapshotMeta,
+    github: GitHubAccess,
+    codebase: Codebase,
+    targetSha?: string,
+): SnapshotContext {
     return {
         snapshotId: meta.snapshotId,
         baseSha: meta.baseSha,
@@ -276,5 +320,6 @@ function buildSnapshotContext(meta: SnapshotMeta, github: GitHubAccess, codebase
         repoFullName: github.repoFullName,
         githubClient: github.githubClient,
         codebase,
+        targetSha,
     };
 }

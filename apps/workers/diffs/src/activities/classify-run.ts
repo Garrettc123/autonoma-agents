@@ -1,7 +1,7 @@
 import { InlineMp4VideoUploader, type UploadedVideo, type VideoUploader } from "@autonoma/ai";
 import { persistAiCosts } from "@autonoma/billing";
 import { type ApplicationArchitecture, db } from "@autonoma/db";
-import { readPrDiffStat, type InspectableStep, StorageEvidenceLoader } from "@autonoma/diffs";
+import { computeRunSubject, readPrDiffStat, type InspectableStep, StorageEvidenceLoader } from "@autonoma/diffs";
 import {
     ClassifierAgent,
     type Evidence,
@@ -30,7 +30,7 @@ import type {
 } from "@autonoma/workflow/activities";
 import ffmpeg from "@ffmpeg-installer/ffmpeg";
 import { resolveRunTarget } from "../codebase/run-target";
-import { withSnapshotContext } from "../codebase/snapshot-context";
+import { type SnapshotContext, withSnapshotContext } from "../codebase/snapshot-context";
 import { env } from "../env";
 import { webmToGif } from "../media/webm-to-gif";
 import { previewSecrets } from "../preview-secrets";
@@ -149,128 +149,155 @@ export async function classifyInvestigationRun(input: ClassifyInvestigationRunIn
 
     const generation = await loadGenerationRow(testGenerationId);
 
-    return withSnapshotContext(snapshotId, `classify-${testGenerationId}`, async (context) => {
-        const target = await resolveRunTarget(context);
-        const resolvedPreview = await resolvePreviewEnvironment(context.repoFullName, target, logger);
-        const session = createModelSession();
+    return withSnapshotContext(
+        snapshotId,
+        `classify-${testGenerationId}`,
+        async (context) => {
+            const target = await resolveRunTarget(context);
+            const resolvedPreview = await resolvePreviewEnvironment(context.repoFullName, target, logger);
+            const session = createModelSession();
 
-        // getVideoModel rather than getModel: acquiring it IS the video-capability check, so a model whose entry
-        // declares no uploader fails here rather than at the provider. The uploader itself is built with THIS
-        // host's ffmpeg - the image ships none on PATH, and which binary exists is a fact the shared registry
-        // cannot know - so the entry's own factory would silently fail to transcode a pre-optimizer webm.
-        const recordingModel = session.getVideoModel({ model: "smart-video", tag: "investigation-vision-video" });
-        const uploader = new InlineMp4VideoUploader(ffmpeg.path);
-        const { run: runArtifacts, recordingBytes } = await buildRunArtifacts(generation, uploader);
+            // getVideoModel rather than getModel: acquiring it IS the video-capability check, so a model whose entry
+            // declares no uploader fails here rather than at the provider. The uploader itself is built with THIS
+            // host's ffmpeg - the image ships none on PATH, and which binary exists is a fact the shared registry
+            // cannot know - so the entry's own factory would silently fail to transcode a pre-optimizer webm.
+            const recordingModel = session.getVideoModel({ model: "smart-video", tag: "investigation-vision-video" });
+            const uploader = new InlineMp4VideoUploader(ffmpeg.path);
+            const { run: runArtifacts, recordingBytes } = await buildRunArtifacts(generation, uploader);
 
-        // Gate the previewkit-dependent tools on whether this run's preview is actually managed by previewkit. The
-        // namespace only resolves for a previewkit-deployed preview; when it does not (a self-hosted / non-integrated
-        // client), there is no Loki stream and the backend script harness cannot authenticate - so we omit
-        // get_app_logs / run_script / get_preview_env rather than let them fail with confusing errors the classifier
-        // mistakes for signal. App logs additionally need LOKI configured on this worker.
-        const previewIntegrated = resolvedPreview != null;
-        // The endpoint is bound HERE, once, into the querier the loader takes: the loader throws instead of
-        // returning prose, so it must never be constructed without somewhere to reach and a namespace to read.
-        const lokiUrl = env.LOKI_URL != null && env.LOKI_URL !== "" ? env.LOKI_URL : undefined;
-        const loadAppLogs =
-            resolvedPreview != null && lokiUrl != null
-                ? (regex: string) =>
-                      loadPreviewAppLogs(
-                          {
-                              regex,
-                              namespace: resolvedPreview.namespace,
-                              startEpoch: runArtifacts.startEpoch,
-                              endEpoch: runArtifacts.endEpoch,
-                              logger,
-                          },
-                          lokiQuerier(lokiUrl),
-                      )
+            // Gate the previewkit-dependent tools on whether this run's preview is actually managed by previewkit. The
+            // namespace only resolves for a previewkit-deployed preview; when it does not (a self-hosted / non-integrated
+            // client), there is no Loki stream and the backend script harness cannot authenticate - so we omit
+            // get_app_logs / run_script / get_preview_env rather than let them fail with confusing errors the classifier
+            // mistakes for signal. App logs additionally need LOKI configured on this worker.
+            const previewIntegrated = resolvedPreview != null;
+            // The endpoint is bound HERE, once, into the querier the loader takes: the loader throws instead of
+            // returning prose, so it must never be constructed without somewhere to reach and a namespace to read.
+            const lokiUrl = env.LOKI_URL != null && env.LOKI_URL !== "" ? env.LOKI_URL : undefined;
+            const loadAppLogs =
+                resolvedPreview != null && lokiUrl != null
+                    ? (regex: string) =>
+                          loadPreviewAppLogs(
+                              {
+                                  regex,
+                                  namespace: resolvedPreview.namespace,
+                                  startEpoch: runArtifacts.startEpoch,
+                                  endEpoch: runArtifacts.endEpoch,
+                                  logger,
+                              },
+                              lokiQuerier(lokiUrl),
+                          )
+                    : undefined;
+            const preview = previewIntegrated
+                ? new PreviewEnvironment(previewSecrets(), context.applicationId, resolvedPreview.connectionKeys)
                 : undefined;
-        const preview = previewIntegrated
-            ? new PreviewEnvironment(previewSecrets(), context.applicationId, resolvedPreview.connectionKeys)
-            : undefined;
-        logger.info("Resolved preview introspection availability", {
-            extra: { previewIntegrated, appLogsAvailable: loadAppLogs != null },
-        });
+            logger.info("Resolved preview introspection availability", {
+                extra: { previewIntegrated, appLogsAvailable: loadAppLogs != null },
+            });
 
-        const classifier = new ClassifierAgent({
-            model: session.getModel({ model: "classifier", tag: "investigation-classify" }),
-            videoModel: recordingModel.model,
-        });
-        const { result: verdict, conversation } = await classifier.run({
-            appSlug: context.appSlug,
-            target,
-            test: { slug, plan: generation.testPlan.prompt, affectedReason: reason },
-            provision: describeProvision(generation),
-            diffSummary: await readPrDiffStat({
-                root: context.codebase.primaryDir,
+            const classifier = new ClassifierAgent({
+                model: session.getModel({ model: "classifier", tag: "investigation-classify" }),
+                videoModel: recordingModel.model,
+            });
+            const { result: verdict, conversation } = await classifier.run({
+                appSlug: context.appSlug,
+                target,
+                test: { slug, plan: generation.testPlan.prompt, affectedReason: reason },
+                provision: describeProvision(generation),
+                diffSummary: await readClassifierDiffSummary(context),
+                priorPass,
+                codebase: context.codebase,
                 baseSha: context.baseSha,
                 headSha: context.headSha,
-            }),
-            priorPass,
-            codebase: context.codebase,
-            baseSha: context.baseSha,
-            headSha: context.headSha,
-            run: runArtifacts,
-            screenshotLoader: new StorageEvidenceLoader(getStorage()),
-            // One instance in both slots - it satisfies each capability, so both tools are registered.
-            previewEnv: preview,
-            previewScript: preview,
-            loadBaseline: async () =>
-                formatPriorRunsBaseline(
-                    await getAnalysisStore().priorRuns({
-                        applicationId: context.applicationId,
-                        testSlug: slug,
-                        currentSnapshotId: snapshotId,
-                    }),
-                ),
-            loadAppLogs,
-        });
+                run: runArtifacts,
+                screenshotLoader: new StorageEvidenceLoader(getStorage()),
+                // One instance in both slots - it satisfies each capability, so both tools are registered.
+                previewEnv: preview,
+                previewScript: preview,
+                loadBaseline: async () =>
+                    formatPriorRunsBaseline(
+                        await getAnalysisStore().priorRuns({
+                            applicationId: context.applicationId,
+                            testSlug: slug,
+                            currentSnapshotId: snapshotId,
+                        }),
+                    ),
+                loadAppLogs,
+            });
 
-        // Persist the classifier's reasoning (best-effort) so a wrong verdict can be debugged, alongside the cost
-        // ledger - both are independent auxiliary writes and a failure of either must not sink the classification.
-        const [conversationUrl] = await Promise.all([
-            uploadConversation({
-                storage: getStorage(),
-                snapshotId,
-                phase: "classify",
-                generationId: testGenerationId,
-                conversation,
-                logger: logger.child({ name: "uploadConversation" }),
-            }),
-            persistAiCosts(
-                db,
-                session.costCollector.getRecords(),
-                { investigationSnapshotId: snapshotId },
-                logger,
-            ).catch((error: unknown) => {
-                rethrowIfCreditsExhausted(error);
-                logger.warn("Failed to persist classification costs", { err: error });
-            }),
-        ]);
+            // Persist the classifier's reasoning (best-effort) so a wrong verdict can be debugged, alongside the cost
+            // ledger - both are independent auxiliary writes and a failure of either must not sink the classification.
+            const [conversationUrl] = await Promise.all([
+                uploadConversation({
+                    storage: getStorage(),
+                    snapshotId,
+                    phase: "classify",
+                    generationId: testGenerationId,
+                    conversation,
+                    logger: logger.child({ name: "uploadConversation" }),
+                }),
+                persistAiCosts(
+                    db,
+                    session.costCollector.getRecords(),
+                    { investigationSnapshotId: snapshotId },
+                    logger,
+                ).catch((error: unknown) => {
+                    rethrowIfCreditsExhausted(error);
+                    logger.warn("Failed to persist classification costs", { err: error });
+                }),
+            ]);
 
-        // The report features the frame the classifier judged most descriptive (verdict.keyStepIndex), not
-        // mechanically the last/failed one. When it named no step we show no screenshot rather than falling back
-        // to the run's final frame, which is often a setup/blank/home screen and reads as a misleading "failure".
-        const keyScreenshot = resolveKeyScreenshot(generation.attempts, verdict.keyStepIndex);
-        // Each screenshot/video evidence item the classifier pinned to a step gets that step's frame key resolved
-        // here (the only place the attempts are in scope), so the finding page can render the cited still inline.
-        const evidence = resolveEvidenceFrames(verdict.evidence, generation.attempts);
-        const clipUrl = await maybeGenerateClip(verdict.category, recordingBytes, testGenerationId, logger);
-        logger.info("Shadow run classified", {
-            extra: { category: verdict.category, confidence: verdict.confidence, keyStepIndex: verdict.keyStepIndex },
-        });
-        return {
-            slug,
-            plan: generation.testPlan.prompt,
-            runSuccess: runArtifacts.success,
-            stepCount: runArtifacts.stepCount,
-            runSteps: runArtifacts.steps,
-            runTrace: deriveRunTrace(generation.attempts),
-            verdict: { ...verdict, evidence },
-            keyScreenshotUrl: keyScreenshot ?? undefined,
-            clipUrl,
-            conversationUrl,
-        };
+            // The report features the frame the classifier judged most descriptive (verdict.keyStepIndex), not
+            // mechanically the last/failed one. When it named no step we show no screenshot rather than falling back
+            // to the run's final frame, which is often a setup/blank/home screen and reads as a misleading "failure".
+            const keyScreenshot = resolveKeyScreenshot(generation.attempts, verdict.keyStepIndex);
+            // Each screenshot/video evidence item the classifier pinned to a step gets that step's frame key resolved
+            // here (the only place the attempts are in scope), so the finding page can render the cited still inline.
+            const evidence = resolveEvidenceFrames(verdict.evidence, generation.attempts);
+            const clipUrl = await maybeGenerateClip(verdict.category, recordingBytes, testGenerationId, logger);
+            logger.info("Shadow run classified", {
+                extra: {
+                    category: verdict.category,
+                    confidence: verdict.confidence,
+                    keyStepIndex: verdict.keyStepIndex,
+                },
+            });
+            return {
+                slug,
+                plan: generation.testPlan.prompt,
+                runSuccess: runArtifacts.success,
+                stepCount: runArtifacts.stepCount,
+                runSteps: runArtifacts.steps,
+                runTrace: deriveRunTrace(generation.attempts),
+                verdict: { ...verdict, evidence },
+                keyScreenshotUrl: keyScreenshot ?? undefined,
+                clipUrl,
+                conversationUrl,
+            };
+        },
+        { fetchTargetTip: true },
+    );
+}
+
+/**
+ * The change summary the classifier grounds against: the branch's whole owned patch (its merge-base with the
+ * target vs the head), so an "update branch" merge does not present the target's changes as this PR's.
+ */
+async function readClassifierDiffSummary(context: SnapshotContext): Promise<string> {
+    const subject =
+        context.targetSha != null
+            ? await computeRunSubject({
+                  root: context.codebase.primaryDir,
+                  headSha: context.headSha,
+                  frontierSha: context.baseSha,
+                  targetSha: context.targetSha,
+              })
+            : undefined;
+    if (subject?.ownedStat != null) return subject.ownedStat;
+    return await readPrDiffStat({
+        root: context.codebase.primaryDir,
+        baseSha: context.baseSha,
+        headSha: context.headSha,
     });
 }
 
