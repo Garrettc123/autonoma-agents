@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.260828.1](https://github.com/Autonoma-AI/agent/compare/v1.260827.1...v1.260828.1) (2026-08-28)
+
+
+### Features
+
+* content-anchor the README screenshots instead of a fixed viewport height ([#2864](https://github.com/Autonoma-AI/agent/issues/2864)) ([c69f337](https://github.com/Autonoma-AI/agent/commit/c69f3376b23d06a640ae8bfbe59c89039aa92eb0))
+* **platform:** move ebs-csi-controller onto the core node pool ([#2877](https://github.com/Autonoma-AI/agent/issues/2877)) ([edb72f0](https://github.com/Autonoma-AI/agent/commit/edb72f0ce462db7aca252703d3be30f147cc4274))
+* **platform:** move kube-state-metrics and prometheus-agent to their own static node pool ([#2875](https://github.com/Autonoma-AI/agent/issues/2875)) ([e75ba97](https://github.com/Autonoma-AI/agent/commit/e75ba975899c7cc4ecefe7157514ebada0757229))
+
+
+### Bug Fixes
+
+* **keda:** bump keda-operator to 2.20.2 and fix orphaned worker-web ScaledJob cleanup ([#2870](https://github.com/Autonoma-AI/agent/issues/2870)) ([03ba0ad](https://github.com/Autonoma-AI/agent/commit/03ba0ad49a02035dec07cf10b4985a2ca7e811c9))
+* **previewkit:** meter and reap previews by label, price compute in USD ([#2863](https://github.com/Autonoma-AI/agent/issues/2863)) ([6ef0e85](https://github.com/Autonoma-AI/agent/commit/6ef0e85a73de8462c5c10a6ddfff3ef3464a6307))
+* **previewkit:** move default NodePool from spot to on-demand under idle SP ([#2874](https://github.com/Autonoma-AI/agent/issues/2874)) ([e9cb654](https://github.com/Autonoma-AI/agent/commit/e9cb6540f38d89ed6d1a2120c6052df5f455d311))
+
 ## [1.260827.1](https://github.com/Autonoma-AI/agent/compare/v1.260826.2...v1.260827.1) (2026-08-27)
 
 
