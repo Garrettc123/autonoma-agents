@@ -9,6 +9,7 @@ type RawTxClient = TxClient & Pick<PrismaClient, "$queryRaw">;
 
 type DeductCreditsFlooredResultRow = {
     inserted_count: bigint;
+    whole_credits: number | null;
     old_balance: number | null;
     new_balance: number | null;
     new_subscription_balance: number | null;
@@ -26,12 +27,25 @@ export interface DeductCreditsFlooredParams {
     organizationId: string;
     transactionId: string;
     transactionType: CreditTransactionType;
-    cost: number;
+    /**
+     * What to charge, in MILLIONTHS of a credit. Whole-credit callers pass
+     * `credits * MICRO_CREDITS_PER_CREDIT`; only metered compute, whose 15-minute windows each
+     * cost a fraction of a credit, passes a value that is not a whole multiple.
+     *
+     * Sub-credit amounts are not rounded up. They accumulate on the org's
+     * `creditRemainderMicros` and are deducted as whole credits once they add up to one, so a
+     * fleet of previews is billed for what it consumed instead of a minimum of one credit per
+     * window (which overcharged 3-4x at observed usage).
+     */
+    costMicroCredits: number;
     fkColumn: CreditTransactionFkColumn;
 }
 
 export interface DeductCreditsFlooredResult {
+    /** Whether this call was the one that recorded the charge (false on an idempotent retry). */
     deducted: boolean;
+    /** Whole credits actually taken off the balance. Zero when the charge only moved the carry. */
+    creditsDeducted?: number;
     newBalance?: number;
     /**
      * True when this deduction just pushed a zero-tolerance org (`killJobsOnCreditExhaustion`) from
@@ -67,7 +81,10 @@ export async function deductCreditsFloored(
     params: DeductCreditsFlooredParams,
     logger: Logger,
 ): Promise<DeductCreditsFlooredResult> {
-    const { organizationId, transactionId, transactionType, cost, fkColumn } = params;
+    const { organizationId, transactionId, transactionType, costMicroCredits, fkColumn } = params;
+    // Bound as text and cast, not as a number: a large charge in millionths exceeds int4, and
+    // the carry arithmetic below must not silently overflow.
+    const costMicros = String(Math.round(costMicroCredits));
 
     const result = await db
         .$transaction(async (tx) => {
@@ -79,22 +96,37 @@ export async function deductCreditsFloored(
                         organization_id,
                         credit_balance,
                         subscription_credit_balance,
+                        credit_remainder_micros,
                         credit_floor,
                         kill_jobs_on_credit_exhaustion
                     FROM billing_customer
                     WHERE organization_id = ${organizationId}
                     FOR UPDATE
                 ),
-                eligible AS (
+                -- This charge plus whatever sub-credit consumption was carried forward, split
+                -- into the whole credits to take now and the remainder to carry on. Integer
+                -- division truncates, and both operands are non-negative, so this floors.
+                accrued AS (
                     SELECT
                         organization_id,
                         credit_balance,
                         subscription_credit_balance,
                         credit_floor,
                         kill_jobs_on_credit_exhaustion,
-                        LEAST(subscription_credit_balance, ${cost}) AS subscription_consumed
+                        ((credit_remainder_micros::bigint + ${costMicros}::bigint) / 1000000)::int
+                            AS whole_credits,
+                        ((credit_remainder_micros::bigint + ${costMicros}::bigint) % 1000000)::int
+                            AS new_remainder_micros
                     FROM customer
                 ),
+                eligible AS (
+                    SELECT
+                        *,
+                        LEAST(subscription_credit_balance, whole_credits) AS subscription_consumed
+                    FROM accrued
+                ),
+                -- Written even when whole_credits is 0: the row is what makes this idempotent, so
+                -- a retried window must not be able to advance the carry a second time.
                 inserted AS (
                     INSERT INTO credit_transaction (
                         id,
@@ -108,8 +140,8 @@ export async function deductCreditsFloored(
                         ${transactionId},
                         organization_id,
                         ${transactionType}::credit_transaction_type,
-                        ${-cost},
-                        GREATEST(credit_balance - ${cost}, credit_floor),
+                        -whole_credits,
+                        GREATEST(credit_balance - whole_credits, credit_floor),
                         ${fkColumn.value}
                     FROM eligible
                     ON CONFLICT (id) DO NOTHING
@@ -118,9 +150,10 @@ export async function deductCreditsFloored(
                 updated AS (
                     UPDATE billing_customer bc
                     SET
-                        credit_balance = GREATEST(eligible.credit_balance - ${cost}, eligible.credit_floor),
+                        credit_balance = GREATEST(eligible.credit_balance - eligible.whole_credits, eligible.credit_floor),
                         subscription_credit_balance =
-                            GREATEST(eligible.subscription_credit_balance - eligible.subscription_consumed, 0)
+                            GREATEST(eligible.subscription_credit_balance - eligible.subscription_consumed, 0),
+                        credit_remainder_micros = eligible.new_remainder_micros
                     FROM eligible
                     WHERE bc.organization_id = eligible.organization_id
                       AND EXISTS (SELECT 1 FROM inserted)
@@ -128,6 +161,7 @@ export async function deductCreditsFloored(
                 )
                 SELECT
                     (SELECT COUNT(*)::bigint FROM inserted) AS inserted_count,
+                    (SELECT whole_credits FROM eligible LIMIT 1) AS whole_credits,
                     (SELECT credit_balance FROM eligible LIMIT 1) AS old_balance,
                     (SELECT credit_balance FROM updated LIMIT 1) AS new_balance,
                     (SELECT subscription_credit_balance FROM updated LIMIT 1) AS new_subscription_balance,
@@ -157,11 +191,16 @@ export async function deductCreditsFloored(
                 organizationId,
                 transactionId,
                 transactionType,
-                cost,
+                extra: { costMicroCredits, creditsDeducted: result.whole_credits },
                 newBalance: result.new_balance,
                 crossedIntoExhaustion,
             });
-            return { deducted: true, newBalance: result.new_balance ?? undefined, crossedIntoExhaustion };
+            return {
+                deducted: true,
+                creditsDeducted: result.whole_credits ?? undefined,
+                newBalance: result.new_balance ?? undefined,
+                crossedIntoExhaustion,
+            };
         })
         .catch((error: unknown) => {
             if (isUniqueConstraintError(error)) {

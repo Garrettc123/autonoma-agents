@@ -7,6 +7,8 @@ import { z } from "zod";
 import { env } from "../../env";
 import { internalProcedure, router } from "../../trpc";
 
+const MICRODOLLARS_PER_USD = 1_000_000;
+
 const ListOrganizationsInputSchema = z.object({
     page: z.number().int().positive(),
     pageSize: z.number().int().min(1).max(100),
@@ -209,14 +211,18 @@ export const adminRouter = router({
             .mutation(({ ctx: { services }, input }) =>
                 services.billing.setPromoCodeActive(input.promoCodeId, input.isActive),
             ),
-        /** An org's live previewkit compute-usage rate, for the billing settings pricing form to pre-fill. */
+        /**
+         * An org's live previewkit compute price, for the billing settings pricing form to pre-fill.
+         * USD per hour, the same unit as the AWS reference the form shows beside it, so the two are
+         * directly comparable and "apply the reference" needs no conversion.
+         */
         getComputePricing: internalProcedure
             .input(z.object({ organizationId: z.string().min(1) }))
             .query(async ({ ctx: { services }, input }) => {
                 const pricing = await services.billing.getPricing(input.organizationId);
                 return {
-                    creditsPerVcpuHour: pricing.creditsPerVcpuHour,
-                    creditsPerGbMemoryHour: pricing.creditsPerGbMemoryHour,
+                    usdPerVcpuHour: pricing.usdPerVcpuHourMicros / MICRODOLLARS_PER_USD,
+                    usdPerGbHour: pricing.usdPerGbHourMicros / MICRODOLLARS_PER_USD,
                 };
             }),
         /**
@@ -227,22 +233,23 @@ export const adminRouter = router({
             services.billing.getComputePricingReferences(),
         ),
         /**
-         * Sets an org's live previewkit compute-usage rate. Deliberate and admin-only: this is
-         * the only path that writes BillingPricing.creditsPerVcpuHour/creditsPerGbMemoryHour -
-         * the cronjob that computes the reference rate above never calls this itself.
+         * Overrides one org's previewkit compute price, away from the fleet default. Deliberate and
+         * admin-only: this is the only path that writes
+         * BillingPricing.usdPerVcpuHourMicros/usdPerGbHourMicros - the cronjob that computes the
+         * reference rate above never calls this itself.
          */
         updateComputePricing: internalProcedure
             .input(
                 z.object({
                     organizationId: z.string().min(1),
-                    creditsPerVcpuHour: z.number().nonnegative(),
-                    creditsPerGbMemoryHour: z.number().nonnegative(),
+                    usdPerVcpuHour: z.number().nonnegative(),
+                    usdPerGbHour: z.number().nonnegative(),
                 }),
             )
             .mutation(({ ctx: { services }, input }) =>
                 services.billing.updateComputePricing(input.organizationId, {
-                    creditsPerVcpuHour: input.creditsPerVcpuHour,
-                    creditsPerGbMemoryHour: input.creditsPerGbMemoryHour,
+                    usdPerVcpuHour: input.usdPerVcpuHour,
+                    usdPerGbHour: input.usdPerGbHour,
                 }),
             ),
         /**
@@ -350,16 +357,17 @@ export const adminRouter = router({
             .input(z.object({ environmentId: z.string().min(1) }))
             .query(({ ctx: { services }, input }) => services.usage.environmentComputeUsage(input.environmentId)),
         /**
-         * What every org WOULD be charged for compute at the given rates over the given window.
-         * Read-only: compute is metered unconditionally but priced at 0, and the deductions have
-         * no dry-run mode, so this is the only way to size a rate - and find the orgs it would
-         * push below their floor - before setting one.
+         * What every org WOULD be charged for compute at the given USD prices over the given window.
+         * Read-only, and the deductions have no dry-run mode, so this is the only way to size a
+         * price - and find the orgs it would push below their floor - before setting one. Prices
+         * are USD per hour, not credits: each org's credits are derived from its own sell rate,
+         * which is exactly what makes a fleet-wide USD number safe to set.
          */
         computeBillingProjection: internalProcedure
             .input(
                 z.object({
-                    creditsPerVcpuHour: z.number().int().min(0),
-                    creditsPerGbMemoryHour: z.number().int().min(0),
+                    usdPerVcpuHour: z.number().min(0),
+                    usdPerGbHour: z.number().min(0),
                     since: z.date(),
                     until: z.date(),
                 }),

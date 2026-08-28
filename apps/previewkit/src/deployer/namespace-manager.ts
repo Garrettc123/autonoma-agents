@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { PREVIEWKIT_MANAGED_BY_LABEL, PREVIEWKIT_PR_NUMBER_LABEL } from "@autonoma/k8s/previewkit-labels";
 import { toSlug } from "@autonoma/utils";
 import * as k8s from "@kubernetes/client-node";
 import { logger } from "../logger";
@@ -20,8 +21,10 @@ const NAMESPACE_MAX_LENGTH = 63;
 // colliding would mean one silently takes over the other's namespace.
 const NAMESPACE_HASH_LENGTH = 16;
 
-const LABEL_MANAGED_BY = "previewkit.dev/managed-by";
-const LABEL_PR_NUMBER = "previewkit.dev/pr-number";
+// The two labels the reaper and the log shipper select on. Defined once in
+// @autonoma/k8s so a consumer can never disagree with what the deployer writes.
+const LABEL_MANAGED_BY = PREVIEWKIT_MANAGED_BY_LABEL;
+const LABEL_PR_NUMBER = PREVIEWKIT_PR_NUMBER_LABEL;
 const LABEL_REPO = "previewkit.dev/repo";
 const LABEL_ORGANIZATION = "previewkit.dev/organization";
 

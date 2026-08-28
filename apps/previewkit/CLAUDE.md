@@ -62,6 +62,16 @@ redeploys it at the pushed head (`deployMainBranchFromPushWebhook`, action `sync
 Pushes that don't update such an environment are dropped by the webhook handler before they
 are even recorded - push fires for every branch of every connected repo.
 
+**Nothing outside the deployer may recognise a preview by its NAME.** The namespace format has already
+changed once (`preview-{owner}-{repo}-pr-{N}` -> `{owner}-{repo}-{N}-{hash}`), and every consumer that had
+hardcoded the old prefix kept compiling while silently matching nothing: the usage meter stopped billing
+running compute, the reaper stopped reclaiming namespaces AND started stamping live environments
+`torn_down`, and Alloy stopped shipping app logs. Select on the labels the deployer writes instead -
+`previewkit.dev/managed-by=previewkit` plus `previewkit.dev/pr-number` (the pair is
+`PREVIEWKIT_ENVIRONMENT_NAMESPACE_SELECTOR` in `@autonoma/k8s/previewkit-labels`; the `pr-number` half is
+load-bearing, since the shared edge namespace `system` also carries `managed-by`). `pr-number` is also how
+the base preview is recognised as permanent - not a `-pr-0` suffix.
+
 **Concurrency model:** the per-environment mutex is the `previewkit.dev/env={hash}-{pr}` label on
 each Job (`PreviewkitJobLauncher`, `@autonoma/k8s/previewkit-jobs`). Launching a deploy or per-app redeploy first deletes
 any in-flight "deploy-family" Job for that env (`previewkit.dev/type in (deploy,redeploy-app)`,
@@ -169,7 +179,10 @@ an unexpected crash exits non-zero, so the Job's `backoffLimit: 1` retries just 
   shape (`computeAppBuildResourceUsage`, local to this file) and recorded to `PreviewkitAppBuildUsage`, then
   deducted from the org's balance via `@autonoma/billing`'s `deductCreditsForBuildUsage` - floored at the org's
   own `creditFloor` (0 by default) rather than requiring sufficiency, so an already-running build is never
-  half-billed. `PreviewkitAppBuildUsage.instanceType`/`capacityType` carry the real EC2 instance Karpenter
+  half-billed. Prices live on `BillingPricing` in USD per hour (`usdPerVcpuHourMicros` /
+  `usdPerGbHourMicros`, a fleet-wide default of 1.5x AWS cost) and convert to credits at each org's own sell
+  rate; a build costing less than one credit accrues on `BillingCustomer.creditRemainderMicros` instead of
+  rounding up. `PreviewkitAppBuildUsage.instanceType`/`capacityType` carry the real EC2 instance Karpenter
   provisioned for that build (e.g. "m7i.xlarge"/"spot"), read off the node's labels by
   `BuildKitJobManager.provision()` (`builder/buildkit-job-manager.ts`) once the build pod is scheduled - the
   node-pool's requirements only bound a range (m-family, gen 6-8, xlarge, spot or on-demand), not which concrete

@@ -5,14 +5,11 @@ import { formatMicrodollars } from "lib/format";
 import { useAdminEnvironmentComputeUsage } from "lib/query/admin.queries";
 
 /**
- * Admin-only Previewkit compute usage for this environment - build and running compute,
- * priced through the same pricing table billing itself uses. Zero credits means the
- * pricing is currently zeroed out (shadow mode), not that the usage was free. Collapsible
- * (see `AdminAiCostPanel`); `defaultOpen` starts it expanded for the dedicated Usage tab.
- *
- * Also shows the global, AWS-derived pricing reference (kept current by the weekly
- * aws-compute-pricing-drift cronjob) next to a form to set this org's live rate - applying it
- * is always a deliberate admin action here, never something the cronjob does on its own.
+ * Admin-only Previewkit compute usage for this environment - build and running compute, priced
+ * through the same pricing table billing itself uses. Credits are shown fractional on purpose:
+ * sub-credit consumption accrues on the org's balance rather than rounding up per window, so a
+ * rounded figure here would not match what the org is charged. Collapsible (see
+ * `AdminAiCostPanel`); `defaultOpen` starts it expanded for the dedicated Usage tab.
  */
 export function AdminComputeUsagePanel({
   environmentId,
@@ -29,7 +26,7 @@ export function AdminComputeUsagePanel({
   return (
     <details className="group shrink-0 border border-border-dim bg-surface-base" open={defaultOpen ? true : undefined}>
       <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 px-4 py-3">
-        <CaretRightIcon size={12} className="shrink-0 text-text-tertiary transition-transform group-open:rotate-90" />
+        <CaretRightIcon size={12} className="shrink-0 text-text-secondary transition-transform group-open:rotate-90" />
         <CoinsIcon size={14} className="shrink-0 text-text-secondary" />
         <span className="font-mono text-xs font-semibold uppercase tracking-widest text-text-primary">
           Compute usage
@@ -61,8 +58,8 @@ export function AdminComputeUsagePanel({
               credits={data.running.credits}
             />
             <div className="px-4 py-2 font-mono text-2xs text-text-secondary">
-              Priced at {data.creditsPerVcpuHour} credits/vCPU-hr, {data.creditsPerGbMemoryHour} credits/GB-hr
-              {data.creditsPerVcpuHour === 0 && data.creditsPerGbMemoryHour === 0 && " (shadow mode - not yet billed)"}
+              Priced at ${data.usdPerVcpuHour.toFixed(6)}/vCPU-hr, ${data.usdPerGbHour.toFixed(6)}/GB-hr
+              {data.usdPerVcpuHour === 0 && data.usdPerGbHour === 0 && " (shadow mode - not yet billed)"}
             </div>
           </div>
         )}

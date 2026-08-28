@@ -5,7 +5,6 @@ import type { BillingService } from "../types";
 import type { PrometheusClient } from "./prometheus-client";
 
 const WINDOW_MS = 15 * 60 * 1000;
-const WINDOW_SECONDS = WINDOW_MS / 1000;
 // Windows close this far behind wall clock to give remote_write ingestion time
 // to land the trailing samples of the window before it's queried.
 const INGESTION_LAG_MS = 5 * 60 * 1000;
@@ -118,11 +117,11 @@ export class PreviewUsageMeterSweepService extends Service {
             }
 
             let cpuByNamespace: Map<string, number>;
-            let averageGbByNamespace: Map<string, number>;
+            let gbSecondsByNamespace: Map<string, number>;
             try {
-                [cpuByNamespace, averageGbByNamespace] = await Promise.all([
-                    this.prometheus.queryVcpuSecondsByNamespace(windowEnd),
-                    this.prometheus.queryAverageGbByNamespace(windowEnd),
+                [cpuByNamespace, gbSecondsByNamespace] = await Promise.all([
+                    this.prometheus.queryVcpuSecondsByNamespace(windowEnd, WINDOW_MS),
+                    this.prometheus.queryGbSecondsByNamespace(windowEnd, WINDOW_MS),
                 ]);
             } catch (error) {
                 this.logger.error("Prometheus query failed; stopping sweep without advancing past this window", error, {
@@ -139,7 +138,7 @@ export class PreviewUsageMeterSweepService extends Service {
                         windowStart: currentWindowStart,
                         windowEnd,
                         vcpuSeconds: cpuByNamespace.get(env.namespace) ?? 0,
-                        gbSeconds: (averageGbByNamespace.get(env.namespace) ?? 0) * WINDOW_SECONDS,
+                        gbSeconds: gbSecondsByNamespace.get(env.namespace) ?? 0,
                     });
                     return { env, succeeded };
                 }),

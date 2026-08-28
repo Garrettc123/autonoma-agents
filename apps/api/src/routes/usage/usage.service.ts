@@ -1,7 +1,19 @@
-import type { BillingService } from "@autonoma/billing";
-import { computePreviewUsageCost } from "@autonoma/billing";
+import type { BillingPricingValues, BillingService } from "@autonoma/billing";
+import { computePreviewUsageCostUsd, creditsPerUsd } from "@autonoma/billing";
 import { Prisma, type PrismaClient } from "@autonoma/db";
 import { Service } from "../service";
+
+const MICRODOLLARS_PER_USD = 1_000_000;
+
+/**
+ * A USD compute cost in the org's credits, for display. Fractional on purpose: sub-credit
+ * consumption is now accrued rather than rounded up per row, so showing a rounded figure here
+ * would not match what the org is actually charged. Zero when the org's row yields no usable
+ * sell rate, the same case the deduction skips.
+ */
+function toDisplayCredits(costUsd: number, pricing: BillingPricingValues): number {
+    return costUsd * (creditsPerUsd(pricing) ?? 0);
+}
 
 export interface BranchAiCostTag {
     tag: string;
@@ -57,8 +69,8 @@ export interface EnvironmentComputeUsage {
      */
     organizationId: string;
     organizationName: string;
-    creditsPerVcpuHour: number;
-    creditsPerGbMemoryHour: number;
+    usdPerVcpuHour: number;
+    usdPerGbHour: number;
 }
 
 /** One org's measured compute over the window, repriced at the rates being considered. */
@@ -68,6 +80,8 @@ export interface ComputeBillingProjectionRow {
     buildCredits: number;
     runningCredits: number;
     totalCredits: number;
+    /** What the same usage comes to in USD - the projected price, before each org's own credits conversion. */
+    totalUsd: number;
     creditBalance: number;
     creditFloor: number;
     /** Where the balance would land. Below `creditFloor`, so deliberately allowed to go negative. */
@@ -89,10 +103,11 @@ export interface ComputeBillingProjection {
     organizationsCharged: number;
     organizationsUnderwater: number;
     totalCredits: number;
+    totalUsd: number;
     since: Date;
     until: Date;
-    creditsPerVcpuHour: number;
-    creditsPerGbMemoryHour: number;
+    usdPerVcpuHour: number;
+    usdPerGbHour: number;
 }
 
 /**
@@ -192,19 +207,25 @@ export class UsageService extends Service {
                 vcpuSeconds: buildVcpuSeconds,
                 gbSeconds: buildGbSeconds,
                 buildCount: buildUsage._count._all,
-                credits: computePreviewUsageCost(buildVcpuSeconds, buildGbSeconds, pricing),
+                credits: toDisplayCredits(
+                    computePreviewUsageCostUsd(buildVcpuSeconds, buildGbSeconds, pricing),
+                    pricing,
+                ),
                 realCostUsdMicrodollars: buildUsage._sum.realCostUsdMicrodollars ?? undefined,
             },
             running: {
                 vcpuSeconds: runningVcpuSeconds,
                 gbSeconds: runningGbSeconds,
                 windowCount: runningUsage._count._all,
-                credits: computePreviewUsageCost(runningVcpuSeconds, runningGbSeconds, pricing),
+                credits: toDisplayCredits(
+                    computePreviewUsageCostUsd(runningVcpuSeconds, runningGbSeconds, pricing),
+                    pricing,
+                ),
             },
             organizationId: environment.organizationId,
             organizationName: environment.organization.name,
-            creditsPerVcpuHour: pricing.creditsPerVcpuHour,
-            creditsPerGbMemoryHour: pricing.creditsPerGbMemoryHour,
+            usdPerVcpuHour: pricing.usdPerVcpuHourMicros / MICRODOLLARS_PER_USD,
+            usdPerGbHour: pricing.usdPerGbHourMicros / MICRODOLLARS_PER_USD,
         };
     }
 
@@ -220,14 +241,14 @@ export class UsageService extends Service {
      * clamps at `creditFloor`, so it shows how far past the floor a rate would reach.
      */
     async computeBillingProjection(input: {
-        creditsPerVcpuHour: number;
-        creditsPerGbMemoryHour: number;
+        usdPerVcpuHour: number;
+        usdPerGbHour: number;
         since: Date;
         until: Date;
     }): Promise<ComputeBillingProjection> {
-        const { creditsPerVcpuHour, creditsPerGbMemoryHour, since, until } = input;
+        const { usdPerVcpuHour, usdPerGbHour, since, until } = input;
         this.logger.info("Projecting compute billing", {
-            extra: { creditsPerVcpuHour, creditsPerGbMemoryHour, since, until },
+            extra: { usdPerVcpuHour, usdPerGbHour, since, until },
         });
 
         const [buildRows, runningRows] = await Promise.all([
@@ -243,10 +264,11 @@ export class UsageService extends Service {
                 organizationsCharged: 0,
                 organizationsUnderwater: 0,
                 totalCredits: 0,
+                totalUsd: 0,
                 since,
                 until,
-                creditsPerVcpuHour,
-                creditsPerGbMemoryHour,
+                usdPerVcpuHour,
+                usdPerGbHour,
             };
         }
 
@@ -265,11 +287,16 @@ export class UsageService extends Service {
         const customerByOrg = new Map(customers.map((customer) => [customer.organizationId, customer]));
         const buildCreditsByOrg = new Map(buildRows.map((row) => [row.organizationId, row.credits]));
         const runningCreditsByOrg = new Map(runningRows.map((row) => [row.organizationId, row.credits]));
+        const usdByOrg = new Map<string, number>();
+        for (const row of [...buildRows, ...runningRows]) {
+            usdByOrg.set(row.organizationId, (usdByOrg.get(row.organizationId) ?? 0) + row.usd);
+        }
 
         const rows: ComputeBillingProjectionRow[] = organizationIds.map((organizationId) => {
             const buildCredits = buildCreditsByOrg.get(organizationId) ?? 0;
             const runningCredits = runningCreditsByOrg.get(organizationId) ?? 0;
             const totalCredits = buildCredits + runningCredits;
+            const totalUsd = usdByOrg.get(organizationId) ?? 0;
             const customer = customerByOrg.get(organizationId);
             const creditBalance = customer?.creditBalance ?? 0;
             const creditFloor = customer?.creditFloor ?? 0;
@@ -282,6 +309,7 @@ export class UsageService extends Service {
                 buildCredits,
                 runningCredits,
                 totalCredits,
+                totalUsd,
                 creditBalance,
                 creditFloor,
                 balanceAfter,
@@ -296,10 +324,11 @@ export class UsageService extends Service {
             organizationsCharged: charged.length,
             organizationsUnderwater: rows.filter((row) => row.goesUnderwater).length,
             totalCredits: rows.reduce((sum, row) => sum + row.totalCredits, 0),
+            totalUsd: rows.reduce((sum, row) => sum + row.totalUsd, 0),
             since,
             until,
-            creditsPerVcpuHour,
-            creditsPerGbMemoryHour,
+            usdPerVcpuHour,
+            usdPerGbHour,
         };
 
         this.logger.info("Projected compute billing", {
@@ -332,11 +361,11 @@ export class UsageService extends Service {
      */
     private async creditsByOrg(
         table: "previewkit_app_build_usage" | "previewkit_usage_window",
-        rate: { creditsPerVcpuHour: number; creditsPerGbMemoryHour: number; since: Date; until: Date },
-    ): Promise<Array<{ organizationId: string; credits: number }>> {
-        const cost = Prisma.sql`
-            (vcpu_seconds / 3600.0) * ${rate.creditsPerVcpuHour}
-                + (gb_seconds / 3600.0) * ${rate.creditsPerGbMemoryHour}
+        rate: { usdPerVcpuHour: number; usdPerGbHour: number; since: Date; until: Date },
+    ): Promise<Array<{ organizationId: string; credits: number; usd: number }>> {
+        const costUsd = Prisma.sql`
+            (u.vcpu_seconds / 3600.0) * ${rate.usdPerVcpuHour}
+                + (u.gb_seconds / 3600.0) * ${rate.usdPerGbHour}
         `;
         // The table name cannot be a bind parameter, and the union type above is the only thing
         // that reaches this - no caller-supplied string ever becomes an identifier here.
@@ -345,15 +374,36 @@ export class UsageService extends Service {
                 ? Prisma.sql`previewkit_app_build_usage`
                 : Prisma.sql`previewkit_usage_window`;
 
-        const rows = await this.db.$queryRaw<Array<{ organization_id: string; credits: bigint }>>`
-            SELECT organization_id, SUM(GREATEST(1, CEIL(${cost})))::bigint AS credits
-            FROM ${from}
-            WHERE created_at >= ${rate.since}
-              AND created_at <= ${rate.until}
-              AND ${cost} > 0
-            GROUP BY organization_id
+        // Mirrors the real deduction (computePreviewUsageMicroCredits -> deductCreditsFloored),
+        // and the test that pins the two together depends on it staying that way:
+        //   - USD is summed across the window and converted ONCE, then floored. Accrual carries
+        //     sub-credit remainders between windows, so flooring the total is what the org
+        //     actually pays - flooring or ceiling each row would not be.
+        //   - The conversion uses each org's OWN sell rate, since a fleet-uniform USD price is a
+        //     different number of credits per org. NULLIF guards the zero-topup row that
+        //     `creditsPerUsd` returns undefined for, so it drops out instead of dividing by zero.
+        //   - No per-row GREATEST(1, ...): the one-credit-minimum-per-window rule is gone.
+        const rows = await this.db.$queryRaw<Array<{ organization_id: string; credits: bigint; usd: number }>>`
+            SELECT u.organization_id,
+                   FLOOR(
+                       SUM(${costUsd})
+                           * (bp.credits_per_topup / NULLIF(bp.stripe_topup_amount_cents, 0) * 100.0)
+                   )::bigint AS credits,
+                   SUM(${costUsd})::double precision AS usd
+            FROM ${from} u
+            JOIN billing_pricing bp ON bp.organization_id = u.organization_id
+            WHERE u.created_at >= ${rate.since}
+              AND u.created_at <= ${rate.until}
+              AND bp.credits_per_topup > 0
+              AND bp.stripe_topup_amount_cents > 0
+            GROUP BY u.organization_id, bp.credits_per_topup, bp.stripe_topup_amount_cents
+            HAVING SUM(${costUsd}) > 0
         `;
 
-        return rows.map((row) => ({ organizationId: row.organization_id, credits: Number(row.credits) }));
+        return rows.map((row) => ({
+            organizationId: row.organization_id,
+            credits: Number(row.credits),
+            usd: Number(row.usd),
+        }));
     }
 }

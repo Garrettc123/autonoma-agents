@@ -234,20 +234,20 @@ export function useAdminComputePricingReference(enabled: boolean) {
 }
 
 /**
- * What every org WOULD be charged for compute at the given rates over the given window. Read-only
+ * What every org WOULD be charged for compute at the given USD prices over the given window. Read-only
  * and never billed - `enabled` is false until an admin explicitly asks, because this is a
  * what-if, not a page load.
  */
 export function useComputeBillingProjection(input: ComputeBillingProjectionInput | undefined) {
     return useQuery({
         ...trpc.admin.usage.computeBillingProjection.queryOptions(
-            input ?? { creditsPerVcpuHour: 0, creditsPerGbMemoryHour: 0, since: new Date(0), until: new Date(0) },
+            input ?? { usdPerVcpuHour: 0, usdPerGbHour: 0, since: new Date(0), until: new Date(0) },
         ),
         enabled: input != null,
     });
 }
 
-/** Sets an org's live previewkit compute-usage rate. Admin-only. */
+/** Overrides one org's previewkit compute price (USD per hour), away from the fleet default. Admin-only. */
 export function useUpdateComputePricing() {
     const queryClient = useQueryClient();
     return useAPIMutation({

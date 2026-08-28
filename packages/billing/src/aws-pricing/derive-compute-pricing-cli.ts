@@ -4,10 +4,15 @@ import { REFERENCE_COMPUTE_POOLS, toCreditRates } from "./aws-instance-pricing";
 import { resolveComputeRates } from "./resolve-compute-rates";
 
 /**
- * Prints suggested `creditsPerVcpuHour`/`creditsPerGbMemoryHour` rates derived from live AWS
- * pricing, for a human to review before applying to `BillingPricing` - this never writes to
- * the database itself. Run with `tsx src/aws-pricing/derive-compute-pricing-cli.ts
- * [creditsPerUsd]`; omit `creditsPerUsd` to see only the raw USD rates.
+ * Prints the USD-per-hour compute rates derived from live AWS pricing, for a human to review
+ * before applying to `BillingPricing.usdPerVcpuHourMicros`/`usdPerGbHourMicros` - this never
+ * writes to the database itself. Run with `tsx src/aws-pricing/derive-compute-pricing-cli.ts
+ * [creditsPerUsd]`; the optional `creditsPerUsd` only adds an informational credits equivalent,
+ * since prices are stored and applied in USD.
+ *
+ * These are COST. The stored price carries a margin on top (a fleet default of 1.5x - see the
+ * activation migration 20260827120100), so a rate applied straight from this output would resell
+ * compute at exactly what it cost us.
  *
  * For a spot-eligible pool (currently just buildkit - see `ComputePoolReference.supportsSpot`),
  * the printed rate is blended by the real spot/on-demand mix buildkit actually got over the
@@ -18,9 +23,9 @@ import { resolveComputeRates } from "./resolve-compute-rates";
  * - Previewkit's rate prices the deployed preview app pods (amd64, no dedicated Karpenter pool
  *   or fixed instance shape - see `REFERENCE_COMPUTE_POOLS`), so it's representative of one
  *   reference instance, not an exact average of everything the cluster might actually schedule.
- * - `BillingPricing` has one shared rate pair per org, used for both build and running usage,
+ * - `BillingPricing` has one shared price pair per org, used for both build and running usage,
  *   even though buildkit and previewkit are priced from different reference instances and
- *   buildkit's is spot-blended - picking one rate for both is an approximation either way.
+ *   buildkit's is spot-blended - picking one price for both is an approximation either way.
  */
 async function main() {
     const logger = rootLogger.child({ name: "derive-compute-pricing-cli" });

@@ -52,7 +52,7 @@ in flight must never be half-billed.
 | Path | Priced by | Uses the primitive |
 |---|---|---|
 | AI cost (analysis activities) | credits-per-USD rate | yes |
-| Preview runtime compute | `creditsPerVcpuHour` / `creditsPerGbMemoryHour` | yes |
+| Preview runtime compute | `usdPerVcpuHourMicros` / `usdPerGbHourMicros` | yes |
 | Previewkit build compute | same compute rates | yes |
 | Test generation | per-architecture generation cost | no - hard sufficiency gate that throws |
 | LLM proxy (planner CLI) | credits-per-USD rate | no - floors at literal `0` |

@@ -2,7 +2,6 @@ import type { Logger } from "@autonoma/logger";
 import { _InstanceType, DescribeSpotPriceHistoryCommand, EC2Client, type SpotPrice } from "@aws-sdk/client-ec2";
 import { GetProductsCommand, PricingClient } from "@aws-sdk/client-pricing";
 import { z } from "zod";
-import type { BillingPricingValues } from "../billing-pricing.types";
 
 // The AWS Price List Query API is served only from these two regions, regardless of which
 // region's prices are being queried - the priced region is the `location` filter value (a
@@ -168,7 +167,15 @@ function parseMemoryGb(memory: string): number {
     return Number(match[1]);
 }
 
-export type ComputeResourceRates = Pick<BillingPricingValues, "creditsPerVcpuHour" | "creditsPerGbMemoryHour">;
+/**
+ * A USD rate pair expressed in credits. Informational only: `BillingPricing` stores compute
+ * prices in USD, so nothing converts to credits in order to STORE it - this exists so the
+ * pricing CLI can show what a USD rate works out to for an org at a given sell rate.
+ */
+export interface CreditComputeRates {
+    creditsPerVcpuHour: number;
+    creditsPerGbHour: number;
+}
 
 export interface UsdComputeRates {
     usdPerVcpuHour: number;
@@ -285,10 +292,10 @@ export function blendComputeResourceRates(
     };
 }
 
-/** Converts derived USD resource rates to credits, using the same `creditsPerUsd` exchange rate `credits.service.ts` uses elsewhere. */
-export function toCreditRates(rates: UsdComputeRates, creditsPerUsd: number): ComputeResourceRates {
+/** Converts derived USD resource rates to credits at a given sell rate, for display. */
+export function toCreditRates(rates: UsdComputeRates, creditsPerUsd: number): CreditComputeRates {
     return {
         creditsPerVcpuHour: rates.usdPerVcpuHour * creditsPerUsd,
-        creditsPerGbMemoryHour: rates.usdPerGbHour * creditsPerUsd,
+        creditsPerGbHour: rates.usdPerGbHour * creditsPerUsd,
     };
 }

@@ -1,13 +1,19 @@
 import type { V1Deployment, V1Pod, V1StatefulSet } from "@kubernetes/client-node";
+import {
+    PREVIEWKIT_MANAGED_BY_LABEL,
+    PREVIEWKIT_MANAGED_BY_VALUE,
+    PREVIEWKIT_MANAGED_SELECTOR,
+} from "../previewkit-labels";
 import type { NamespaceLiveness, PreviewPowerState, PreviewWorkloadKind, WorkloadLiveness } from "./types";
 
 // The label the deployer stamps on every preview workload (resource-factory.ts
 // BASE_LABELS) and that the central Gatekeeper sleeps/wakes on (its
 // TARGET_SELECTOR). Selecting on it returns exactly the set of workloads whose
-// collective readiness means "this preview is usable".
-export const PREVIEW_MANAGED_LABEL = "previewkit.dev/managed-by";
-export const PREVIEW_MANAGED_LABEL_VALUE = "previewkit";
-export const PREVIEW_MANAGED_LABEL_SELECTOR = `${PREVIEW_MANAGED_LABEL}=${PREVIEW_MANAGED_LABEL_VALUE}`;
+// collective readiness means "this preview is usable". Re-exported from the one
+// definition in ../previewkit-labels rather than restated, so it cannot drift.
+export const PREVIEW_MANAGED_LABEL = PREVIEWKIT_MANAGED_BY_LABEL;
+export const PREVIEW_MANAGED_LABEL_VALUE = PREVIEWKIT_MANAGED_BY_VALUE;
+export const PREVIEW_MANAGED_LABEL_SELECTOR = PREVIEWKIT_MANAGED_SELECTOR;
 
 // Written by Gatekeeper onto each workload it sleeps, carrying the pre-sleep
 // replica count. Its presence alongside replicas:0 is Gatekeeper's fingerprint,

@@ -13,18 +13,22 @@ const throwingBillingService = {
     },
 };
 
-const CREDITS_PER_VCPU_HOUR = 10;
-const CREDITS_PER_GB_MEMORY_HOUR = 2;
+// $0.01/vCPU-hour and $0.002/GB-hour, exactly 15 and 3 credits per hour at the default sell
+// rate of 1500 credits/USD.
+const USD_PER_VCPU_HOUR_MICROS = 10_000;
+const USD_PER_GB_HOUR_MICROS = 2_000;
+const CREDITS_PER_VCPU_HOUR = 15;
+const CREDITS_PER_GB_HOUR = 3;
 
 async function setPreviewUsageRates(harness: BillingTestHarness, organizationId: string): Promise<void> {
     await harness.db.billingPricing.upsert({
         where: { organizationId },
         create: {
             organizationId,
-            creditsPerVcpuHour: CREDITS_PER_VCPU_HOUR,
-            creditsPerGbMemoryHour: CREDITS_PER_GB_MEMORY_HOUR,
+            usdPerVcpuHourMicros: USD_PER_VCPU_HOUR_MICROS,
+            usdPerGbHourMicros: USD_PER_GB_HOUR_MICROS,
         },
-        update: { creditsPerVcpuHour: CREDITS_PER_VCPU_HOUR, creditsPerGbMemoryHour: CREDITS_PER_GB_MEMORY_HOUR },
+        update: { usdPerVcpuHourMicros: USD_PER_VCPU_HOUR_MICROS, usdPerGbHourMicros: USD_PER_GB_HOUR_MICROS },
     });
 }
 
@@ -47,8 +51,10 @@ integrationTestSuite({
             const sender = new FakeQuerySender();
             const windowEnd = new Date("2026-07-21T12:45:00.000Z");
             sender.respondAt(windowEnd, {
-                cpu: [{ namespace: env.namespace, value: 900 }], // 0.25h * 10 credits/h = 2.5
-                memory: [{ namespace: env.namespace, value: 1 }], // 1 GB avg * 1h * 2 credits/h = 2
+                cpu: [{ namespace: env.namespace, value: 900 }], // 0.25h * 15 credits/h = 3.75
+                // GB-seconds, straight from the query - the client integrates the gauge now, so
+                // there is no average for the caller to multiply by the window length.
+                memory: [{ namespace: env.namespace, value: 900 }], // 0.25h * 3 credits/h = 0.75
             });
 
             const result = await buildSweep(harness, sender).run(new Date("2026-07-21T13:00:00.000Z"));
@@ -64,17 +70,17 @@ integrationTestSuite({
             });
             expect(window.windowEnd).toEqual(windowEnd);
             expect(window.vcpuSeconds).toBe(900);
-            expect(window.gbSeconds).toBe(900); // 1 GB avg * 900s (15min) window
+            expect(window.gbSeconds).toBe(900); // GB-seconds as the query returns them
             expect(window.organizationId).toBe(orgId);
 
             const updatedEnv = await harness.db.previewkitEnvironment.findUniqueOrThrow({ where: { id: env.id } });
             expect(updatedEnv.meteredAt).toEqual(windowEnd);
 
-            const expectedCost = Math.ceil(
-                (900 / 3600) * CREDITS_PER_VCPU_HOUR + (900 / 3600) * CREDITS_PER_GB_MEMORY_HOUR,
-            ); // ceil(2.5+0.5)=3
+            // 3.75 + 0.75 = 4.5 credits: four are charged now and half a credit is carried.
+            const expectedCost = Math.floor((900 / 3600) * CREDITS_PER_VCPU_HOUR + (900 / 3600) * CREDITS_PER_GB_HOUR);
             const customer = await harness.db.billingCustomer.findUniqueOrThrow({ where: { organizationId: orgId } });
             expect(customer.creditBalance).toBe(100_000 - expectedCost);
+            expect(customer.creditRemainderMicros).toBe(500_000);
 
             const tx = await harness.db.creditTransaction.findFirstOrThrow({
                 where: { organizationId: orgId, type: CreditTransactionType.PREVIEW_RUNTIME_CONSUMPTION },
@@ -93,7 +99,7 @@ integrationTestSuite({
             const sender = new FakeQuerySender();
             sender.respondAt(new Date("2026-07-21T12:45:00.000Z"), {
                 cpu: [{ namespace: env.namespace, value: 900 }],
-                memory: [{ namespace: env.namespace, value: 1 }],
+                memory: [{ namespace: env.namespace, value: 900 }],
             });
             const now = new Date("2026-07-21T13:00:00.000Z");
             const sweep = buildSweep(harness, sender);
@@ -237,7 +243,7 @@ integrationTestSuite({
             const windowEnd = new Date("2026-07-21T12:45:00.000Z");
             sender.respondAt(windowEnd, {
                 cpu: [{ namespace: env.namespace, value: 900 }],
-                memory: [{ namespace: env.namespace, value: 1 }],
+                memory: [{ namespace: env.namespace, value: 900 }],
             });
             const now = new Date("2026-07-21T13:00:00.000Z");
 
@@ -277,9 +283,7 @@ integrationTestSuite({
             const envAfterRetry = await harness.db.previewkitEnvironment.findUniqueOrThrow({ where: { id: env.id } });
             expect(envAfterRetry.meteredAt).toEqual(windowEnd);
 
-            const expectedCost = Math.ceil(
-                (900 / 3600) * CREDITS_PER_VCPU_HOUR + (900 / 3600) * CREDITS_PER_GB_MEMORY_HOUR,
-            );
+            const expectedCost = Math.floor((900 / 3600) * CREDITS_PER_VCPU_HOUR + (900 / 3600) * CREDITS_PER_GB_HOUR);
             const balanceAfterRetry = await harness.db.billingCustomer.findUniqueOrThrow({
                 where: { organizationId: orgId },
             });

@@ -1,4 +1,9 @@
 import { createHmac } from "node:crypto";
+import {
+    PREVIEWKIT_MANAGED_BY_LABEL,
+    PREVIEWKIT_MANAGED_BY_VALUE,
+    PREVIEWKIT_PR_NUMBER_LABEL,
+} from "@autonoma/k8s/previewkit-labels";
 import { isProtectedPreviewkitEnvKey } from "@autonoma/types";
 import type * as k8s from "@kubernetes/client-node";
 import type { AppConfig } from "../config/schema";
@@ -32,7 +37,7 @@ interface AppResourceOptions {
 }
 
 const BASE_LABELS = {
-    "previewkit.dev/managed-by": "previewkit",
+    [PREVIEWKIT_MANAGED_BY_LABEL]: PREVIEWKIT_MANAGED_BY_VALUE,
 };
 
 // Label selector matching every previewkit-managed workload (exactly what BASE_LABELS
@@ -68,7 +73,7 @@ export function buildCentralGatekeeperRole(namespace: string, prNumber: number):
         metadata: {
             name: CENTRAL_GATEKEEPER_RBAC_NAME,
             namespace,
-            labels: { ...BASE_LABELS, "previewkit.dev/pr-number": String(prNumber) },
+            labels: { ...BASE_LABELS, [PREVIEWKIT_PR_NUMBER_LABEL]: String(prNumber) },
         },
         rules: [
             {
@@ -100,7 +105,7 @@ export function buildCentralGatekeeperRoleBinding(
         metadata: {
             name: CENTRAL_GATEKEEPER_RBAC_NAME,
             namespace,
-            labels: { ...BASE_LABELS, "previewkit.dev/pr-number": String(prNumber) },
+            labels: { ...BASE_LABELS, [PREVIEWKIT_PR_NUMBER_LABEL]: String(prNumber) },
         },
         roleRef: {
             apiGroup: "rbac.authorization.k8s.io",
@@ -143,7 +148,7 @@ export function buildAppDeployment(opts: AppResourceOptions): k8s.V1Deployment {
     const labels = {
         ...BASE_LABELS,
         app: app.name,
-        "previewkit.dev/pr-number": String(opts.prNumber),
+        [PREVIEWKIT_PR_NUMBER_LABEL]: String(opts.prNumber),
     };
 
     // Workloads this app must wait for at wake time. Gatekeeper reads this from the
@@ -274,7 +279,7 @@ export function buildAppService(opts: AppResourceOptions): k8s.V1Service | undef
     const labels = {
         ...BASE_LABELS,
         app: app.name,
-        "previewkit.dev/pr-number": String(opts.prNumber),
+        [PREVIEWKIT_PR_NUMBER_LABEL]: String(opts.prNumber),
     };
 
     return {

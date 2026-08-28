@@ -142,6 +142,6 @@ describe("toCreditRates", () => {
         const credits = toCreditRates({ usdPerVcpuHour: 0.03465, usdPerGbHour: 0.0039375 }, 1500);
 
         expect(credits.creditsPerVcpuHour).toBeCloseTo(51.975, 6);
-        expect(credits.creditsPerGbMemoryHour).toBeCloseTo(5.90625, 6);
+        expect(credits.creditsPerGbHour).toBeCloseTo(5.90625, 6);
     });
 });

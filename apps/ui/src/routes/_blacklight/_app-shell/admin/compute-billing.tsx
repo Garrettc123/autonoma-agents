@@ -32,7 +32,9 @@ export const Route = createFileRoute("/_blacklight/_app-shell/admin/compute-bill
 });
 
 /** The credits customers buy per USD, from the schema defaults: 150,000 credits per $100. */
-const CREDITS_PER_USD = 1500;
+// The margin the fleet default carries over AWS cost, used to pre-fill the form from the
+// reference. Kept in step with the activation migration (20260827120100).
+const DEFAULT_MARGIN_MULTIPLE = 1.5;
 const DEFAULT_WINDOW_DAYS = 30;
 
 function daysAgoInputValue(days: number): string {
@@ -75,16 +77,16 @@ function ProjectionForm() {
   const reference = useAdminComputePricingReference(true);
   const projection = useComputeBillingProjection(committed);
 
-  const parsedVcpu = Number.parseInt(vcpuRate, 10);
-  const parsedGb = Number.parseInt(gbRate, 10);
+  const parsedVcpu = Number.parseFloat(vcpuRate);
+  const parsedGb = Number.parseFloat(gbRate);
   const canRun =
-    Number.isInteger(parsedVcpu) && parsedVcpu >= 0 && Number.isInteger(parsedGb) && parsedGb >= 0 && since <= until;
+    Number.isFinite(parsedVcpu) && parsedVcpu >= 0 && Number.isFinite(parsedGb) && parsedGb >= 0 && since <= until;
 
   function handleRun() {
     if (!canRun) return;
     setCommitted({
-      creditsPerVcpuHour: parsedVcpu,
-      creditsPerGbMemoryHour: parsedGb,
+      usdPerVcpuHour: parsedVcpu,
+      usdPerGbHour: parsedGb,
       // Whole UTC days, so a run is reproducible rather than shifting with the hour it was clicked.
       since: new Date(`${since}T00:00:00.000Z`),
       until: new Date(`${until}T23:59:59.999Z`),
@@ -99,8 +101,8 @@ function ProjectionForm() {
         </PanelHeader>
         <PanelBody className="space-y-3">
           <p className="text-sm text-text-secondary">
-            What compute actually costs us, refreshed weekly by the pricing-drift job. Multiply by {CREDITS_PER_USD} to
-            get a break-even credit rate; anything above that is margin.
+            What compute actually costs us, refreshed weekly by the pricing-drift job. Prices are set in the same unit,
+            so the fleet default is simply this times {DEFAULT_MARGIN_MULTIPLE}.
           </p>
           {reference.isPending ? (
             <Skeleton className="h-16 w-full" />
@@ -109,16 +111,23 @@ function ProjectionForm() {
               {(reference.data ?? []).map((row) => (
                 <div key={row.pool} className="space-y-1">
                   <p className="font-mono text-2xs uppercase tracking-widest text-text-secondary">{row.pool}</p>
-                  <p className="font-mono text-sm text-text-primary">
-                    {Math.round(row.usdPerVcpuHour * CREDITS_PER_USD).toLocaleString()} credits/vCPU-hr
-                  </p>
-                  <p className="font-mono text-sm text-text-primary">
-                    {Math.round(row.usdPerGbHour * CREDITS_PER_USD).toLocaleString()} credits/GB-hr
-                  </p>
+                  <p className="font-mono text-sm text-text-primary">${row.usdPerVcpuHour.toFixed(6)} /vCPU-hr</p>
+                  <p className="font-mono text-sm text-text-primary">${row.usdPerGbHour.toFixed(6)} /GB-hr</p>
                   <p className="text-3xs text-text-secondary">
-                    ${row.usdPerVcpuHour.toFixed(5)} / ${row.usdPerGbHour.toFixed(5)} per hour
+                    at {DEFAULT_MARGIN_MULTIPLE}x: ${(row.usdPerVcpuHour * DEFAULT_MARGIN_MULTIPLE).toFixed(6)} / $
+                    {(row.usdPerGbHour * DEFAULT_MARGIN_MULTIPLE).toFixed(6)}
                     {row.spotFraction != null && ` · ${Math.round(row.spotFraction * 100)}% spot`}
                   </p>
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    onClick={() => {
+                      setVcpuRate((row.usdPerVcpuHour * DEFAULT_MARGIN_MULTIPLE).toFixed(6));
+                      setGbRate((row.usdPerGbHour * DEFAULT_MARGIN_MULTIPLE).toFixed(6));
+                    }}
+                  >
+                    Use for projection
+                  </Button>
                 </div>
               ))}
               {(reference.data ?? []).length === 0 && (
@@ -137,32 +146,35 @@ function ProjectionForm() {
         </PanelHeader>
         <PanelBody className="space-y-4">
           <p className="text-sm text-text-secondary">
-            Reprices compute already recorded, at rates that are not saved anywhere. Nothing is charged and no
-            organization is modified - this is the only way to size a rate before setting one, since the deduction
-            itself has no dry-run mode.
+            Reprices compute already recorded, at prices that are not saved anywhere. Nothing is charged and no
+            organization is modified - this is the only way to size a price before setting one, since the deduction
+            itself has no dry-run mode. Each org's credits come from its own sell rate, so the credit totals below
+            differ between orgs even though the USD price is the same for all of them.
           </p>
 
           <div className="grid gap-3 sm:grid-cols-4">
             <div className="space-y-2">
-              <Label htmlFor="projection-vcpu">Credits / vCPU-hour</Label>
+              <Label htmlFor="projection-vcpu">USD / vCPU-hour</Label>
               <Input
                 id="projection-vcpu"
                 type="number"
                 min={0}
+                step="any"
                 value={vcpuRate}
                 onChange={(e) => setVcpuRate(e.target.value)}
-                placeholder="52"
+                placeholder="0.051975"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="projection-gb">Credits / GB-hour</Label>
+              <Label htmlFor="projection-gb">USD / GB-hour</Label>
               <Input
                 id="projection-gb"
                 type="number"
                 min={0}
+                step="any"
                 value={gbRate}
                 onChange={(e) => setGbRate(e.target.value)}
-                placeholder="6"
+                placeholder="0.005906"
               />
             </div>
             <div className="space-y-2">
@@ -193,14 +205,14 @@ function ProjectionResult({ data }: { data: NonNullable<ReturnType<typeof useCom
     <Panel>
       <PanelHeader>
         <PanelTitle>
-          Result: {data.creditsPerVcpuHour} credits/vCPU-hr, {data.creditsPerGbMemoryHour} credits/GB-hr
+          Result: ${data.usdPerVcpuHour.toFixed(6)}/vCPU-hr, ${data.usdPerGbHour.toFixed(6)}/GB-hr
         </PanelTitle>
       </PanelHeader>
       <PanelBody className="space-y-4">
         <div className="flex flex-wrap gap-8">
           <Stat label="Orgs charged" value={data.organizationsCharged.toLocaleString()} />
           <Stat label="Total credits" value={data.totalCredits.toLocaleString()} />
-          <Stat label="Total USD" value={`$${(data.totalCredits / CREDITS_PER_USD).toFixed(2)}`} />
+          <Stat label="Total USD" value={`$${data.totalUsd.toFixed(2)}`} />
           <Stat label="Orgs pushed below floor" value={data.organizationsUnderwater.toLocaleString()} />
         </div>
 

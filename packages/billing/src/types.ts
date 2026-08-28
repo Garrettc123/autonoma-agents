@@ -179,7 +179,7 @@ export interface BillingService {
     getPricing(organizationId: string): Promise<BillingPricingValues>;
     updateComputePricing(
         organizationId: string,
-        rates: { creditsPerVcpuHour: number; creditsPerGbMemoryHour: number },
+        rates: { usdPerVcpuHour: number; usdPerGbHour: number },
     ): Promise<void>;
     updateMeteredMarkup(organizationId: string, meteredMarkupBps: number): Promise<void>;
     getComputePricingReferences(): Promise<ComputePricingReference[]>;

@@ -8,6 +8,7 @@
         "./eks": "./src/eks-kubeconfig.ts",
         "./preview-liveness": "./src/preview-liveness/index.ts",
         "./preview-reaper": "./src/preview-reaper/index.ts",
+        "./previewkit-labels": "./src/previewkit-labels.ts",
         "./previewkit-jobs": "./src/previewkit-jobs/index.ts",
         "./previewkit-jobs/env": "./src/previewkit-jobs/env.ts"
     },

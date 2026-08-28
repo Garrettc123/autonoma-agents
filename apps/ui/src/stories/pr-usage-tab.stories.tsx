@@ -150,8 +150,8 @@ const COMPUTE_USAGE = {
   // whichever org the viewing admin happens to be switched into.
   organizationId: "org_fixture_01",
   organizationName: "Acme",
-  creditsPerVcpuHour: 52,
-  creditsPerGbMemoryHour: 6,
+  usdPerVcpuHour: 0.051975,
+  usdPerGbHour: 0.005906,
 };
 
 const AI_COST = {
@@ -205,8 +205,8 @@ export const AdminShadowMode: Story = {
                 ...COMPUTE_USAGE,
                 build: { ...COMPUTE_USAGE.build, credits: 0 },
                 running: { ...COMPUTE_USAGE.running, credits: 0 },
-                creditsPerVcpuHour: 0,
-                creditsPerGbMemoryHour: 0,
+                usdPerVcpuHour: 0,
+                usdPerGbHour: 0,
               },
             },
             // The drift cronjob has never run in this environment, so there is no reference to

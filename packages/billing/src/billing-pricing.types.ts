@@ -6,7 +6,7 @@ export type BillingPricingValues = {
     creditsIosGenerationCost: number;
     creditsAndroidGenerationCost: number;
     stripeTopupAmountCents: number;
-    creditsPerVcpuHour: number;
-    creditsPerGbMemoryHour: number;
+    usdPerVcpuHourMicros: number;
+    usdPerGbHourMicros: number;
     meteredMarkupBps: number;
 };

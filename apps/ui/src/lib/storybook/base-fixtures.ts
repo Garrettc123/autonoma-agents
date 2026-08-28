@@ -310,7 +310,7 @@ const baseTrpcFixtures: TrpcFixtures = {
     // no way to model that, so the baseline answers as a staff viewer would.
     admin: {
         billing: {
-            getComputePricing: { creditsPerVcpuHour: 52, creditsPerGbMemoryHour: 6 },
+            getComputePricing: { usdPerVcpuHour: 0.051975, usdPerGbHour: 0.005906 },
             getComputePricingReference: [
                 {
                     pool: "buildkit",

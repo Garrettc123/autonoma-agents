@@ -14,8 +14,8 @@ const DEFAULT_PRICING: BillingPricingValues = {
     creditsIosRunCost: 200,
     creditsAndroidRunCost: 40,
     stripeTopupAmountCents: 10_000,
-    creditsPerVcpuHour: 0,
-    creditsPerGbMemoryHour: 0,
+    usdPerVcpuHourMicros: 0,
+    usdPerGbHourMicros: 0,
     meteredMarkupBps: 10_000,
 };
 

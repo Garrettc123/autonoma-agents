@@ -1,9 +1,16 @@
+import { PREVIEWKIT_MANAGED_BY_LABEL, PREVIEWKIT_MANAGED_BY_VALUE } from "@autonoma/k8s/previewkit-labels";
 import { sleep } from "@autonoma/utils/sleep";
 import * as k8s from "@kubernetes/client-node";
 import { logger as rootLogger } from "../logger";
 
 const POLL_INTERVAL_MS = 3_000;
 const DEFAULT_HOOK_TIMEOUT_MS = 15 * 60 * 1000;
+
+// Stamped on the Job AND its pod template - see the note at the template below.
+const HOOK_LABELS = {
+    [PREVIEWKIT_MANAGED_BY_LABEL]: PREVIEWKIT_MANAGED_BY_VALUE,
+    "previewkit.dev/hook": "deploy",
+};
 
 /**
  * Creates a one-off K8s Job in `namespace` using `image`, runs `command`
@@ -50,7 +57,7 @@ export async function runHookJob(
         metadata: {
             name: jobName,
             namespace,
-            labels: { "previewkit.dev/managed-by": "previewkit", "previewkit.dev/hook": "deploy" },
+            labels: HOOK_LABELS,
         },
         spec: {
             // No retries: a failed hook fails the Job immediately (backoffLimit
@@ -62,6 +69,13 @@ export async function runHookJob(
             // logs stay inspectable via kubectl after the deploy completes.
             ttlSecondsAfterFinished: 1800,
             template: {
+                // The pod needs the label too, not just the Job: Kubernetes does not copy
+                // Job labels onto the pod template, and the log shipper selects pods by it
+                // (deployment/previewkit/cluster/logging/alloy.yaml). Without this a failed
+                // hook's output - the most useful thing it produces - is never shipped.
+                metadata: {
+                    labels: HOOK_LABELS,
+                },
                 spec: {
                     restartPolicy: "Never",
                     securityContext: { runAsUser: 0 },

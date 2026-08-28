@@ -2,6 +2,8 @@ import type { ComputePricingReference, PrismaClient } from "@autonoma/db";
 import type { BillingPricingValues } from "./billing-pricing.types";
 import { Service } from "./service";
 
+const MICRODOLLARS_PER_USD = 1_000_000;
+
 export class BillingPricingService extends Service {
     constructor(private readonly db: PrismaClient) {
         super();
@@ -18,8 +20,8 @@ export class BillingPricingService extends Service {
                 creditsIosGenerationCost: true,
                 creditsAndroidGenerationCost: true,
                 stripeTopupAmountCents: true,
-                creditsPerVcpuHour: true,
-                creditsPerGbMemoryHour: true,
+                usdPerVcpuHourMicros: true,
+                usdPerGbHourMicros: true,
                 meteredMarkupBps: true,
             },
         });
@@ -37,8 +39,8 @@ export class BillingPricingService extends Service {
                 creditsIosGenerationCost: true,
                 creditsAndroidGenerationCost: true,
                 stripeTopupAmountCents: true,
-                creditsPerVcpuHour: true,
-                creditsPerGbMemoryHour: true,
+                usdPerVcpuHourMicros: true,
+                usdPerGbHourMicros: true,
                 meteredMarkupBps: true,
             },
         });
@@ -54,28 +56,30 @@ export class BillingPricingService extends Service {
     }
 
     /**
-     * Sets an org's live previewkit compute-usage rate - a deliberate, admin-triggered write,
-     * never touched by the pricing-drift cronjob (which only writes the informational, global
-     * `ComputePricingReference`). The column is `Int` (whole credits per hour), so a fractional
-     * suggestion (e.g. from `ComputePricingReference` converted through this org's creditsPerUsd)
-     * is rounded here rather than by the caller, so every write path rounds the same way.
+     * Overrides one org's previewkit compute price, away from the fleet default - a deliberate,
+     * admin-triggered write, never touched by the pricing-drift cronjob (which only writes the
+     * informational, global `ComputePricingReference`).
+     *
+     * Takes USD per hour and stores microdollars, so the caller passes the same unit the
+     * `ComputePricingReference` it is comparing against is denominated in and no call site has to
+     * remember the scale. Microdollars are fine-grained enough that the rounding here is
+     * immaterial (a ten-thousandth of a cent per hour).
      */
     async updateComputePricing(
         organizationId: string,
-        rates: { creditsPerVcpuHour: number; creditsPerGbMemoryHour: number },
+        rates: { usdPerVcpuHour: number; usdPerGbHour: number },
     ): Promise<void> {
-        const creditsPerVcpuHour = Math.round(rates.creditsPerVcpuHour);
-        const creditsPerGbMemoryHour = Math.round(rates.creditsPerGbMemoryHour);
+        const usdPerVcpuHourMicros = Math.round(rates.usdPerVcpuHour * MICRODOLLARS_PER_USD);
+        const usdPerGbHourMicros = Math.round(rates.usdPerGbHour * MICRODOLLARS_PER_USD);
 
         await this.db.billingPricing.upsert({
             where: { organizationId },
-            create: { organizationId, creditsPerVcpuHour, creditsPerGbMemoryHour },
-            update: { creditsPerVcpuHour, creditsPerGbMemoryHour },
+            create: { organizationId, usdPerVcpuHourMicros, usdPerGbHourMicros },
+            update: { usdPerVcpuHourMicros, usdPerGbHourMicros },
         });
         this.logger.info("Updated compute pricing for organization", {
             organizationId,
-            creditsPerVcpuHour,
-            creditsPerGbMemoryHour,
+            extra: { usdPerVcpuHourMicros, usdPerGbHourMicros },
         });
     }
 
@@ -100,8 +104,8 @@ export class BillingPricingService extends Service {
     /**
      * The global (not org-scoped) AWS-derived reference rates the pricing-drift cronjob keeps
      * current - one row per compute pool. Purely informational: shown next to an org's live
-     * rate in the admin Usage tab so an admin can decide whether to apply it via
-     * `updateComputePricing`.
+     * rate in the admin billing settings so an admin can decide whether to apply it via
+     * `updateComputePricing`. Both are USD, so the two are directly comparable.
      */
     async getComputePricingReferences(): Promise<ComputePricingReference[]> {
         return this.db.computePricingReference.findMany({ orderBy: { pool: "asc" } });

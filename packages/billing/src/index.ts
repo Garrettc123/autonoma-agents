@@ -52,7 +52,7 @@ export {
 } from "./aws-pricing/aws-instance-pricing";
 export type {
     ComputePoolReference,
-    ComputeResourceRates,
+    CreditComputeRates,
     Ec2InstanceType,
     OnDemandInstancePrice,
     UsdComputeRates,
@@ -67,7 +67,12 @@ export { referenceToUsdRates, syncComputePricingReference } from "./aws-pricing/
 export type { ComputePricingSyncResult } from "./aws-pricing/compute-pricing-reference.service";
 export { persistAiCosts } from "./ai-cost-persister.service";
 export type { AiCostAnchor } from "./ai-cost-persister.service";
-export { computePreviewUsageCost } from "./billing-utils";
+export {
+    computePreviewUsageCostUsd,
+    computePreviewUsageMicroCredits,
+    creditsPerUsd,
+    toMicroCredits,
+} from "./billing-utils";
 export type { BillingPricingValues } from "./billing-pricing.types";
 export { deductCreditsForBuildUsage } from "./deduct-credits-for-build-usage";
 export { clearBranchTriggerBlock, recordBranchTriggerBlocked } from "./trigger-block";

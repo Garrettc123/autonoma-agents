@@ -2,7 +2,7 @@ import type { CostRecord } from "@autonoma/ai";
 import { CreditTransactionType, type PrismaClient } from "@autonoma/db";
 import { getObservabilityContext, type Logger } from "@autonoma/logger";
 import { BillingPricingService } from "./billing-pricing.service";
-import { usdToCreditCost } from "./billing-utils";
+import { toMicroCredits, usdToCreditCost } from "./billing-utils";
 import { deductCreditsFloored } from "./credits-deduction";
 import { CreditsExhaustedError } from "./credits-exhausted-error";
 
@@ -119,7 +119,7 @@ async function deductCreditsForAiCost(
                 organizationId,
                 transactionId: `ctr_ai_${firstId}`,
                 transactionType: CreditTransactionType.AI_COST_CONSUMPTION,
-                cost,
+                costMicroCredits: toMicroCredits(cost),
                 fkColumn: { name: "ai_cost_record_id", value: firstId },
             },
             logger,

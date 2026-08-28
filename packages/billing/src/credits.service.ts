@@ -8,7 +8,7 @@ import type { AutoTopUpService } from "./auto-topup.service";
 import type { BillingPricingService } from "./billing-pricing.service";
 import type { BillingTopupPackageService } from "./billing-topup-package.service";
 import {
-    computePreviewUsageCost,
+    computePreviewUsageMicroCredits,
     getGenerationCreditCost,
     isUniqueConstraintError,
     usdToCreditCost,
@@ -547,17 +547,23 @@ export class CreditsService extends Service {
 
     /**
      * Deduct credits for one closed PreviewkitUsageWindow's measured compute
-     * (vCPU-seconds and memory GB-seconds), at the org's flat per-hour rates.
-     * Charges are rounded up to a minimum of 1 whole credit, same as
-     * `deductCreditsForLlmProxy` - there is no fractional-credit ledger, so an
-     * idle window's sub-credit cost is not tracked between calls. A window whose
-     * measured usage prices out to exactly zero - genuinely idle, or measured
-     * against samples that never arrived - is skipped entirely, matching the
-     * non-positive-cost guard below.
+     * (vCPU-seconds and memory GB-seconds), at the org's flat per-hour USD prices,
+     * converted to credits at the org's own sell rate.
+     *
+     * Charges are NOT rounded up to a whole credit. A fifteen-minute window of a real
+     * preview costs a fraction of one credit, so the old minimum-of-one rule overcharged
+     * several times over; the cost is passed to `deductCreditsFloored` in millionths and
+     * whatever does not make up a whole credit accrues on
+     * `BillingCustomer.creditRemainderMicros`, to be charged once successive windows add up
+     * to one. Unlike `deductCreditsForLlmProxy`, which still charges a whole-credit minimum
+     * per request. A window whose measured usage prices out to exactly zero - genuinely
+     * idle, or measured against samples that never arrived - is skipped entirely, matching
+     * the non-positive-cost guard below.
      *
      * Balance floors at the org's `creditFloor` (0 by default) rather than requiring
      * sufficiency - a mid-flight environment must never be half-billed. Idempotent on
-     * `usageWindowId` (one deduction per window, however many times the sweep retries it).
+     * `usageWindowId` (one deduction per window, however many times the sweep retries it),
+     * and that idempotency covers the carry as well as the balance.
      */
     async deductCreditsForPreviewUsage(
         organizationId: string,
@@ -573,27 +579,33 @@ export class CreditsService extends Service {
         });
 
         const pricing = await this.pricingService.getOrCreatePricing(organizationId);
-        const rawCost = computePreviewUsageCost(vcpuSeconds, gbSeconds, pricing);
+        const costMicroCredits = computePreviewUsageMicroCredits(vcpuSeconds, gbSeconds, pricing);
 
-        if (!(rawCost > 0)) {
-            this.logger.info("Skipping previewkit usage deduction for non-positive cost", {
+        if (costMicroCredits == null) {
+            this.logger.warn("Skipping previewkit usage deduction - no usable credits-per-USD rate", {
                 organizationId,
                 usageWindowId,
-                vcpuSeconds,
-                gbSeconds,
-                rawCost,
+                extra: { vcpuSeconds, gbSeconds },
             });
             return false;
         }
 
-        const cost = Math.max(1, Math.ceil(rawCost));
+        if (costMicroCredits <= 0) {
+            this.logger.info("Skipping previewkit usage deduction for non-positive cost", {
+                organizationId,
+                usageWindowId,
+                extra: { vcpuSeconds, gbSeconds, costMicroCredits },
+            });
+            return false;
+        }
+
         const { deducted } = await deductCreditsFloored(
             this.db,
             {
                 organizationId,
                 transactionId: `ctr_preview_${usageWindowId}`,
                 transactionType: CreditTransactionType.PREVIEW_RUNTIME_CONSUMPTION,
-                cost,
+                costMicroCredits,
                 fkColumn: { name: "usage_window_id", value: usageWindowId },
             },
             this.logger,

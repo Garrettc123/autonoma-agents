@@ -147,10 +147,7 @@ export class DisabledBillingService implements BillingService {
         return this.billingPricingService.getOrCreatePricing(organizationId);
     }
 
-    updateComputePricing(
-        organizationId: string,
-        rates: { creditsPerVcpuHour: number; creditsPerGbMemoryHour: number },
-    ) {
+    updateComputePricing(organizationId: string, rates: { usdPerVcpuHour: number; usdPerGbHour: number }) {
         return this.billingPricingService.updateComputePricing(organizationId, rates);
     }
 

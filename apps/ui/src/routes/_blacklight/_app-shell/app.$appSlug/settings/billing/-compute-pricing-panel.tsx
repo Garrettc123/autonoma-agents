@@ -8,14 +8,22 @@ import {
 import { useActiveOrg } from "lib/query/auth.queries";
 import { useEffect, useState } from "react";
 
+// The margin the fleet default carries over AWS cost, so "apply the reference" lands on the same
+// number the activation migration (20260827120100) sets. Kept in step with it.
+const DEFAULT_MARGIN_MULTIPLE = 1.5;
+
 /**
- * Admin-only previewkit compute pricing: the global, AWS-derived reference rate (kept current by
- * the weekly aws-compute-pricing-drift cronjob) next to a form to set this org's live billed rate.
- * Applying it is always a deliberate admin action here, never something the cronjob does on its
- * own. Lives in billing settings rather than a specific environment's Usage tab, since the rate is
- * an org-wide setting, not tied to any one preview. Self-hides for non-staff viewers: the
- * underlying queries are `internalProcedure`-gated and error out for anyone who isn't Autonoma
- * staff, same as every other admin-only panel in the product.
+ * Admin-only previewkit compute pricing: the global, AWS-derived reference cost (kept current by
+ * the weekly aws-compute-pricing-drift cronjob) next to a form overriding this org's price away
+ * from the fleet default. Applying the reference is always a deliberate admin action here, never
+ * something the cronjob does on its own.
+ *
+ * Both sides are USD per hour, so they are directly comparable and "apply" needs no arithmetic
+ * from the admin - which is the whole reason prices are stored in USD rather than credits. Lives in
+ * billing settings rather than a specific environment's Usage tab, since the price is an org-wide
+ * setting, not tied to any one preview. Self-hides for non-staff viewers: the underlying queries
+ * are `internalProcedure`-gated and error out for anyone who isn't Autonoma staff, same as every
+ * other admin-only panel in the product.
  */
 export function ComputePricingPanel() {
   const { data: activeOrg } = useActiveOrg();
@@ -27,14 +35,14 @@ export function ComputePricingPanel() {
   } = useAdminComputePricing(activeOrg?.id ?? "", enabled);
   const { data: reference, isPending: referencePending } = useAdminComputePricingReference(enabled);
   const updateComputePricing = useUpdateComputePricing();
-  const [creditsPerVcpuHour, setCreditsPerVcpuHour] = useState("");
-  const [creditsPerGbMemoryHour, setCreditsPerGbMemoryHour] = useState("");
+  const [usdPerVcpuHour, setUsdPerVcpuHour] = useState("");
+  const [usdPerGbHour, setUsdPerGbHour] = useState("");
 
-  // Keep the inputs in sync once the org's live rate loads (or another admin applied a change).
+  // Keep the inputs in sync once the org's live price loads (or another admin applied a change).
   useEffect(() => {
     if (pricing == null) return;
-    setCreditsPerVcpuHour(String(pricing.creditsPerVcpuHour));
-    setCreditsPerGbMemoryHour(String(pricing.creditsPerGbMemoryHour));
+    setUsdPerVcpuHour(pricing.usdPerVcpuHour.toFixed(6));
+    setUsdPerGbHour(pricing.usdPerGbHour.toFixed(6));
   }, [pricing]);
 
   if (activeOrg == null || pricingError) return null;
@@ -51,13 +59,14 @@ export function ComputePricingPanel() {
       </PanelHeader>
       <PanelBody className="space-y-4">
         <p className="text-sm text-text-secondary">
-          The rate previewkit build and running compute is billed at for {activeOrg.name}. Zero means the pricing is
-          currently zeroed out (shadow mode) - usage is measured but not charged.
+          The price previewkit build and running compute is billed at for {activeOrg.name}, in USD per hour. Every org
+          starts on the fleet default ({DEFAULT_MARGIN_MULTIPLE}x the AWS reference below); this overrides it for this
+          one. Zero means the pricing is zeroed out (shadow mode) - usage is measured but not charged.
         </p>
 
         <div className="space-y-2">
           <span className="font-mono text-2xs font-semibold uppercase tracking-widest text-text-secondary">
-            AWS pricing reference
+            AWS pricing reference (cost)
           </span>
           {referencePending ? (
             <Skeleton className="h-5 w-full" />
@@ -71,14 +80,25 @@ export function ComputePricingPanel() {
                   className="flex flex-wrap items-center gap-3 font-mono text-2xs text-text-secondary"
                 >
                   <span className="w-16 shrink-0 text-text-primary">{row.pool}</span>
-                  <span>${row.usdPerVcpuHour.toFixed(5)}/vCPU-hr</span>
-                  <span>${row.usdPerGbHour.toFixed(5)}/GB-hr</span>
+                  <span>${row.usdPerVcpuHour.toFixed(6)}/vCPU-hr</span>
+                  <span>${row.usdPerGbHour.toFixed(6)}/GB-hr</span>
                   {row.spotFraction != null && (
                     <span>
                       {(row.spotFraction * 100).toFixed(0)}% spot (n={row.sampleSize})
                     </span>
                   )}
-                  <span className="ml-auto">updated {formatRelativeTime(row.updatedAt)}</span>
+                  <span>updated {formatRelativeTime(row.updatedAt)}</span>
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    className="ml-auto"
+                    onClick={() => {
+                      setUsdPerVcpuHour((row.usdPerVcpuHour * DEFAULT_MARGIN_MULTIPLE).toFixed(6));
+                      setUsdPerGbHour((row.usdPerGbHour * DEFAULT_MARGIN_MULTIPLE).toFixed(6));
+                    }}
+                  >
+                    Apply at {DEFAULT_MARGIN_MULTIPLE}x
+                  </Button>
                 </div>
               ))}
             </div>
@@ -94,40 +114,40 @@ export function ComputePricingPanel() {
               event.preventDefault();
               updateComputePricing.mutate({
                 organizationId: activeOrg.id,
-                creditsPerVcpuHour: Number(creditsPerVcpuHour),
-                creditsPerGbMemoryHour: Number(creditsPerGbMemoryHour),
+                usdPerVcpuHour: Number(usdPerVcpuHour),
+                usdPerGbHour: Number(usdPerGbHour),
               });
             }}
           >
             <span className="font-mono text-2xs font-semibold uppercase tracking-widest text-text-secondary">
-              {activeOrg.name}'s billed rate
+              {activeOrg.name}'s billed price
             </span>
             <div className="flex flex-wrap items-end gap-2">
               <div className="space-y-1">
-                <Label htmlFor="credits-per-vcpu-hour" className="text-2xs">
-                  credits/vCPU-hr
+                <Label htmlFor="usd-per-vcpu-hour" className="text-2xs">
+                  USD/vCPU-hr
                 </Label>
                 <Input
-                  id="credits-per-vcpu-hour"
+                  id="usd-per-vcpu-hour"
                   type="number"
                   min={0}
                   step="any"
-                  value={creditsPerVcpuHour}
-                  onChange={(event) => setCreditsPerVcpuHour(event.target.value)}
+                  value={usdPerVcpuHour}
+                  onChange={(event) => setUsdPerVcpuHour(event.target.value)}
                   className="h-9 w-28 font-mono text-xs"
                 />
               </div>
               <div className="space-y-1">
-                <Label htmlFor="credits-per-gb-hour" className="text-2xs">
-                  credits/GB-hr
+                <Label htmlFor="usd-per-gb-hour" className="text-2xs">
+                  USD/GB-hr
                 </Label>
                 <Input
-                  id="credits-per-gb-hour"
+                  id="usd-per-gb-hour"
                   type="number"
                   min={0}
                   step="any"
-                  value={creditsPerGbMemoryHour}
-                  onChange={(event) => setCreditsPerGbMemoryHour(event.target.value)}
+                  value={usdPerGbHour}
+                  onChange={(event) => setUsdPerGbHour(event.target.value)}
                   className="h-9 w-28 font-mono text-xs"
                 />
               </div>

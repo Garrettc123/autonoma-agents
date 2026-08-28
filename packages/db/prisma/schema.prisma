@@ -1560,6 +1560,13 @@ model BillingCustomer {
 
   creditBalance             Int     @default(0) @map("credit_balance")
   subscriptionCreditBalance Int     @default(0) @map("subscription_credit_balance")
+  // Consumption too small to be a whole credit, carried between deductions in millionths of a
+  // credit. Metered compute is billed in 15-minute windows that each cost a fraction of one
+  // credit, so rounding every window up to 1 (the old behaviour) overcharged by 3-4x at
+  // observed usage levels. Accruing here instead bills what was actually consumed at any
+  // window granularity. Lives on this row because deductCreditsFloored already locks it FOR
+  // UPDATE, so the carry moves atomically with the balance it belongs to.
+  creditRemainderMicros     Int     @default(0) @map("credit_remainder_micros")
   autoTopUpEnabled          Boolean @default(false) @map("auto_top_up_enabled")
   autoTopUpThreshold        Int     @default(0) @map("auto_top_up_threshold")
   // Which package auto-recharges when the balance drops below autoTopUpThreshold - required
@@ -1611,13 +1618,29 @@ model BillingPricing {
   creditsAndroidRunCost        Int @default(40) @map("credits_android_run_cost")
   stripeTopupAmountCents       Int @default(10000) @map("stripe_topup_amount_cents")
 
-  // Flat, fleet-uniform previewkit compute-usage rates. Zero until a deliberate go/no-go -
-  // deductCreditsForPreviewUsage never charges while both are 0, and enforcement is separately
-  // gated by PREVIEWKIT_BILLING_ENABLED + OrganizationSettings.previewkitBillingEnabled. Set via
-  // the admin.billing.updateComputePricing action, which can pre-fill from the live AWS-derived
-  // ComputePricingReference (converted through this org's creditsPerUsd) but always writes a
-  // deliberate, reviewed value - never touched automatically by the pricing-drift cronjob, which
-  // only ever writes ComputePricingReference.
+  // Flat, fleet-uniform previewkit compute-usage rates, in USD microdollars per hour.
+  //
+  // Denominated in USD rather than credits on purpose. Credits are sold at a per-org rate
+  // (creditsPerTopup / stripeTopupAmountCents), so one fleet-wide number of CREDITS is a
+  // different real price for every org that does not sit on the default topup pricing, and
+  // whole credits could not express the per-GB rate at all (~5.9 credits/GB-hr rounded to 6,
+  // a 1.7% error baked into every bill). In USD one number means one price, and the credits
+  // conversion happens at deduction time through each org's own sell rate.
+  //
+  // These are a PRICE, not a cost: the margin over what AWS charges is already inside the
+  // number. That is why compute is deliberately excluded from meteredMarkupBps below -
+  // applying it here too would double-count the same margin. The live AWS cost is tracked
+  // separately in ComputePricingReference, which the pricing-drift cronjob keeps current and
+  // an admin compares against when choosing this.
+  // The defaults are the activated fleet rate (1.5x AWS; see the activation migration
+  // 20260827120100 for the arithmetic). They are the column defaults in the database too,
+  // so a new organization is priced from its first deploy rather than silently free.
+  usdPerVcpuHourMicros Int @default(51975) @map("usd_per_vcpu_hour_micros")
+  usdPerGbHourMicros   Int @default(5906) @map("usd_per_gb_hour_micros")
+
+  // Retired by the two columns above, kept one deploy so the release this replaces - which
+  // still selects them - keeps working through a rollback window. Nothing reads them here.
+  // Their DROP rides a follow-up migration once that window has passed.
   creditsPerVcpuHour     Int @default(0) @map("credits_per_vcpu_hour")
   creditsPerGbMemoryHour Int @default(0) @map("credits_per_gb_memory_hour")
 
@@ -1627,9 +1650,9 @@ model BillingPricing {
   // (LLM proxy, AI cost, generation) resells AI at exactly what it cost us. This is the one knob
   // that makes that margin a deliberate number instead of an accident.
   //
-  // Deliberately NOT applied to creditsPerVcpuHour/creditsPerGbMemoryHour above: those are
-  // credits-per-hour figures an admin sets directly, so whatever margin they carry is already
-  // inside the number. Applying this to them too would silently double-count it.
+  // Deliberately NOT applied to usdPerVcpuHourMicros/usdPerGbHourMicros above: those are
+  // prices an admin sets directly, so whatever margin they carry is already inside the
+  // number. Applying this to them too would silently double-count it.
   meteredMarkupBps Int @default(10000) @map("metered_markup_bps")
 
   createdAt DateTime @default(now()) @map("created_at")
