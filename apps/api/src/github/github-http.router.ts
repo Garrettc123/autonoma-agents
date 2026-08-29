@@ -18,6 +18,7 @@ import { configureInstallationUrl } from "./github-urls";
 import { MergeGateSlackNotifier } from "./merge-gate-slack-notifier";
 import { MergeGateService } from "./merge-gate.service";
 import { PullRequestCacheService } from "./pull-request-cache.service";
+import { RepoRenameService } from "./repo-rename.service";
 import { resolveInstallOrganization } from "./resolve-install-organization";
 
 type GitHubEnv = {
@@ -42,6 +43,7 @@ const mergeGateService = new MergeGateService(
 );
 const branchContributorService = new BranchContributorService(db, githubService);
 const bugFixOutcomeService = new BugFixOutcomeService(db, analytics, env.MERGE_GATE_ENABLED, branchContributorService);
+const repoRenameService = new RepoRenameService(db);
 
 export const githubHttpRouter = new Hono<GitHubEnv>();
 
@@ -194,6 +196,8 @@ const WEBHOOK_EVENT_TYPES = {
     "pull_request.ready_for_review": "pull_request_ready_for_review",
     "pull_request.labeled": "pull_request_labeled",
     "issue_comment.created": "issue_comment_created",
+    // A rename leaves every denormalized repo_full_name column pointing at a name GitHub no longer serves.
+    "repository.renamed": "repository_renamed",
     // push payloads carry no `action`; the event name alone is the key.
     push: "push",
 } as const;
@@ -329,6 +333,9 @@ async function dispatchWebhookEvent(
         case "issue_comment_created":
             await mergeGateService.applySkipFromCommentWebhook(organizationId, payload);
             await mergeGateService.requestStartFromCommentWebhook(organizationId, payload);
+            return;
+        case "repository_renamed":
+            await repoRenameService.backfillFromWebhook(organizationId, payload);
             return;
         case "push":
             // Independent of the deploy: one corrects bookkeeping, the other builds.

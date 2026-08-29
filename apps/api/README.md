@@ -229,8 +229,22 @@ default and bounded by the global `MERGE_GATE_ENABLED` kill switch; enabled per 
   `requestAnalysisRun`.
 - **Requires GitHub App settings** (non-code): the `checks: write` permission, the `issue_comment` webhook
   subscription (for `/autonoma-skip` and `/start analysis`), the `pull_request.labeled` webhook subscription (for
-  the activation label trigger - GitHub does not deliver labeled events without it), and `administration: write`
-  for programmatic branch protection. Nothing functions until these are applied.
+  the activation label trigger - GitHub does not deliver labeled events without it), the `repository` webhook
+  subscription (for the rename backfill below - without it a rename silently strands rows), and
+  `administration: write` for programmatic branch protection. Nothing functions until these are applied.
+- **Repo rename backfill** (`RepoRenameService`, `src/github/repo-rename.service.ts`): `githubRepositoryId` is a
+  repo's stable identity, but eight tables denormalize `repoFullName` instead - `GitHubPrComment`,
+  `GitHubCheckRun`, `BranchContributor`, `SkipRecord`, `BugFixOutcome`, `FindingFalsePositiveCandidate`,
+  `PreviewkitBuildCircuit` and `PreviewkitEnvironment` - several keyed on it uniquely. On `repository.renamed`
+  this rewrites all of them from the old full name to the new one in a single transaction, so a collision leaves
+  every table untouched rather than half-migrated. Rows are matched by full name alone, NOT scoped to the
+  webhook's organization: a GitHub full name is globally unique and two orgs may track one repo, so a global
+  rewrite makes the first delivery fix everything and later ones no-ops. Without this a rename orphans every one
+  of those rows silently - the PR-comment store finds nothing under the old name and posts a SECOND comment on a
+  PR that already has one, the preview build circuit forgets an app's failure streak, and contributor
+  attribution and skip records restart from empty. `repo-rename-tables.test.ts` derives the model list from
+  `schema.prisma` and fails when a new table gains a `repoFullName` without being added. Not yet handled:
+  `repository.transferred`, which changes the owner half of the name the same way.
 - **Per-developer attribution** (`BranchContributorService`, `src/github/branch-contributor.service.ts`):
   stickiness is an individual habit, so a branch's outcome must attribute to ALL its authors, not just the
   opener. On `pull_request.opened/synchronize/reopened/ready_for_review/closed` it resolves the PR's full
