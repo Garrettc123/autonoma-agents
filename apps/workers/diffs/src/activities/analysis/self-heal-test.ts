@@ -29,6 +29,14 @@ export async function selfHealAnalysisTest(input: SelfHealAnalysisTestInput): Pr
     const logger = rootLogger.child({ name: "selfHealAnalysisTest", extra: { slug } });
     logger.info("Authoring a self-heal plan rewrite on the test's own rows");
 
+    // A blank plan is never authorable: re-running it drives the browser agent with no instructions, which wanders
+    // and re-classifies as plan_mismatch, wasting the pass. The caller gates on this too; refusing here as well keeps
+    // a blank rewrite from ever landing on a test's rows regardless of how it was reached.
+    if (plan.trim() === "") {
+        logger.warn("Refusing to author a blank self-heal plan; keeping the test on its existing plan");
+        return { prepared: false, skippedReason: "the proposed plan is blank" };
+    }
+
     const target = await resolveAnalysisTestTarget(snapshotId, slug);
     if (target == null) {
         logger.warn("Cannot self-heal a test with no assignment on the snapshot");

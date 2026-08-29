@@ -456,6 +456,29 @@ describe("investigatorWorkflow verdict state machine", () => {
         });
     });
 
+    it("keeps as plan_mismatch without re-running when the revised plan is only whitespace", async () => {
+        // A whitespace-only suggestedTestUpdate is the classifier's "no viable rewrite" signal squeezed through a
+        // schema that forbids the empty string. It must be read as "no rewrite" - never authored and re-run as a
+        // blank plan, which would drive the browser agent with no instructions and re-classify as plan_mismatch.
+        harness.classifyQueue = [
+            classified(verdict("plan_mismatch", { suggestedTestUpdate: " ", headline: "no viable rewrite yet" })),
+        ];
+
+        const finding = await runInvestigator("proposed");
+
+        expect(finding).toEqual({
+            slug: SLUG,
+            testCaseId: TEST_CASE_ID,
+            category: "plan_mismatch",
+            headline: "no viable rewrite yet",
+            origin: "proposed",
+        });
+        expect(harness.webRuns).toEqual([ORIGINAL_GENERATION]);
+        expect(harness.selfHealCalls).toHaveLength(0);
+        expect(harness.revertCalls).toHaveLength(0);
+        expect(harness.persistCalls).toHaveLength(1);
+    });
+
     it("keeps as plan_mismatch when a self-heal rewrite could not be prepared", async () => {
         // The classifier proposed a plan, but the self-heal activity could not prepare a generation (e.g. the
         // slug had no assignment) - so no rewrite landed and nothing re-ran; the test is kept as plan_mismatch.

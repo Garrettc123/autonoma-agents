@@ -228,7 +228,9 @@ async function runWithSelfHeal(params: SelfHealParams): Promise<AnalysisCandidat
         // A rewrite + re-run is available unless this is the final iteration (which withholds the plan-edit path so the
         // loop always terminates) or the classifier proposed no revised plan.
         const isFinalIteration = iteration === MAX_INVESTIGATOR_ITERATIONS;
-        const revisedPlan = outcome.verdict.suggestedTestUpdate;
+        // Trim so a whitespace-only rewrite (a blank plan the classifier could not fill) is treated as "no rewrite"
+        // and never re-run verbatim; a real plan is unaffected.
+        const revisedPlan = outcome.verdict.suggestedTestUpdate?.trim();
         const canSelfHeal = !isFinalIteration && revisedPlan != null && revisedPlan !== "";
         if (!canSelfHeal) {
             // Out of self-heal budget: the test is KEPT as `plan_mismatch`, never removed - it may be salvageable in a
