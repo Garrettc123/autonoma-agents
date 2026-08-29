@@ -9,7 +9,7 @@ import {
 } from "@autonoma/diffs/analysis";
 import { type Logger, logger as rootLogger } from "@autonoma/logger";
 import type { StorageProvider } from "@autonoma/storage";
-import { createGithubApp } from "../../src/create-services";
+import { getGitHubApp } from "../../src/github-app";
 import { getStorage } from "../../src/services";
 import { ensureFetchable, probeEvidence } from "../framework";
 import { casesDir } from "../framework/cases-dir";
@@ -56,7 +56,7 @@ export async function captureReporter(params: CaptureReporterParams): Promise<st
 
     // Resolve coords and validate both SHAs are fetchable (throws UnfetchableShaError on a dead SHA), warming
     // the same cache the eval uses so we never write a case that cannot be re-run.
-    const githubApp = createGithubApp();
+    const githubApp = getGitHubApp();
     const coords = await resolveSnapshotCoords(snapshotId, githubApp);
     await ensureFetchable(coords, { githubApp });
 

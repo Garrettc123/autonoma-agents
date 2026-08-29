@@ -2,7 +2,7 @@ import { db } from "@autonoma/db";
 import { type DiffsAgentInput, resolveScenarioRecipesForSnapshot } from "@autonoma/diffs";
 import { logger } from "@autonoma/logger";
 import { type Suite, TestSuiteStore } from "@autonoma/test-suite";
-import { createGithubApp } from "../create-services";
+import { getGitHubApp } from "../github-app";
 import { type BranchData, loadBranchData, loadDiffsContext } from "./load-context";
 
 /** The DiffsAgent input minus the on-disk clone, which the caller owns. */
@@ -49,7 +49,7 @@ export async function assembleDiffsAgentInput({
         );
     }
 
-    const branchData = await loadBranchData(branchId, createGithubApp());
+    const branchData = await loadBranchData(branchId, getGitHubApp());
     logger.info("Loaded branch data", { extra: { fullName: branchData.fullName } });
 
     const suiteInfo = await loadBaselineSuiteInfo(snapshotId, prevSnapshotId);

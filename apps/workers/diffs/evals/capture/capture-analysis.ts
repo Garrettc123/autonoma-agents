@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { logger as rootLogger } from "@autonoma/logger";
 import { assembleDiffsAgentInput } from "../../src/analysis/assemble-input";
-import { createGithubApp } from "../../src/create-services";
+import { getGitHubApp } from "../../src/github-app";
 import { serializeAnalysisInput } from "../analysis/analysis-input";
 import { casesDir } from "../framework/cases-dir";
 import { ensureFetchable } from "../framework/codebase-cache";
@@ -43,7 +43,7 @@ export async function captureAnalysis(params: CaptureAnalysisParams): Promise<st
         throw new Error(`Case folder already exists: ${caseDir} (pass --force to re-freeze its inputs)`);
     }
 
-    const githubApp = createGithubApp();
+    const githubApp = getGitHubApp();
     const coords = await resolveSnapshotCoords(snapshotId, githubApp);
 
     // Warm the same cache the eval uses and validate SHA-fetchability (throws

@@ -3,21 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { db, type OnboardingStep, type PrismaClient } from "@autonoma/db";
 import { Codebase } from "@autonoma/diffs";
-import { type GitHubApp, type GitHubInstallationClient, UnreachableBaseShaError } from "@autonoma/github";
+import { type GitHubInstallationClient, UnreachableBaseShaError } from "@autonoma/github";
 import { logger as rootLogger } from "@autonoma/logger";
 import { APPLICATION_UNLINKED_FAILURE_TYPE } from "@autonoma/types";
 import { ApplicationFailure } from "@temporalio/activity";
-import { createGithubApp } from "../create-services";
+import { getGitHubApp } from "../github-app";
 import { resolveDependencyCheckouts } from "./resolve-dependencies";
-
-let githubAppSingleton: GitHubApp | undefined;
-
-function getGithubApp(): GitHubApp {
-    if (githubAppSingleton == null) {
-        githubAppSingleton = createGithubApp();
-    }
-    return githubAppSingleton;
-}
 
 /** The snapshot metadata the analysis activities need (resolved without cloning). */
 export interface SnapshotMeta {
@@ -112,7 +103,7 @@ export async function resolveGitHubAccess(meta: SnapshotMeta): Promise<GitHubAcc
 /** Build authenticated GitHub access from an org + repo id. */
 async function resolveGitHubAccessFor(organizationId: string, githubRepositoryId: number): Promise<GitHubAccess> {
     const installation = await db.gitHubInstallation.findUniqueOrThrow({ where: { organizationId } });
-    const githubClient = await getGithubApp().getInstallationClient(installation.installationId);
+    const githubClient = await getGitHubApp().getInstallationClient(installation.installationId);
     const repo = await githubClient.getRepository(githubRepositoryId);
     return { repoFullName: repo.fullName, githubClient };
 }

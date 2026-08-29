@@ -5,8 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { Codebase } from "@autonoma/diffs";
-import { type GitHubApp, OctokitGitHubApp } from "@autonoma/github";
-import { ensurePem } from "@autonoma/github/schemas";
+import type { GitHubApp } from "@autonoma/github";
 import { type Logger, logger as rootLogger } from "@autonoma/logger";
 import { z } from "zod";
 
@@ -94,29 +93,14 @@ export interface CheckoutHandle {
     dispose(): Promise<void>;
 }
 
-let githubAppSingleton: GitHubApp | undefined;
-
 /**
- * Build the default GitHub App from this app's env, lazily and via dynamic
- * import. Deferring the import means the env (which requires the GITHUB_APP_*
- * credentials) is only validated when a token actually has to be minted - so an
- * eval over a public repo, or one whose SHAs are already cached, runs with no
- * GitHub credentials at all.
+ * Load the worker's GitHub App singleton lazily, via dynamic import. Deferring the import means the env
+ * (which requires the GITHUB_APP_* credentials) is only validated when a token actually has to be minted -
+ * so an eval over a public repo, or one whose SHAs are already cached, runs with no GitHub credentials at all.
  */
 async function loadDefaultGithubApp(): Promise<GitHubApp> {
-    if (githubAppSingleton == null) {
-        const { env } = await import("../../src/env");
-        githubAppSingleton = new OctokitGitHubApp({
-            appId: env.GITHUB_APP_ID,
-            // Evals run under TESTING=true, which makes createEnv skip the base64PrivateKey transform,
-            // so the key may still be base64 here. Decode it, or no installation token can be minted and
-            // every private-repo case silently falls back to an unauthenticated clone.
-            privateKey: ensurePem(env.GITHUB_APP_PRIVATE_KEY),
-            webhookSecret: env.GITHUB_APP_WEBHOOK_SECRET,
-            appSlug: env.GITHUB_APP_SLUG,
-        });
-    }
-    return githubAppSingleton;
+    const { getGitHubApp } = await import("../../src/github-app");
+    return getGitHubApp();
 }
 
 /** A warmed repo cache: the base clone exists with the case's commits fetched and validated. */

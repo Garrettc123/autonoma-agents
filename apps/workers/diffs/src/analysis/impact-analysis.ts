@@ -9,7 +9,7 @@ import type { GitHubApp } from "@autonoma/github";
 import { logger as rootLogger } from "@autonoma/logger";
 import { type OpenSnapshot, type Suite, TestSuiteStore } from "@autonoma/test-suite";
 import type { AnalysisInvestigationTarget } from "@autonoma/workflow/activities";
-import { createGithubApp } from "../create-services";
+import { getGitHubApp } from "../github-app";
 import { type BranchData, loadBranchData, loadDiffsContext } from "./load-context";
 import { type AgentSelection, materializeSelection } from "./materialize-selection";
 import { EMPTY_MERGE_FLOW_RESULT, type MergeFlowResult, runMergeFlow } from "./merge-flow";
@@ -50,7 +50,7 @@ export async function selectImpactTargets({
 }: SelectImpactTargetsParams): Promise<ImpactSelection> {
     logger.info("Impact Analysis selection started");
 
-    const githubApp = createGithubApp();
+    const githubApp = getGitHubApp();
     const store = new TestSuiteStore(db);
     const snapshot = await store.reopen(snapshotId);
     const coordinates = requireCoordinates(snapshot);

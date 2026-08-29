@@ -1,6 +1,6 @@
 import { logger } from "@autonoma/logger";
 import { App } from "@octokit/app";
-import { Octokit } from "@octokit/core";
+import { Octokit as BaseOctokit } from "@octokit/core";
 import { retry } from "@octokit/plugin-retry";
 import { throttling } from "@octokit/plugin-throttling";
 import type { EtagStore } from "./etag-store";
@@ -9,11 +9,13 @@ import { OctokitGitHubInstallationClient } from "./github-installation-client";
 
 const appLogger = logger.child({ name: "OctokitGitHubApp" });
 
-// Octokit composed with GitHub's recommended throttling + retry plugins. The throttling
-// plugin serializes requests and honors Retry-After / x-ratelimit-* headers; the retry
-// plugin backs off transient failures. Applied to every installation client, so all
-// platform-wide GitHub calls are rate-limit-safe.
-const ThrottledOctokit = Octokit.plugin(throttling, retry).defaults({
+/**
+ * The Octokit every GitHub caller on the platform builds on: composed with GitHub's recommended
+ * throttling + retry plugins, so it honors Retry-After / x-ratelimit-* headers and backs off transient
+ * failures. Deliberately named for what it is rather than what it adds - a host constructing its own
+ * `App` should reach for this one, never `@octokit/core`'s bare export.
+ */
+export const Octokit = BaseOctokit.plugin(throttling, retry).defaults({
     throttle: {
         onRateLimit: (
             retryAfter: number,
@@ -70,7 +72,7 @@ export class OctokitGitHubApp implements GitHubApp {
             appId: credentials.appId,
             privateKey: credentials.privateKey,
             webhooks: { secret: credentials.webhookSecret },
-            Octokit: ThrottledOctokit,
+            Octokit,
         });
     }
 

@@ -15,7 +15,7 @@ import { SELF_HEAL_RERUN_REASON } from "@autonoma/types";
 import { buildRunFacts, describeProvision, loadGenerationRow } from "../../src/activities/classify-run";
 import { resolveRunTarget } from "../../src/codebase/run-target";
 import { loadSnapshotMeta, resolveGitHubAccess } from "../../src/codebase/snapshot-context";
-import { createGithubApp } from "../../src/create-services";
+import { getGitHubApp } from "../../src/github-app";
 import { previewSecrets } from "../../src/preview-secrets";
 import { type ProductionCapabilities, serializeClassifierInput } from "../classifier/classifier-input";
 import { FrozenAppLogArtifactStore } from "../classifier/frozen-app-log-artifact";
@@ -71,7 +71,7 @@ export async function captureClassifier(params: CaptureClassifierParams): Promis
     const snapshotId = classification.finding.reportSnapshotId;
     const slug = classification.finding.testCase.slug;
 
-    const githubApp = createGithubApp();
+    const githubApp = getGitHubApp();
     const coords = await resolveSnapshotCoords(snapshotId, githubApp);
     // Warm the same cache the eval uses, for its SHA-fetchability check: a case whose head was force-pushed
     // away is refused here instead of failing every future run of the suite.

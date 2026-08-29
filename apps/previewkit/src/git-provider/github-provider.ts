@@ -1,4 +1,5 @@
 import { Readable } from "node:stream";
+import { Octokit } from "@autonoma/github";
 import { App } from "@octokit/app";
 import { logger } from "../logger";
 import { downloadRepoTarball } from "./download-repo-tarball";
@@ -53,25 +54,50 @@ interface GitHubProviderOptions {
     privateKey: string;
 }
 
+type InstallationOctokit = Awaited<ReturnType<App["getInstallationOctokit"]>>;
+
 export class GitHubProvider implements GitProvider {
     readonly name = "github";
     private app: App;
+    /**
+     * repoFullName -> installation-scoped octokit, resolved once per process instead of one installation
+     * lookup + octokit construction per provider call. Never evicted: the runner is a short-lived one-shot
+     * Job touching a handful of repos.
+     */
+    private readonly octokits = new Map<string, Promise<InstallationOctokit>>();
 
     constructor(options: GitHubProviderOptions) {
         this.app = new App({
             appId: options.appId,
             privateKey: options.privateKey,
+            Octokit,
         });
     }
 
-    private async getInstallationOctokit(repoFullName: string) {
+    private getInstallationOctokit(repoFullName: string): Promise<InstallationOctokit> {
+        const cached = this.octokits.get(repoFullName);
+        if (cached != null) return cached;
+
+        // The promise is stored before it settles so concurrent calls share one lookup; a failed resolution
+        // (transient error, app installed mid-run) is dropped rather than cached as the answer forever.
+        const octokit = this.resolveInstallationOctokit(repoFullName);
+        this.octokits.set(repoFullName, octokit);
+        octokit.catch(() => this.octokits.delete(repoFullName));
+        return octokit;
+    }
+
+    private async resolveInstallationOctokit(repoFullName: string): Promise<InstallationOctokit> {
         const { owner, repo } = parseRepo(repoFullName);
         try {
             const { data: installation } = await this.app.octokit.request("GET /repos/{owner}/{repo}/installation", {
                 owner,
                 repo,
             });
-            return this.app.getInstallationOctokit(installation.id);
+            logger.info("Resolved GitHub App installation for repository", {
+                repoFullName,
+                installationId: installation.id,
+            });
+            return await this.app.getInstallationOctokit(installation.id);
         } catch (error) {
             if (isNotFoundError(error)) {
                 logger.warn("GitHub App is not installed on repository", { repoFullName });

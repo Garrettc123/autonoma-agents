@@ -30,6 +30,44 @@ const CHECKOUT_TIMEOUT_MS = 60_000;
 const CAT_FILE_TIMEOUT_MS = 30_000;
 const CLONE_MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 
+/**
+ * How long a resolved repoId -> owner/repo pair is reused before re-fetching. Every repoId-keyed method needs
+ * the owner/repo names for its URL, which used to cost an extra `GET /repositories/{id}` per call - doubling
+ * this client's rate-limit spend. Renames are rare and GitHub redirects requests addressed to a repo's old
+ * name, so a stale entry degrades gracefully; the TTL only bounds how long the old spelling lingers in logs.
+ */
+const REPO_NAME_CACHE_TTL_MS = 10 * 60 * 1000;
+
+interface OwnerRepo {
+    owner: string;
+    repo: string;
+}
+
+interface CachedRepoName {
+    /** Stored before the fetch settles, so concurrent misses for one repo share a single request. */
+    value: Promise<OwnerRepo>;
+    expiresAt: number;
+}
+
+/**
+ * Module-level on purpose: clients are constructed fresh per operation all over the platform, so an
+ * instance-level cache would almost never hit. Keyed per installation so one tenant's resolution is never
+ * served from another's. Entries expire by TTL alone - the population (installations x repos actually
+ * touched) is far too small to need size-based eviction.
+ */
+const repoNameCache = new Map<string, CachedRepoName>();
+
+function repoNameCacheKey(installationId: number, repoId: number): string {
+    return `${installationId}:${repoId}`;
+}
+
+/** Store (or refresh) a cache entry, dropping it again if the resolution fails so an error is never cached. */
+function storeRepoName(cacheKey: string, value: Promise<OwnerRepo>): Promise<OwnerRepo> {
+    repoNameCache.set(cacheKey, { value, expiresAt: Date.now() + REPO_NAME_CACHE_TTL_MS });
+    value.catch(() => repoNameCache.delete(cacheKey));
+    return value;
+}
+
 const installationAuthSchema = z.object({ token: z.string().min(1) });
 
 /** GitHub's create/get check-run response, narrowed to the numeric id we persist for later updates. */
@@ -513,17 +551,27 @@ export class OctokitGitHubInstallationClient implements GitHubInstallationClient
             private: data.private,
         };
 
+        // Seed the name cache too: fetching a repo and then calling a repoId-keyed method on the same client
+        // is a common shape, and without this the follow-up re-fetches the record just to learn the name.
+        // The deferred parse turns an invalid full_name into a rejection storeRepoName drops, never a throw here.
+        storeRepoName(
+            repoNameCacheKey(this.installationId, repoId),
+            Promise.resolve().then(() => parseRepoFullName(repo.fullName)),
+        );
+
         this.logger.info("Fetched repository", { repoId, fullName: repo.fullName });
 
         return repo;
     }
 
     async getRepositoryArchiveUrl(repoId: number, ref = "HEAD"): Promise<string> {
-        const repository = await this.getRepository(repoId);
-        const { owner, repo } = parseRepoFullName(repository.fullName);
-        const token = await this.getInstallationToken();
+        const [{ owner, repo }, token] = await Promise.all([
+            this.resolveOwnerRepo(repoId),
+            this.getInstallationToken(),
+        ]);
+        const fullName = `${owner}/${repo}`;
 
-        this.logger.info("Resolving repository archive URL", { repoId, fullName: repository.fullName, ref });
+        this.logger.info("Resolving repository archive URL", { repoId, fullName, ref });
 
         const res = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/tarball/${encodeURIComponent(ref)}`, {
             headers: {
@@ -536,7 +584,7 @@ export class OctokitGitHubInstallationClient implements GitHubInstallationClient
 
         const location = res.headers.get("location");
         if (res.status >= 300 && res.status < 400 && location != null) {
-            this.logger.info("Resolved repository archive URL", { repoId, fullName: repository.fullName });
+            this.logger.info("Resolved repository archive URL", { repoId, fullName });
             return location;
         }
 
@@ -1167,8 +1215,14 @@ export class OctokitGitHubInstallationClient implements GitHubInstallationClient
         throw error;
     }
 
-    private async resolveOwnerRepo(repoId: number): Promise<{ owner: string; repo: string }> {
-        const repository = await this.getRepository(repoId);
-        return parseRepoFullName(repository.fullName);
+    private resolveOwnerRepo(repoId: number): Promise<OwnerRepo> {
+        const cacheKey = repoNameCacheKey(this.installationId, repoId);
+        const cached = repoNameCache.get(cacheKey);
+        if (cached != null && cached.expiresAt > Date.now()) {
+            return cached.value;
+        }
+
+        const value = this.getRepository(repoId).then((repository) => parseRepoFullName(repository.fullName));
+        return storeRepoName(cacheKey, value);
     }
 }

@@ -10,6 +10,7 @@ only on `@autonoma/db`, `@autonoma/logger`, and Octokit - no HTTP or app-server 
 | --- | --- |
 | `OctokitGitHubApp` / `GitHubApp` | The App: verify webhooks, mint per-installation clients. |
 | `OctokitGitHubInstallationClient` / `GitHubInstallationClient` | Per-installation client: repos, PRs, commits, comments, check runs, rulesets. |
+| `Octokit` | The platform's Octokit - `@octokit/core`'s, composed with the throttling + retry plugins. Hosts that build their own `App` (previewkit's GitProvider) pass this so every GitHub caller honors rate-limit headers. Never import `@octokit/core` directly. |
 | `FakeGitHubApp` / `FakeGitHubInstallationClient` | In-memory doubles for tests (build repos/PRs/commits, inspect comments + check runs). |
 | `LocalDevGitHubApp` / `LocalDevGitHubInstallationClient` | Fixed-response doubles for `LOCAL_DEV`. |
 | `parseRepoFullName` | Split `"owner/repo"`. |

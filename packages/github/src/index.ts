@@ -1,5 +1,6 @@
 export {
     GitHubInstallationUnavailableError,
+    Octokit,
     OctokitGitHubApp,
     type GitHubApp,
     type GitHubAppCredentials,
