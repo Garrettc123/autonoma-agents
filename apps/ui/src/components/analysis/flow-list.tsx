@@ -1,14 +1,5 @@
-import {
-  Badge,
-  cn,
-  Panel,
-  PanelBody,
-  PanelHeader,
-  PanelTitle,
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@autonoma/blacklight";
+import type { Badge } from "@autonoma/blacklight";
+import { Panel, PanelBody, PanelHeader, PanelTitle } from "@autonoma/blacklight";
 import {
   type AnalysisFindingView,
   type AnalysisFlow,
@@ -18,6 +9,9 @@ import {
 } from "@autonoma/types";
 import { ArrowUpRightIcon } from "@phosphor-icons/react/ArrowUpRight";
 import { CaretRightIcon } from "@phosphor-icons/react/CaretRight";
+import { BadgeLabel } from "components/analysis/badge-label";
+import { HintBadge } from "components/analysis/hint-badge";
+import { OwnerBadge } from "components/analysis/owner-badge";
 import { OWNER_META, type OwnerMeta } from "components/analysis/owner-meta";
 import { VerdictBadge } from "components/analysis/verdict-badge";
 import { InfoHint } from "components/info-hint";
@@ -60,9 +54,9 @@ export const FLOW_STATUS_META: Record<
 
 /**
  * Whose a flow's gaps are - the reader's first question, drawn from the shared owner registry so the flows and
- * open-issues lists word the same owner identically. A flow additionally has a `none` case (no gap, no owner) that
- * shows nothing. The flow list renders it as a legible hover-native chip (label + its (i) description); the registry's
- * `icon` is unused here.
+ * open-issues lists word the same owner identically. Rendered by the shared {@link OwnerBadge}, so the chip is
+ * pixel-identical to the one the open-issues cards show. A flow additionally has a `none` case (no gap, no owner)
+ * that shows nothing.
  */
 export const FLOW_OWNER_META: Record<AnalysisFlow["owner"], OwnerMeta | undefined> = {
   client: OWNER_META.client,
@@ -143,51 +137,28 @@ function FlowRow({ flow, findings }: { flow: AnalysisFlow; findings: AnalysisFin
 
   return (
     <li className="flex flex-col gap-1 px-4 py-3">
-      {/* Title leads so every flow name starts at the same left edge; the status chip trails it, owner sits far right. */}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="text-sm font-medium text-text-primary">{flow.title}</span>
-        <HintBadge label={status.label} variant={status.variant} hint={status.description} />
-        {composition != null && <span className="font-mono text-3xs text-text-secondary">{composition}</span>}
-        {owner != null && (
-          <HintBadge label={owner.label} variant={owner.variant} hint={owner.description} className="ml-auto" />
-        )}
+      {/* The status chip leads the row inline, so the title starts beside it and long titles wrap underneath the chip
+          rather than pushing it onto its own line. The "N of M checks passed" composition trails the title, and the
+          owner is pinned right and top-aligned. */}
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1 text-sm font-medium text-text-primary">
+          <HintBadge
+            hint={status.description}
+            variant={status.variant}
+            className="mr-2 align-middle font-mono text-3xs uppercase tracking-wider"
+          >
+            <BadgeLabel>{status.label}</BadgeLabel>
+          </HintBadge>
+          {flow.title}
+          {composition != null && (
+            <span className="ml-2 align-middle font-mono text-3xs font-normal text-text-secondary">{composition}</span>
+          )}
+        </div>
+        {owner != null && <OwnerBadge meta={owner} />}
       </div>
       <p className="text-xs leading-relaxed text-text-secondary">{flow.detail}</p>
       {findingsBackHeader && <FlowFindings findings={findings} />}
     </li>
-  );
-}
-
-/**
- * A status/owner chip whose whole surface reveals its plain-language explanation on hover - no separate (i). The
- * Badge renders as a `button` so the hint is keyboard-reachable, not mouse-only.
- */
-function HintBadge({
-  label,
-  variant,
-  hint,
-  className,
-}: {
-  label: string;
-  variant: BadgeVariant;
-  hint: string;
-  className?: string;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Badge
-            variant={variant}
-            render={<button type="button" />}
-            className={cn("font-mono text-3xs uppercase tracking-wider", className)}
-          >
-            {label}
-          </Badge>
-        }
-      />
-      <TooltipContent className="max-w-xs normal-case">{hint}</TooltipContent>
-    </Tooltip>
   );
 }
 

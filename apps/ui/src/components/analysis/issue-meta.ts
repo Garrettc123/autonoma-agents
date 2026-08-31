@@ -51,11 +51,16 @@ const STATUS_META: Record<AnalysisIssueStatus, IssueBadgeMeta> = {
     resolved: { label: "Resolved", variant: "success" },
 };
 
-/** Which side owns each kind of issue. A bug is the app's own defect; environment/scenario are test-setup gaps. */
+// Every open issue is the reader's to fix. The Reporter only ever files client-owned problems - `bug` (a defect in
+// the app), `environment` (a wrong preview key/flag/service), `scenario` (missing or wrong seeded data). Autonoma's
+// own faults surface as `engine_artifact`/`plan_mismatch` findings, which never become issues (there is no autonoma
+// issue kind). This is the same reading as the flows list, which owns a scenario/env gap to the client - see
+// `deriveAnalysisFlowOwner` and `COVERAGE_OWNER` in `@autonoma/types`. The Record is kept over the union so a new
+// kind is a compile error here until its owner is decided, rather than defaulting silently.
 const KIND_OWNER: Record<AnalysisIssueKind, AnalysisOwner> = {
     bug: "client",
-    environment: "autonoma",
-    scenario: "autonoma",
+    environment: "client",
+    scenario: "client",
 };
 
 export function analysisIssueKindMeta(kind: AnalysisIssueKind): IssueKindMeta {

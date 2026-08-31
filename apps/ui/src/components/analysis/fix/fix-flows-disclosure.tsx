@@ -1,6 +1,9 @@
-import { Badge, Panel, PanelBody } from "@autonoma/blacklight";
+import { Panel, PanelBody } from "@autonoma/blacklight";
 import { type AnalysisFlow, analysisFlowComposition } from "@autonoma/types";
+import { BadgeLabel } from "components/analysis/badge-label";
 import { FLOW_OWNER_META, FLOW_STATUS_META } from "components/analysis/flow-list";
+import { HintBadge } from "components/analysis/hint-badge";
+import { OwnerBadge } from "components/analysis/owner-badge";
 import { useState } from "react";
 
 export function FixFlowsDisclosure({ flows }: { flows: AnalysisFlow[] }) {
@@ -40,16 +43,16 @@ function FlowSummaryRow({ flow }: { flow: AnalysisFlow }) {
   return (
     <li className="flex flex-col gap-1 px-4 py-2.5">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <Badge variant={status.variant} className="shrink-0 font-mono text-3xs uppercase tracking-wider">
-          {status.label}
-        </Badge>
+        <HintBadge
+          hint={status.description}
+          variant={status.variant}
+          className="shrink-0 font-mono text-3xs uppercase tracking-wider"
+        >
+          <BadgeLabel>{status.label}</BadgeLabel>
+        </HintBadge>
         <span className="text-sm font-medium text-text-primary">{flow.title}</span>
         {composition != null && <span className="font-mono text-3xs text-text-secondary">{composition}</span>}
-        {owner != null && (
-          <Badge variant={owner.variant} className="ml-auto shrink-0 font-mono text-3xs uppercase tracking-wider">
-            {owner.label}
-          </Badge>
-        )}
+        {owner != null && <OwnerBadge meta={owner} className="ml-auto" />}
       </div>
       <p className="text-xs leading-relaxed text-text-secondary">{flow.detail}</p>
     </li>

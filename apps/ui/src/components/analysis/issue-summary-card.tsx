@@ -1,14 +1,15 @@
-import { Badge, cn, Tooltip, TooltipContent, TooltipTrigger } from "@autonoma/blacklight";
+import { Badge } from "@autonoma/blacklight";
 import type { AnalysisIssueSummary } from "@autonoma/types";
 import { CaretRightIcon } from "@phosphor-icons/react/CaretRight";
+import { BadgeLabel } from "components/analysis/badge-label";
+import { HintBadge } from "components/analysis/hint-badge";
 import {
   analysisIssueKindMeta,
   analysisIssueOwnerMeta,
   analysisIssueSeverityMeta,
   type IssueKindMeta,
 } from "components/analysis/issue-meta";
-import type { OwnerMeta } from "components/analysis/owner-meta";
-import type { ComponentProps, ReactNode } from "react";
+import { OwnerBadge } from "components/analysis/owner-badge";
 import { AppLink } from "routes/_blacklight/_app-shell/-app-link";
 
 /**
@@ -49,7 +50,7 @@ export function IssueSummaryCard({ issue, prNumber }: { issue: AnalysisIssueSumm
               <BadgeLabel>{severityMeta.label}</BadgeLabel>
             </Badge>
             <IssueKindBadge meta={kindMeta} />
-            <IssueOwnerBadge meta={ownerMeta} />
+            <OwnerBadge meta={ownerMeta} className="ml-auto" />
           </div>
           <p className="mt-1.5 truncate text-xs text-text-secondary">{issue.title}</p>
           {issue.runCount > 0 && (
@@ -70,55 +71,4 @@ function IssueKindBadge({ meta }: { meta: IssueKindMeta }) {
       <BadgeLabel>{meta.label}</BadgeLabel>
     </HintBadge>
   );
-}
-
-function IssueOwnerBadge({ meta }: { meta: OwnerMeta }) {
-  const Icon = meta.icon;
-  return (
-    <HintBadge
-      hint={meta.description}
-      variant={meta.variant}
-      className="ml-auto shrink-0 gap-1 font-mono text-3xs uppercase tracking-wider"
-    >
-      <Icon size={11} weight="bold" />
-      <BadgeLabel>{meta.label}</BadgeLabel>
-    </HintBadge>
-  );
-}
-
-/**
- * A Badge that reveals its explanation on hover - the badge is the tooltip trigger, so no separate (i) is shown.
- * `pointer-events-auto` lets it receive hover over the card's `pointer-events-none` link overlay (which also means a
- * click on the badge doesn't navigate - the rest of the card still does); the tooltip content renders in a portal,
- * so the badge's `overflow-hidden` can't clip it.
- */
-function HintBadge({
-  hint,
-  variant,
-  className,
-  children,
-}: {
-  hint: string;
-  variant: ComponentProps<typeof Badge>["variant"];
-  className?: string;
-  children: ReactNode;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Badge variant={variant} className={cn("pointer-events-auto", className)}>
-            {children}
-          </Badge>
-        }
-      />
-      <TooltipContent className="max-w-xs normal-case">{hint}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-/** The badge's uppercase text label, nudged down 1px. This mono font's caps ride ~1px above the box center, so
- * without it the label reads high against the badge background and its sibling icons (which sit at true center). */
-function BadgeLabel({ children }: { children: ReactNode }) {
-  return <span className="translate-y-px">{children}</span>;
 }
