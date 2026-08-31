@@ -1,4 +1,4 @@
-import { createBillingService } from "@autonoma/billing";
+import { createBillingService, VercelInvoiceStatus } from "@autonoma/billing";
 import { db, VercelBillingPeriodStatus } from "@autonoma/db";
 import type { VercelBillingPlan } from "@autonoma/db";
 import { ThirdPartyError } from "@autonoma/errors";
@@ -231,9 +231,9 @@ export async function submitInvoiceToVercel(
             billingPeriodId,
             installationId,
             amount: plan.cost,
-            status: "pending",
+            status: VercelInvoiceStatus.Pending,
         },
     });
 
-    logger.info("Invoice recorded", { vercelInvoiceId, installationId, status: "pending" });
+    logger.info("Invoice recorded", { vercelInvoiceId, installationId, status: VercelInvoiceStatus.Pending });
 }

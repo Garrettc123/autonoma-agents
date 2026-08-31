@@ -1,7 +1,7 @@
 import { analytics } from "@autonoma/analytics";
 import type { Prisma, PrismaClient } from "@autonoma/db";
 import { type ApplicationArchitecture, CreditTransactionType } from "@autonoma/db";
-import { InsufficientCreditsError, SubscriptionGracePeriodExpiredError } from "@autonoma/errors";
+import { BadRequestError, InsufficientCreditsError, SubscriptionGracePeriodExpiredError } from "@autonoma/errors";
 import { BILLING_TOPUP_SOURCES, type BillingTopupSource } from "@autonoma/types";
 import * as Sentry from "@sentry/node";
 import type { AutoTopUpService } from "./auto-topup.service";
@@ -20,6 +20,7 @@ import type {
     TopupRefundResultRow,
 } from "./billing.types";
 import { deductCreditsFloored } from "./credits-deduction";
+import { hasEverPaid } from "./has-ever-paid";
 import { Service } from "./service";
 import { getCurrentSpendPeriodKey, type SpendCapService } from "./spend-cap.service";
 import type {
@@ -360,6 +361,13 @@ export class CreditsService extends Service {
      * sitting below its floor - because an earlier in-flight PR was allowed to dip below zero -
      * stays blocked from starting anything NEW until it tops up, but nothing already running is
      * torn down or interrupted by this check.
+     *
+     * A floor below zero is an extension of credit, so it only applies to an org that has settled a
+     * bill at least once ({@link hasEverPaid}). This is the enforcement point rather than
+     * {@link updateCreditFloor} because it re-decides on every check: an org that pays, earns an
+     * overdraft, then refunds its way back to nothing loses the overdraft with it, and no stored
+     * floor can outlive the payment history that justified it. The floor is not cleared - it is
+     * simply not honoured below zero until the org qualifies again.
      */
     private async checkFloorGate(
         organizationId: string,
@@ -370,7 +378,7 @@ export class CreditsService extends Service {
             select: { creditBalance: true, creditFloor: true },
         });
         const balance = customer?.creditBalance ?? 0;
-        const floor = customer?.creditFloor ?? 0;
+        const floor = await this.effectiveFloor(organizationId, customer?.creditFloor ?? 0, label);
 
         if (balance <= floor) {
             this.logger.info(`${label} credits gate blocked - at or below credit floor`, {
@@ -385,6 +393,23 @@ export class CreditsService extends Service {
     }
 
     /**
+     * The floor to actually gate on. Equals the configured one except for an overdraft an
+     * organization has not earned, which clamps back to zero.
+     */
+    private async effectiveFloor(organizationId: string, configuredFloor: number, label: string): Promise<number> {
+        const isOverdraft = configuredFloor < 0;
+        if (!isOverdraft) return configuredFloor;
+
+        if (await hasEverPaid(this.db, organizationId, this.logger)) return configuredFloor;
+
+        this.logger.warn(`${label} credits gate ignoring configured overdraft - organization has never paid`, {
+            organizationId,
+            extra: { configuredFloor },
+        });
+        return 0;
+    }
+
+    /**
      * Raises (or lowers) how far below zero an org's balance may go before `checkFloorGate` blocks
      * new work - a deliberate admin action, same as `updateComputePricing`. There is no automatic
      * "this org is enterprise" detection, so this is the only way a floor other than the default 0
@@ -392,6 +417,16 @@ export class CreditsService extends Service {
      */
     async updateCreditFloor(organizationId: string, creditFloor: number): Promise<void> {
         this.logger.info("Updating credit floor", { organizationId, creditFloor });
+
+        // Refused here as well as ignored in `checkFloorGate` so an admin gets told, rather than
+        // saving a floor that silently never applies. The gate stays the real boundary: this check
+        // is a snapshot, and the organization's payment history can change after it passes.
+        if (creditFloor < 0 && !(await hasEverPaid(this.db, organizationId, this.logger))) {
+            throw new BadRequestError(
+                "This organization has never paid. It must settle a top-up or an invoice before it can be given an overdraft.",
+            );
+        }
+
         await this.db.billingCustomer.upsert({
             where: { organizationId },
             create: { organizationId, creditFloor },

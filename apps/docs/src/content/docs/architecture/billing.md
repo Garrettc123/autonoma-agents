@@ -86,7 +86,23 @@ Both compute rates default to zero, so compute is metered but not charged until 
 
 - **Top-up purchases** - a fixed-size credit pack bought through Stripe Checkout.
 - **Auto top-up** - optional per organization: when the balance falls below `autoTopUpThreshold`,
-  charge the saved card for another top-up automatically.
+  charge the saved card for another top-up automatically. It cannot be enabled without a saved card,
+  because there would be nothing to charge, and a card is only saved by completing a purchase.
+  A recharge that fails is recorded on the customer (`autoTopUpLastFailureReason`) and shown on the
+  billing page, cleared by the next successful charge. That record exists because auto top-up fires
+  from whichever host ran the deduction - a worker, the previewkit runner, a cronjob - and none of
+  those can send email; only the API host also sends one.
+
+  A deduction is not the only thing that should cause a recharge, so it is not the only thing that
+  does. The `auto-topup-reconciler` cronjob sweeps every 15 minutes for organizations sitting below
+  their threshold and recharges them, whatever did or did not happen to them. Without it, the
+  recharge is edge-triggered and misses every case where one becomes possible without a deduction -
+  most importantly a spend cap whose calendar month rolls over while the organization is out of
+  credits: it is blocked at the credit gate, so nothing deducts, so nothing triggers, and the fresh
+  headroom is never used. A card replaced after a decline and a package reactivated after being
+  pulled have the same shape. The deduction hook stays as the fast path; the sweep is the floor
+  under it. A recorded failure suppresses further attempts for six hours, so a card that will keep
+  declining is not re-charged every tick.
 - **Promo codes** - redeemable once per organization, with optional redemption limits and date windows.
 - **Free start credits** - a one-time grant keyed on the **email address**, not the organization, so
   creating a second organization does not earn a second grant.
@@ -97,6 +113,14 @@ Both compute rates default to zero, so compute is metered but not charged until 
 **Credit floor** - how far below zero an organization's balance may go. Work already running keeps
 going and is charged in full; the floor only blocks *new* work starting, via
 `checkPreviewDeployCreditsGate` (preview deploys) and `checkAnalysisCreditsGate` (PR analysis runs).
+
+A floor below zero is an extension of credit, so it applies only to an organization that has settled
+a bill at least once - a Stripe top-up (net of refunds), an active Stripe subscription, or a Vercel
+invoice Vercel reports paid and has not since refunded. A free-start organization that has never
+paid is gated at `0` no matter what its floor says, and `updateCreditFloor` refuses to set a negative
+one for it. The check runs on every gate rather than only at write time, so an organization that
+pays, earns an overdraft and then refunds its way back to nothing loses the overdraft with the
+payment that justified it.
 
 **Grace period** - an unpaid invoice starts a countdown on either rail. Once it expires, the gates
 begin refusing work.

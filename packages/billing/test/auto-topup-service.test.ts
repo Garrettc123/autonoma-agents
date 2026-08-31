@@ -188,5 +188,94 @@ integrationTestSuite({
 
             expect(createCalled).toBe(false);
         });
+
+        // The recorded failure is the only signal that survives every host, so it is the behaviour
+        // worth testing: the balance keeps falling and nothing else tells the customer why.
+        test("records a declined charge on the customer so the billing page can show it", async ({ harness }) => {
+            stubStripe({
+                createPaymentIntent: async () => {
+                    throw new Error("card declined");
+                },
+            });
+
+            const orgId = await harness.createOrgWithBalance(10);
+            const pkg = await harness.topupPackageService.create({
+                name: "Medium",
+                stripePriceId: `price_record_declined_${Date.now()}`,
+                priceCents: 10_000,
+                creditsGranted: 150_000,
+            });
+            await harness.db.billingCustomer.update({
+                where: { organizationId: orgId },
+                data: {
+                    autoTopUpEnabled: true,
+                    autoTopUpThreshold: 100,
+                    autoTopUpPackageId: pkg.id,
+                    stripeCustomerId: `cus_${Date.now()}`,
+                },
+            });
+
+            await harness.creditsService.deductCreditsForLlmProxy(orgId, 0.001, `req_${Date.now()}`);
+
+            const customer = await harness.db.billingCustomer.findUniqueOrThrow({ where: { organizationId: orgId } });
+            expect(customer.autoTopUpLastFailureReason).toBe("payment_declined");
+            expect(customer.autoTopUpLastFailureAt).not.toBeNull();
+        });
+
+        test("records a missing card rather than only logging it", async ({ harness }) => {
+            stubStripe({ listPaymentMethods: async () => ({ data: [] }) });
+
+            const orgId = await harness.createOrgWithBalance(10);
+            const pkg = await harness.topupPackageService.create({
+                name: "Medium",
+                stripePriceId: `price_no_card_${Date.now()}`,
+                priceCents: 10_000,
+                creditsGranted: 150_000,
+            });
+            await harness.db.billingCustomer.update({
+                where: { organizationId: orgId },
+                data: {
+                    autoTopUpEnabled: true,
+                    autoTopUpThreshold: 100,
+                    autoTopUpPackageId: pkg.id,
+                    stripeCustomerId: `cus_${Date.now()}`,
+                },
+            });
+
+            await harness.creditsService.deductCreditsForLlmProxy(orgId, 0.001, `req_${Date.now()}`);
+
+            const customer = await harness.db.billingCustomer.findUniqueOrThrow({ where: { organizationId: orgId } });
+            expect(customer.autoTopUpLastFailureReason).toBe("no_payment_method");
+        });
+
+        // A stale "still broken" banner is worse than none, so a recharge that works has to clear it.
+        test("clears a recorded failure once a charge succeeds", async ({ harness }) => {
+            stubStripe({});
+
+            const orgId = await harness.createOrgWithBalance(10);
+            const pkg = await harness.topupPackageService.create({
+                name: "Medium",
+                stripePriceId: `price_recovers_${Date.now()}`,
+                priceCents: 10_000,
+                creditsGranted: 150_000,
+            });
+            await harness.db.billingCustomer.update({
+                where: { organizationId: orgId },
+                data: {
+                    autoTopUpEnabled: true,
+                    autoTopUpThreshold: 100,
+                    autoTopUpPackageId: pkg.id,
+                    stripeCustomerId: `cus_${Date.now()}`,
+                    autoTopUpLastFailureReason: "payment_declined",
+                    autoTopUpLastFailureAt: new Date(),
+                },
+            });
+
+            await harness.creditsService.deductCreditsForLlmProxy(orgId, 0.001, `req_${Date.now()}`);
+
+            const customer = await harness.db.billingCustomer.findUniqueOrThrow({ where: { organizationId: orgId } });
+            expect(customer.autoTopUpLastFailureReason).toBeNull();
+            expect(customer.autoTopUpLastFailureAt).toBeNull();
+        });
     },
 });

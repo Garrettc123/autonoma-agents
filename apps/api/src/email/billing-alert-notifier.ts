@@ -1,4 +1,9 @@
-import type { BillingAlertNotifier } from "@autonoma/billing";
+import type {
+    AutoTopUpFailedAlert,
+    AutoTopUpFailureReasonValue,
+    BillingAlertNotifier,
+    SpendCapThresholdAlert,
+} from "@autonoma/billing";
 import type { PrismaClient } from "@autonoma/db";
 import { logger, type Logger } from "@autonoma/logger";
 import { env } from "../env";
@@ -30,13 +35,7 @@ export class ResendBillingAlertNotifier implements BillingAlertNotifier {
         this.logger = logger.child({ name: this.constructor.name });
     }
 
-    async notifySpendCapThreshold(input: {
-        organizationId: string;
-        thresholdPercent: 50 | 80 | 100;
-        capAmountCents: number;
-        amountChargedCents: number;
-        periodEnd: Date;
-    }): Promise<void> {
+    async notifySpendCapThreshold(input: SpendCapThresholdAlert): Promise<void> {
         const { organizationId, thresholdPercent, capAmountCents, amountChargedCents, periodEnd } = input;
         this.logger.info("Sending spend-cap threshold alert", { organizationId, thresholdPercent });
 
@@ -75,6 +74,79 @@ export class ResendBillingAlertNotifier implements BillingAlertNotifier {
                 }),
             ),
         );
+    }
+
+    /**
+     * The recharge the organization configured did not happen, so its balance keeps falling and
+     * nothing will stop it. Sent to owners for the same reason the spend-cap alert is: `Member.role`
+     * is the only accountability signal this schema has.
+     */
+    async notifyAutoTopUpFailed(input: AutoTopUpFailedAlert): Promise<void> {
+        const { organizationId, reason } = input;
+        this.logger.info("Sending auto top-up failure alert", { organizationId, extra: { reason } });
+
+        const [organization, owners] = await Promise.all([
+            this.db.organization.findUnique({ where: { id: organizationId }, select: { name: true } }),
+            this.db.member.findMany({
+                where: { organizationId, role: "owner" },
+                select: { user: { select: { email: true } } },
+            }),
+        ]);
+
+        if (organization == null || owners.length === 0) {
+            this.logger.warn("No organization or owners found for auto top-up failure alert, skipping", {
+                organizationId,
+                extra: { reason },
+            });
+            return;
+        }
+
+        const email = this.buildAutoTopUpFailedEmail(organization.name, reason);
+
+        await Promise.all(
+            owners.map((owner) =>
+                this.emailSender.send({ ...email, to: owner.user.email }).catch((err: unknown) => {
+                    this.logger.warn("Failed to send auto top-up failure alert to an owner", {
+                        organizationId,
+                        extra: { reason },
+                        err,
+                    });
+                }),
+            ),
+        );
+    }
+
+    private buildAutoTopUpFailedEmail(
+        organizationName: string,
+        reason: AutoTopUpFailureReasonValue,
+    ): { subject: string; html: string; from: string } {
+        const safeOrg = escapeHtml(organizationName);
+        const billingUrl = new URL("/billing", this.appUrl).toString();
+        const isMissingCard = reason === "no_payment_method";
+
+        const cause = isMissingCard
+            ? "There is no saved payment method to charge."
+            : "The saved payment method was declined.";
+        const fix = isMissingCard
+            ? "Buy a credit package once to save a card, and automatic top-up will use it from then on."
+            : "Update the payment method, then buy a package to confirm the new card works.";
+
+        return {
+            from: this.fromEmail,
+            subject: `${safeOrg}: automatic top-up did not go through`,
+            html: renderBrandedEmail({
+                eyebrow: "Automatic top-up failed",
+                heading: "Your credits were not topped up",
+                subheading: `${safeOrg} fell below its automatic top-up threshold, but the recharge could not be completed. ${cause}`,
+                contentHtml: `                    <p style="color: ${BRAND.text}; font-size: 16px; line-height: 26px; margin: 0 0 16px 0; font-family: ${FONT_FAMILY};">Until this is resolved the balance keeps falling, and new test runs, preview deploys and PR analysis stop once it reaches zero. Anything already running finishes and is charged in full.</p>
+
+                    <p style="color: ${BRAND.muted}; font-size: 15px; line-height: 24px; margin: 0 0 24px 0; font-family: ${FONT_FAMILY};">${fix}</p>
+
+                    <div style="margin: 0 0 24px 0;">
+                        <a href="${billingUrl}" style="background-color: ${BRAND.accent}; color: ${BRAND.accentForeground}; padding: 14px 22px; text-decoration: none; font-size: 14px; font-weight: 700; font-family: ${FONT_FAMILY}; display: inline-block;">Review billing settings</a>
+                    </div>`,
+            }),
+        };
     }
 
     private buildEmail(input: {

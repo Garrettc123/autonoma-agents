@@ -348,6 +348,10 @@ const baseTrpcFixtures: TrpcFixtures = {
             autoTopUpEnabled: false,
             autoTopUpThreshold: 0,
             autoTopUpPackageId: undefined,
+            // The baseline organization has bought a package before, so auto top-up is offerable.
+            hasSavedPaymentMethod: true,
+            autoTopUpLastFailureReason: undefined,
+            autoTopUpLastFailureAt: undefined,
             cliCreditsSpent: 60,
             transactions: [],
         },

@@ -152,6 +152,10 @@ export const WaitingWithoutCredits: Story = {
             autoTopUpEnabled: false,
             autoTopUpThreshold: 0,
             autoTopUpPackageId: undefined,
+            // Never bought anything, so no card is on file either.
+            hasSavedPaymentMethod: false,
+            autoTopUpLastFailureReason: undefined,
+            autoTopUpLastFailureAt: undefined,
             cliCreditsSpent: 0,
             transactions: [],
           },

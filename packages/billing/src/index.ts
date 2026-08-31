@@ -3,6 +3,8 @@ export type { BillingServices } from "./billing.service";
 export type { BillingService, StripeBillingService } from "./types";
 export type {
     AnalysisCreditsGateResult,
+    AutoTopUpFailedAlert,
+    AutoTopUpFailureReasonValue,
     BillingAlertNotifier,
     BillingServiceOptions,
     BillingTopupPackageItem,
@@ -12,6 +14,7 @@ export type {
     LlmProxyGateResult,
     PreviewDeployGateResult,
     SpendCapStatus,
+    SpendCapThresholdAlert,
     UpdateTopupPackageInput,
 } from "./types";
 export { LoggingBillingAlertNotifier } from "./logging-billing-alert-notifier";
@@ -26,6 +29,8 @@ export {
     resolveFreeStartEligibility,
 } from "./free-start-eligibility";
 export type { FreeStartEligibility, GrantedOrganization } from "./free-start-eligibility";
+export { VercelInvoiceStatus } from "./vercel-invoice-status";
+export type { VercelInvoiceStatusValue } from "./vercel-invoice-status";
 export {
     processVercelInvoicePaid,
     processVercelInvoiceNotPaid,
@@ -65,6 +70,9 @@ export { resolveComputeRates } from "./aws-pricing/resolve-compute-rates";
 export type { ResolvedComputeRates } from "./aws-pricing/resolve-compute-rates";
 export { referenceToUsdRates, syncComputePricingReference } from "./aws-pricing/compute-pricing-reference.service";
 export type { ComputePricingSyncResult } from "./aws-pricing/compute-pricing-reference.service";
+export { AutoTopUpReconciler } from "./auto-topup-reconciler.service";
+export type { AutoTopUpReconcileResult } from "./auto-topup-reconciler.service";
+export { reconcileAutoTopUps } from "./reconcile-auto-top-ups";
 export { persistAiCosts } from "./ai-cost-persister.service";
 export type { AiCostAnchor } from "./ai-cost-persister.service";
 export {

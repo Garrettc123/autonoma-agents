@@ -67,7 +67,7 @@ export function BillingPanel() {
   const canSaveAutoTopUp =
     Number.isFinite(thresholdValue) &&
     thresholdValue >= 0 &&
-    (!autoTopUpEnabled || autoTopUpPackageId.length > 0) &&
+    (!autoTopUpEnabled || (autoTopUpPackageId.length > 0 && data.hasSavedPaymentMethod)) &&
     (autoTopUpEnabled !== data.autoTopUpEnabled ||
       thresholdValue !== data.autoTopUpThreshold ||
       autoTopUpPackageId !== (data.autoTopUpPackageId ?? ""));
@@ -250,14 +250,40 @@ export function BillingPanel() {
             <PanelBody className="space-y-4">
               <p className="font-mono text-2xs uppercase tracking-widest text-text-secondary">Auto top-up</p>
 
+              {/* The only place a failed recharge surfaces reliably: it fires from whichever host ran
+                  the deduction, and only the API host can send the email. Recorded on the customer
+                  row, so this renders regardless. */}
+              {data.autoTopUpLastFailureReason != null ? (
+                <Alert variant="warning" aria-label="billing-auto-topup-failure">
+                  <AlertTitle>Automatic top-up did not go through</AlertTitle>
+                  <AlertDescription>
+                    {data.autoTopUpLastFailureReason === "no_payment_method"
+                      ? "There is no saved payment method to charge. Buy a package once to save a card."
+                      : "The saved payment method was declined. Update it, then buy a package to confirm the new card works."}
+                    {data.autoTopUpLastFailureAt != null ? ` Last attempted ${formatDate(data.autoTopUpLastFailureAt)}.` : ""}
+                  </AlertDescription>
+                </Alert>
+              ) : null}
+
               <label htmlFor="billing-auto-topup-enabled" className="flex items-center gap-3">
                 <Checkbox
                   id="billing-auto-topup-enabled"
                   checked={autoTopUpEnabled}
+                  disabled={!data.hasSavedPaymentMethod}
                   onCheckedChange={(checked) => setAutoTopUpEnabled(checked === true)}
                 />
                 <span className="text-sm text-text-secondary">Enable automatic top-up when credits are low</span>
               </label>
+
+              {/* A card is only saved by completing a purchase, so an org that has never bought one has
+                  nothing for auto top-up to charge. Said here rather than left to fail on save, which is
+                  how it read before: the setting stored fine and simply never fired. */}
+              {!data.hasSavedPaymentMethod ? (
+                <p className="text-2xs text-text-secondary">
+                  Buy a package once to save a payment method. Auto top-up charges that card, so it cannot be enabled
+                  until there is one.
+                </p>
+              ) : null}
 
               <div className="space-y-2">
                 <Label htmlFor="billing-auto-topup-threshold">Threshold</Label>

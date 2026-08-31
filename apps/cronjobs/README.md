@@ -11,6 +11,7 @@ Scheduled tasks that run periodically for background maintenance and billing ope
 | `preview-usage-meter` | Closes wall-clock-aligned 15-minute previewkit compute-usage windows from the self-hosted Prometheus and deducts the corresponding credits. Prices are USD per hour on `BillingPricing`, converted to credits at each org's own sell rate, and sub-credit windows accrue on `BillingCustomer.creditRemainderMicros` rather than rounding up. The Prometheus queries are scoped to the previewkit cluster and NOT to any namespace-name pattern - the sweep selects namespaces from the database instead, because a name-shaped filter here silently stopped matching when the namespace format changed. See `@autonoma/billing`'s `preview-usage-meter/`. | Every 15 minutes |
 | `aws-compute-pricing-drift` | Fetches live AWS pricing for the buildkit/previewkit Karpenter pools' reference instance types (blended by buildkit's real recent spot/on-demand mix), upserts it into the global `ComputePricingReference` table, and pages (Sentry, "warning") when it drifts >10% from what was stored last run. Writes only that reference table - a human decides whether to update any org's `BillingPricing` via `admin.billing.updateComputePricing` (see `@autonoma/billing`'s `aws-pricing/` for the derivation math and the manual `derive-compute-pricing-cli.ts`). | Weekly (Mon 03:00 UTC) |
 | `preview-environment-reaper` | Reconciles preview environments against the previewkit cluster: deletes namespaces past the 7-day TTL (base `*-pr-0` excluded) and writes `torn_down_at` for them, and marks rows whose namespace went some other way. Replaces the `ns-cleaner` shell CronJob, which deleted namespaces with no database access and so left every reclaimed preview still reading as `ready`. Logic in `@autonoma/k8s/preview-reaper`; `DRY_RUN=true` reports without acting. | Daily (03:00 UTC) |
+| `auto-topup-reconciler` | Recharges every organization sitting below its `autoTopUpThreshold` that a deduction did not already recharge. Auto top-up is otherwise edge-triggered off deductions, which cannot fire when the recharge only *becomes* possible - above all when a spend cap's calendar month rolls over while the organization is out of credits and therefore refused at the credit gate. Six-hour backoff on a recorded failure. Logic in `@autonoma/billing`'s `auto-topup-reconciler.service.ts`. | Every 15 minutes |
 
 ## Running Locally
 
@@ -21,6 +22,7 @@ pnpm --filter @autonoma/cronjobs usage-reporter
 pnpm --filter @autonoma/cronjobs usage-meter
 pnpm --filter @autonoma/cronjobs aws-compute-pricing-drift
 pnpm --filter @autonoma/cronjobs preview-environment-reaper
+pnpm --filter @autonoma/cronjobs auto-topup-reconciler
 
 # Or from apps/cronjobs directory
 pnpm billing-invoicer
@@ -28,6 +30,7 @@ pnpm usage-reporter
 pnpm usage-meter
 pnpm aws-compute-pricing-drift
 pnpm preview-environment-reaper
+pnpm auto-topup-reconciler
 ```
 
 ## Environment Variables
@@ -51,6 +54,13 @@ IAM role granting `pricing:GetProducts` (on-demand pricing) and `ec2:DescribeSpo
 pricing for the buildkit pool) - neither supports resource-level scoping - see the
 `eks.amazonaws.com/role-arn` annotation in `deployment/cronjob/aws-compute-pricing-drift.yaml`. It also
 reads (never writes) Postgres for the recent build capacity-type mix used to blend buildkit's rate.
+
+`auto-topup-reconciler` needs `STRIPE_ENABLED=true` and `STRIPE_SECRET_KEY`, since it charges saved
+cards off-session. In-cluster the key comes from the `stripe-env-file` Secret in the `cronjob`
+namespace, which pulls that one property out of `eks/main/production/api` rather than the whole API
+environment (see `deployment/cronjob/auto-topup-reconciler.yaml`). Without a key every attempt logs
+and records a failure instead of charging; with billing never enabled the sweep finds no candidates
+at all, because a candidate must already hold a `stripeCustomerId`.
 
 ## Deployment
 

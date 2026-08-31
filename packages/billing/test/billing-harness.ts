@@ -1,4 +1,11 @@
-import { ApplicationArchitecture, type PrismaClient, PreviewkitStatus, createClient } from "@autonoma/db";
+import {
+    ApplicationArchitecture,
+    CreditTransactionType,
+    type PrismaClient,
+    PreviewkitStatus,
+    SubscriptionStatus,
+    createClient,
+} from "@autonoma/db";
 import { createTestDatabase, type IntegrationHarness } from "@autonoma/integration-test";
 import { AutoTopUpService } from "../src/auto-topup.service";
 import { EnabledBillingService } from "../src/billing-enabled.service";
@@ -8,6 +15,7 @@ import { CreditsService } from "../src/credits.service";
 import { LoggingBillingAlertNotifier } from "../src/logging-billing-alert-notifier";
 import { SpendCapService } from "../src/spend-cap.service";
 import type { BillingService } from "../src/types";
+import { VercelInvoiceStatus, type VercelInvoiceStatusValue } from "../src/vercel-invoice-status";
 import { VercelOverageService } from "../src/vercel-overage.service";
 
 const REPO_FULL_NAME = "test-org/repo";
@@ -44,6 +52,7 @@ export class BillingTestHarness implements IntegrationHarness {
     public readonly pricingService: BillingPricingService;
 
     private previewkitEnvironmentSeq = 0;
+    private vercelInvoiceSeq = 0;
     private previewkitAppSeq = 0;
 
     constructor(db: PrismaClient) {
@@ -104,6 +113,102 @@ export class BillingTestHarness implements IntegrationHarness {
             data: { organizationId: org.id, creditBalance },
         });
         return org.id;
+    }
+
+    /**
+     * Records a settled top-up purchase, which is what `hasEverPaid` reads to allow an overdraft.
+     * A real ledger row rather than a flag, because that row is the actual signal - the same one
+     * `grantTopupCredits` writes once Stripe reports the payment intent succeeded.
+     */
+    async recordSettledTopupPurchase(organizationId: string, amount = 150_000): Promise<void> {
+        const customer = await this.db.billingCustomer.findUniqueOrThrow({ where: { organizationId } });
+        await this.db.creditTransaction.create({
+            data: {
+                organizationId,
+                type: CreditTransactionType.TOPUP_PURCHASE,
+                amount,
+                balanceAfter: customer.creditBalance,
+                stripePaymentIntentId: `pi_paid_${organizationId}_${Date.now()}`,
+            },
+        });
+    }
+
+    /** The compensating negative row a refund writes, which nets off a settled purchase. */
+    async recordTopupRefund(organizationId: string, amount = 150_000): Promise<void> {
+        const customer = await this.db.billingCustomer.findUniqueOrThrow({ where: { organizationId } });
+        await this.db.creditTransaction.create({
+            data: {
+                organizationId,
+                type: CreditTransactionType.TOPUP_REFUND,
+                amount: -amount,
+                balanceAfter: customer.creditBalance,
+                stripeRefundId: `re_${organizationId}_${Date.now()}`,
+            },
+        });
+    }
+
+    /**
+     * A Vercel invoice for this org, settled unless told otherwise. The `paidAt` distinction is the
+     * whole point on that rail: a credit purchase raises an invoice immediately but the money only
+     * arrives when Vercel reports it paid.
+     *
+     * A refunded invoice keeps its `paidAt`, exactly as `processVercelInvoiceRefunded` leaves it -
+     * that is the shape `hasEverPaid` has to tell apart from a still-settled one.
+     */
+    async recordVercelInvoice(
+        organizationId: string,
+        { status = VercelInvoiceStatus.Paid }: { status?: VercelInvoiceStatusValue } = {},
+    ): Promise<void> {
+        const seq = this.vercelInvoiceSeq++;
+        const user = await this.db.user.create({
+            data: { name: `Vercel User ${seq}`, email: `vercel-${seq}-${Date.now()}@example.com` },
+        });
+        const plan = await this.db.vercelBillingPlan.create({
+            data: { name: `Vercel Plan ${seq}-${Date.now()}`, description: "Test plan", cost: "50.00", details: {} },
+        });
+        const installation = await this.db.vercelInstallation.create({
+            data: {
+                vercelInstallationId: `icfg_${seq}_${Date.now()}`,
+                vercelAccountId: `team_${seq}`,
+                vercelUserId: `vuser_${seq}`,
+                organizationId,
+                userId: user.id,
+                billingPlanId: plan.id,
+            },
+        });
+        const period = await this.db.vercelBillingPeriod.create({
+            data: {
+                installationId: installation.id,
+                planId: plan.id,
+                endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+            },
+        });
+
+        await this.db.vercelInvoice.create({
+            data: {
+                installationId: installation.id,
+                billingPeriodId: period.id,
+                vercelInvoiceId: `inv_${seq}_${Date.now()}`,
+                amount: "100.00",
+                status,
+                paidAt: status === VercelInvoiceStatus.Pending ? undefined : new Date(),
+            },
+        });
+    }
+
+    /**
+     * The legacy Stripe subscriber's shape: it pays by invoice, so it has no `TOPUP_PURCHASE` row
+     * and qualifies for an overdraft only through its subscription status.
+     */
+    async recordActiveStripeSubscription(organizationId: string): Promise<void> {
+        await this.db.billingCustomer.update({
+            where: { organizationId },
+            data: {
+                stripeCustomerId: `cus_${organizationId}_${Date.now()}`,
+                subscriptionId: `sub_${organizationId}_${Date.now()}`,
+                subscriptionStatus: SubscriptionStatus.active,
+            },
+        });
     }
 
     /** A PreviewkitEnvironment row for the usage-meter sweep tests, uniquely named per call. */

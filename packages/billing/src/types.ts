@@ -1,5 +1,6 @@
 import type {
     ApplicationArchitecture,
+    AutoTopUpFailureReason,
     BillingCustomer,
     ComputePricingReference,
     CreditTransaction,
@@ -108,6 +109,9 @@ export type PreviewDeployGateResult = { allowed: true } | { allowed: false; reas
 /** Why a new PR analysis run was declined - currently only one reason: the org's balance is at or below its credit floor. */
 export type AnalysisCreditsGateResult = { allowed: true } | { allowed: false; reason: "out_of_credits" };
 
+/** The `AutoTopUpFailureReason` enum's values, so callers need not import Prisma to name one. */
+export type AutoTopUpFailureReasonValue = `${AutoTopUpFailureReason}`;
+
 /**
  * Everything a billing service can optionally be given. An object rather than a growing list of
  * optional positional parameters, which is what unioning each consumer's needs would produce.
@@ -137,6 +141,14 @@ export type BillingStatusResult = {
     autoTopUpEnabled: boolean;
     autoTopUpThreshold: number;
     autoTopUpPackageId: string | undefined;
+    /** Whether Stripe holds a card to charge, which auto top-up cannot fire without. */
+    hasSavedPaymentMethod: boolean;
+    /**
+     * Set while the last auto-recharge attempt is still unresolved, so the balance is falling with
+     * nothing to stop it. Cleared by the next successful charge.
+     */
+    autoTopUpLastFailureReason: AutoTopUpFailureReasonValue | undefined;
+    autoTopUpLastFailureAt: Date | undefined;
     /** All-time credits spent through the managed LLM proxy (planner CLI). */
     cliCreditsSpent: number;
     transactions: CreditTransaction[];
@@ -192,19 +204,33 @@ export interface BillingService {
     updateSpendCap(organizationId: string, capAmountCents: number | undefined): Promise<void>;
 }
 
+export type SpendCapThresholdAlert = {
+    organizationId: string;
+    thresholdPercent: 50 | 80 | 100;
+    capAmountCents: number;
+    amountChargedCents: number;
+    periodEnd: Date;
+};
+
+export type AutoTopUpFailedAlert = {
+    organizationId: string;
+    reason: AutoTopUpFailureReasonValue;
+};
+
 /**
  * The seam a spend-cap threshold alert is delivered through - kept out of `packages/billing`
  * proper so this stays framework-agnostic (no email/Resend dependency here). Mirrors the injected-
  * notifier pattern already used for `MergeGateSlackNotifier` (`apps/api/src/github/merge-gate-slack-notifier.ts`).
  */
 export interface BillingAlertNotifier {
-    notifySpendCapThreshold(input: {
-        organizationId: string;
-        thresholdPercent: 50 | 80 | 100;
-        capAmountCents: number;
-        amountChargedCents: number;
-        periodEnd: Date;
-    }): Promise<void>;
+    notifySpendCapThreshold(input: SpendCapThresholdAlert): Promise<void>;
+
+    /**
+     * A recharge the organization asked for did not happen, so its balance is still falling and
+     * nothing is going to stop it. Only reaches a customer from a host that can send email - see
+     * `AutoTopUpService.recordFailure` for the record that reaches them from every other host.
+     */
+    notifyAutoTopUpFailed(input: AutoTopUpFailedAlert): Promise<void>;
 }
 
 export interface StripeBillingService {

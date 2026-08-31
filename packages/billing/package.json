@@ -14,7 +14,8 @@
         "lint": "oxlint --fix src/",
         "fmt": "oxfmt --write src/",
         "test": "vitest run --passWithNoTests",
-        "derive-compute-pricing": "tsx src/aws-pricing/derive-compute-pricing-cli.ts"
+        "derive-compute-pricing": "tsx src/aws-pricing/derive-compute-pricing-cli.ts",
+        "seed-topup-packages": "tsx src/seed-topup-packages-cli.ts"
     },
     "dependencies": {
         "@autonoma/ai": "workspace:*",

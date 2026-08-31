@@ -9,6 +9,7 @@
         "usage-meter": "dotenv -e ../../.env -- tsx scripts/preview-usage-meter/index.ts",
         "aws-compute-pricing-drift": "dotenv -e ../../.env -- tsx scripts/aws-compute-pricing-drift/index.ts",
         "preview-environment-reaper": "dotenv -e ../../.env -- tsx scripts/preview-environment-reaper/index.ts",
+        "auto-topup-reconciler": "dotenv -e ../../.env -- tsx scripts/auto-topup-reconciler/index.ts",
         "typecheck": "tsc --noEmit",
         "lint": "oxlint --fix scripts/",
         "build": "rolldown -c rolldown.config.ts"

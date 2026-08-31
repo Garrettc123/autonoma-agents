@@ -1593,6 +1593,16 @@ model BillingCustomer {
   // admin action (admin.billing.updateKillJobsOnCreditExhaustion), same rollout shape as creditFloor.
   killJobsOnCreditExhaustion Boolean @default(false) @map("kill_jobs_on_credit_exhaustion")
 
+  // Why the last auto-recharge attempt did not put credits on the balance, and when. Recorded rather
+  // than only logged because auto top-up fires from whichever host happened to deduct - the general
+  // worker, the previewkit runner, the usage-meter cronjob - and none of those can send email. A row
+  // written here reaches the customer from every one of them, through the billing page.
+  //
+  // Cleared on the next successful charge, so a set value always means "still broken", never "was
+  // broken once".
+  autoTopUpLastFailureReason AutoTopUpFailureReason? @map("auto_top_up_last_failure_reason")
+  autoTopUpLastFailureAt     DateTime?               @map("auto_top_up_last_failure_at")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -1601,6 +1611,18 @@ model BillingCustomer {
   autoTopUpPackage BillingTopupPackage? @relation(fields: [autoTopUpPackageId], references: [id], onDelete: SetNull)
 
   @@map("billing_customer")
+}
+
+/// Why an auto-recharge attempt failed to put credits on the balance. Only the reasons a customer
+/// can act on: a missing package or a deactivated one are configuration the org itself chose, and a
+/// spend cap that refused is the cap working as asked, not a failure to report as one.
+enum AutoTopUpFailureReason {
+  /// Stripe holds no reusable card, so the off-session charge could not be attempted.
+  no_payment_method
+  /// Stripe rejected the charge - expired card, insufficient funds, an issuer decline.
+  payment_declined
+
+  @@map("auto_top_up_failure_reason")
 }
 
 model BillingPricing {

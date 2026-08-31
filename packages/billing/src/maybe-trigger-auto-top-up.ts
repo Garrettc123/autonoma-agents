@@ -24,6 +24,10 @@ import { SpendCapService } from "./spend-cap.service";
  * records the charge, that crossing is never re-sent later either. Cap *enforcement* is unaffected
  * (it is all in the database); only the notification is lost. Closing it properly means enqueueing
  * the alert for the API to send rather than notifying inline from whatever host happened to deduct.
+ *
+ * A *failed recharge* does not have that problem, and deliberately so: `AutoTopUpService` records it
+ * on `BillingCustomer` before trying to notify, so the billing page shows it no matter which host
+ * ran the deduction. The email is the part that only the API can add.
  */
 export async function maybeTriggerAutoTopUp(db: PrismaClient, organizationId: string, logger: Logger): Promise<void> {
     try {

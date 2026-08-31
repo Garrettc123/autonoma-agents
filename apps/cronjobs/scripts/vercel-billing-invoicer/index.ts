@@ -1,3 +1,4 @@
+import { VercelInvoiceStatus } from "@autonoma/billing";
 import { db, VercelBillingPeriodStatus, VercelInstallationStatus } from "@autonoma/db";
 import type { Prisma, VercelBillingPlan } from "@autonoma/db";
 import { logger as rootLogger } from "@autonoma/logger";
@@ -305,7 +306,7 @@ async function submitInvoiceToVercel(params: {
                 billingPeriodId: params.billingPeriodId,
                 installationId: params.installationId,
                 amount: totalAmount,
-                status: "pending",
+                status: VercelInvoiceStatus.Pending,
             },
         });
 

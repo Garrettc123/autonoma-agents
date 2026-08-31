@@ -59,6 +59,9 @@ const UNSUBSCRIBED: RouterOutputs["billing"]["status"] = {
   autoTopUpEnabled: false,
   autoTopUpThreshold: 0,
   autoTopUpPackageId: undefined,
+  hasSavedPaymentMethod: false,
+  autoTopUpLastFailureReason: undefined,
+  autoTopUpLastFailureAt: undefined,
   cliCreditsSpent: 0,
   transactions: [],
 };

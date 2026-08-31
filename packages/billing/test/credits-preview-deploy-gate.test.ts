@@ -44,6 +44,7 @@ integrationTestSuite({
 
         test("allows a negative balance that's still above the org's own credit floor", async ({ harness }) => {
             const orgId = await harness.createOrgWithBalance(0);
+            await harness.recordSettledTopupPurchase(orgId);
             await harness.db.billingCustomer.update({
                 where: { organizationId: orgId },
                 data: { creditBalance: -3, creditFloor: -5 },
@@ -54,9 +55,23 @@ integrationTestSuite({
 
         test("blocks once the balance reaches the org's own credit floor", async ({ harness }) => {
             const orgId = await harness.createOrgWithBalance(0);
+            await harness.recordSettledTopupPurchase(orgId);
             await harness.db.billingCustomer.update({
                 where: { organizationId: orgId },
                 data: { creditBalance: -5, creditFloor: -5 },
+            });
+
+            expect(await harness.creditsService.checkPreviewDeployCreditsGate(orgId)).toEqual({
+                allowed: false,
+                reason: "out_of_credits",
+            });
+        });
+
+        test("ignores an overdraft an org has never paid for, blocking it at zero instead", async ({ harness }) => {
+            const orgId = await harness.createOrgWithBalance(0);
+            await harness.db.billingCustomer.update({
+                where: { organizationId: orgId },
+                data: { creditBalance: -3, creditFloor: -5 },
             });
 
             expect(await harness.creditsService.checkPreviewDeployCreditsGate(orgId)).toEqual({

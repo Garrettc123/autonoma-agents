@@ -4,6 +4,7 @@ import { BillingPricingService } from "./billing-pricing.service";
 import { createBillingService } from "./billing.service";
 import { env } from "./env";
 import type { BillingServiceOptions } from "./types";
+import { VercelInvoiceStatus } from "./vercel-invoice-status";
 
 export async function syncVercelPlanPricing(organizationId: string, creditsPerCycle: number): Promise<void> {
     const pricingService = new BillingPricingService(db);
@@ -29,7 +30,7 @@ export async function processVercelInvoicePaid(
 
     await db.vercelInvoice.updateMany({
         where: { vercelInvoiceId: invoiceId },
-        data: { status: "paid", paidAt: new Date() },
+        data: { status: VercelInvoiceStatus.Paid, paidAt: new Date() },
     });
 
     const billingService = createBillingService(db, options);
@@ -49,6 +50,10 @@ export async function processVercelInvoicePaid(
  * suspension, which would unfairly punish a customer over e.g. a support-issued
  * partial refund or proration adjustment). This only updates our own invoice
  * record; it intentionally does not touch subscription/grace-period state.
+ *
+ * `paidAt` is deliberately left alone - it records when the money did arrive.
+ * The status is what says it went back, and it is what `hasEverPaid` reads to
+ * withdraw the overdraft the payment had earned.
  */
 export async function processVercelInvoiceRefunded(installationId: string, invoiceId: string): Promise<void> {
     logger.info("Processing Vercel invoice refunded", { installationId, invoiceId });
@@ -65,7 +70,7 @@ export async function processVercelInvoiceRefunded(installationId: string, invoi
 
     await db.vercelInvoice.updateMany({
         where: { vercelInvoiceId: invoiceId },
-        data: { status: "refunded" },
+        data: { status: VercelInvoiceStatus.Refunded },
     });
 
     logger.info("Vercel invoice marked refunded", {

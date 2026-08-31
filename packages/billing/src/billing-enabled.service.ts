@@ -32,7 +32,12 @@ export class EnabledBillingService implements BillingService, StripeBillingServi
         this.billingPricingService = new BillingPricingService(db);
         this.topupPackageService = new BillingTopupPackageService(db);
         this.spendCapService = new SpendCapService(db, alertNotifier);
-        const autoTopUpService = new AutoTopUpService(db, this.topupPackageService, this.spendCapService);
+        const autoTopUpService = new AutoTopUpService(
+            db,
+            this.topupPackageService,
+            this.spendCapService,
+            alertNotifier,
+        );
         this.billingCustomerService = new BillingCustomerService(db, this.topupPackageService, this.spendCapService);
         this.billingPromoService = new BillingPromoService(db);
         this.vercelOverageService = new VercelOverageService(db);

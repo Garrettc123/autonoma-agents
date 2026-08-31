@@ -1,16 +1,23 @@
-import type { PrismaClient } from "@autonoma/db";
+import { AutoTopUpFailureReason, type PrismaClient } from "@autonoma/db";
 import { BILLING_PAYMENT_INTENT_TYPES, BILLING_TOPUP_SOURCES } from "@autonoma/types";
 import type { BillingTopupPackageService } from "./billing-topup-package.service";
 import { buildAutoTopUpIdempotencyKey } from "./billing-utils";
 import { Service } from "./service";
 import type { SpendCapService } from "./spend-cap.service";
 import { getStripe } from "./stripe-client";
+import type { AutoTopUpFailureReasonValue, BillingAlertNotifier } from "./types";
 
 export class AutoTopUpService extends Service {
     constructor(
         private readonly db: PrismaClient,
         private readonly packageService: BillingTopupPackageService,
         private readonly spendCapService: SpendCapService,
+        /**
+         * Only the API host has one that can send email; everywhere else this is absent and the
+         * recorded failure on `BillingCustomer` is the whole notification. Optional rather than a
+         * no-op default so a host that cannot email is obvious at the construction site.
+         */
+        private readonly alertNotifier?: BillingAlertNotifier,
     ) {
         super();
     }
@@ -68,6 +75,7 @@ export class AutoTopUpService extends Service {
 
         if (paymentMethod == null) {
             this.logger.warn("Auto top-up: no saved payment method found", { organizationId });
+            await this.recordFailure(organizationId, AutoTopUpFailureReason.no_payment_method);
             return;
         }
 
@@ -102,6 +110,7 @@ export class AutoTopUpService extends Service {
             );
 
             this.logger.info("Auto top-up payment intent created", { organizationId, packageId: topupPackage.id });
+            await this.clearFailure(organizationId);
         } catch (error) {
             this.logger.error("Auto top-up payment failed", error, {
                 organizationId,
@@ -111,6 +120,8 @@ export class AutoTopUpService extends Service {
                 packageId: topupPackage.id,
             });
 
+            await this.recordFailure(organizationId, AutoTopUpFailureReason.payment_declined);
+
             if (reservation.periodId != null) {
                 await this.spendCapService.releaseReservation(
                     organizationId,
@@ -118,6 +129,35 @@ export class AutoTopUpService extends Service {
                     topupPackage.priceCents,
                 );
             }
+        }
+    }
+
+    /**
+     * Leaves a breadcrumb the customer can actually see, since this runs on hosts with no way to email
+     * them. Best-effort on purpose: a recharge that already failed must not also throw, and losing the
+     * breadcrumb is strictly better than turning a failed recharge into a failed deduction.
+     */
+    private async recordFailure(organizationId: string, reason: AutoTopUpFailureReasonValue): Promise<void> {
+        try {
+            await this.db.billingCustomer.update({
+                where: { organizationId },
+                data: { autoTopUpLastFailureReason: reason, autoTopUpLastFailureAt: new Date() },
+            });
+            await this.alertNotifier?.notifyAutoTopUpFailed({ organizationId, reason });
+        } catch (err) {
+            this.logger.warn("Could not record the auto top-up failure", { organizationId, extra: { reason }, err });
+        }
+    }
+
+    /** `updateMany` so a customer with nothing recorded is a no-op rather than a needless write. */
+    private async clearFailure(organizationId: string): Promise<void> {
+        try {
+            await this.db.billingCustomer.updateMany({
+                where: { organizationId, autoTopUpLastFailureReason: { not: null } },
+                data: { autoTopUpLastFailureReason: null, autoTopUpLastFailureAt: null },
+            });
+        } catch (err) {
+            this.logger.warn("Could not clear the recorded auto top-up failure", { organizationId, err });
         }
     }
 }
