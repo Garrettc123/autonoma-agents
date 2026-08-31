@@ -753,17 +753,69 @@ const analysisIssueDetail: NonNullable<TrpcFixtures["branches"]> = {
       codeReferences: [{ file: "src/checkout/PlaceOrder.tsx", lines: "42-58", snippet: PLACE_ORDER_SNIPPET }],
     },
     primaryScreenshot: { url: MOCK_SCREENSHOT, points: [] },
-    findingInstances: [
-      {
-        snapshotId: SNAPSHOT_ID,
-        snapshotCreatedAt: RUN_AT,
-        headSha: HEAD_SHA,
-        findingId: "checkout-place-order",
-        slug: "checkout-place-order",
-        category: "client_bug",
-        headline: "Place order button never enables on the checkout page",
-      },
+    coveredTests: [
+      { slug: "checkout-place-order", findingId: "checkout-place-order" },
+      { slug: "checkout-guest-place-order", findingId: "checkout-guest-place-order" },
+      { slug: "checkout-saved-card-place-order", findingId: "checkout-saved-card-place-order" },
+      { slug: "checkout-express-place-order", findingId: "checkout-express-place-order" },
     ],
+  },
+};
+
+// A coverage-plane (environment) issue: the redesign drops Expected/Actual for scenario/environment kinds and shows
+// a single "What happened" account, mirroring how a coverage-fault finding drops expected/actual.
+const ENV_ISSUE_SLUGS = [
+  "discovery-cycles-filter-status",
+  "discovery-cycles-search",
+  "insight-discovery-cycle-tab",
+  "insight-archive-toggle",
+  "home-chat-send",
+];
+const analysisIssueDetailEnvironment: NonNullable<TrpcFixtures["branches"]> = {
+  analysisIssueDetail: {
+    id: "issue_preview_seeding_404",
+    title: "Preview does not serve the Autonoma seeding endpoint",
+    kind: "environment",
+    severity: "high",
+    status: "open",
+    expectedBehavior:
+      "The live preview should accept signed scenario setup requests at POST /api/autonoma so dependent " +
+      "end-to-end tests can seed their isolated tenant.",
+    actualBehavior:
+      "All five scenario setup attempts received HTTP 404 with an HTML response, which the SDK could not parse " +
+      "as JSON; none of the browser flows began.",
+    narrativeMarkdown: [
+      "Every selected flow depends on the `standard` tenant scenario. Its setup request to the new Autonoma " +
+        "endpoint failed before a browser session was created: the SDK received HTTP 404 and an HTML " +
+        "`<!DOCTYPE ...` response rather than its expected JSON protocol response - see " +
+        "[discovery-cycles-filter-status](finding:discovery-cycles-filter-status).",
+      "",
+      "![The 404 HTML response the SDK received](evidence:asset_env_1)",
+    ].join("\n"),
+    evidence: [{ assetId: "asset_env_1", url: MOCK_SCREENSHOT, kind: "screenshot" }],
+    suspectedCause: {
+      explanation:
+        "The preview image was built from a revision whose URL configuration does not mount the Autonoma SDK " +
+        "handler, so the router falls through to the SPA catch-all and returns index.html with a 404.",
+      codeReferences: [
+        {
+          repo: "acme/acme-web",
+          file: "acme/urls.py",
+          lines: "18-24",
+          snippet: [
+            "urlpatterns = [",
+            '    path("admin/", admin.site.urls),',
+            '    path("api/", include("acme.api.urls")),',
+            "    # SDK handler is only mounted when AUTONOMA_ENABLED is set - the preview image was built without it.",
+            '    *([path("api/autonoma", autonoma_handler)] if settings.AUTONOMA_ENABLED else []),',
+            '    re_path(r"^.*$", spa_view),',
+            "]",
+          ].join("\n"),
+        },
+      ],
+    },
+    primaryScreenshot: { url: MOCK_SCREENSHOT, points: [] },
+    coveredTests: ENV_ISSUE_SLUGS.map((slug) => ({ slug, findingId: slug })),
   },
 };
 
@@ -1121,6 +1173,23 @@ export const TestResultPageSteps: Story = {
 export const Issue: Story = {
   args: {
     path: `/app/${baseApplication.slug}/pull-requests/${PR_NUMBER}/issues/issue_place_order`,
+  },
+};
+
+/** The PR-level issue detail for a coverage-plane (environment) issue: a single "What happened" account with no
+ *  Expected/Actual, mirroring how a coverage-fault finding drops expected/actual. */
+export const IssueEnvironment: Story = {
+  parameters: {
+    pageStory: true,
+    msw: {
+      handlers: appShellHandlers({
+        ...pageFixtures,
+        branches: { ...pageFixtures.branches, ...analysisIssueDetailEnvironment },
+      }),
+    },
+  },
+  args: {
+    path: `/app/${baseApplication.slug}/pull-requests/${PR_NUMBER}/issues/issue_preview_seeding_404`,
   },
 };
 

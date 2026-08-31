@@ -12,11 +12,12 @@ import {
   availableRailTabs,
 } from "components/analysis/finding-drawer/finding-drawer-types";
 import { FindingStepsList } from "components/analysis/finding-drawer/finding-steps-list";
+import { RAIL_FRAME_CLASS, RailPanel } from "components/analysis/rail-panel";
 import { SelfHealHistory } from "components/analysis/self-heal-history";
 import { DebugPanel } from "components/debug/debug-panel";
 import { SystemFailurePanel, isSystemFailure } from "components/system-failure-panel";
 import { ensureAnalysisFindingDetailData, useAnalysisFindingDetail } from "lib/query/branches.queries";
-import { type ReactNode, Suspense } from "react";
+import { Suspense } from "react";
 import { AppLink } from "routes/_blacklight/_app-shell/-app-link";
 import { z } from "zod";
 
@@ -33,20 +34,6 @@ const NAV_LINK_CLASS =
 
 /** The line tab's lean form: short text, a tight lime underline hugging it. */
 const RAIL_TAB_CLASS = "h-auto flex-none py-1 after:bottom-0";
-
-/** The run rail is pinned beside the verdict story on wide screens and capped at the viewport, so the story
- * scrolls past it while each panel scrolls within the rail instead of growing the page. 6.5rem clears the top
- * bar plus the rail's sticky offset and a bottom breath. */
-const RAIL_FRAME_CLASS = "lg:sticky lg:top-6 lg:self-start lg:max-h-[calc(100dvh-6.5rem)]";
-
-/** An always-visible, higher-contrast scrollbar so a panel that overflows plainly reads as scrollable. The default
- * overlay scrollbar hides at rest on macOS, and the theme's border tones (#333/#444) vanish against the panel; a
- * reserved gutter plus a light thumb keeps the indicator on screen. `scrollbar-width` is left unset on purpose - a
- * non-auto value makes Chromium ignore the `::-webkit-scrollbar` rules and fall back to a hairline native bar. */
-const RAIL_SCROLLBAR_CLASS =
-  "[scrollbar-gutter:stable] " +
-  "[&::-webkit-scrollbar]:w-2.5 [&::-webkit-scrollbar-track]:bg-transparent " +
-  "[&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/40 [&::-webkit-scrollbar-thumb]:hover:bg-white/60";
 
 /**
  * The canonical, app-scoped test-result page for one finding: a test's analysis verdict and its raw execution
@@ -222,24 +209,6 @@ function RunRail({
         )}
       </Tabs>
     </aside>
-  );
-}
-
-/**
- * A rail tab's body: a framed box that fills the rail's leftover height and scrolls internally, showing an
- * always-visible scrollbar (see {@link RAIL_SCROLLBAR_CLASS}) so an overflowing panel plainly reads as scrollable
- * rather than looking like it simply ends. `className` styles the inner scroll region (e.g. padding). */
-function RailPanel({ className, children }: { className?: string; children: ReactNode }) {
-  return (
-    <div
-      className={cn(
-        "min-h-0 flex-1 overflow-y-auto rounded-lg border border-border-dim bg-surface-base",
-        RAIL_SCROLLBAR_CLASS,
-        className,
-      )}
-    >
-      {children}
-    </div>
   );
 }
 

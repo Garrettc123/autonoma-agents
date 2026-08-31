@@ -112,7 +112,7 @@ apiTestSuite({
             // The issue's covered set is derived from its findings, and a resolve is only accepted for a test the
             // issue actually covers - so an issue that lost its findings could never be closed again.
             const issue = await harness.request().branches.analysisIssueDetail({ issueId: seeded.issueId });
-            expect(issue?.findingInstances.map((instance) => instance.slug)).toEqual([seeded.slug]);
+            expect(issue?.coveredTests.map((test) => test.slug)).toEqual([seeded.slug]);
         });
 
         test("a test the branch's active snapshot does not assign is not found", async ({ harness }) => {

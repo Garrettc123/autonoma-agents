@@ -24,7 +24,6 @@ import {
 import {
     type AnalysisForPr,
     type AnalysisIssueDetail,
-    type AnalysisIssueFindingInstance,
     type AnalysisIssueSummary,
     analysisFindingSortKey,
     type AnalysisFindingView,
@@ -186,11 +185,11 @@ function parseAnalysisTestOrigin(origin: string | undefined): AnalysisTestOrigin
 }
 
 /**
- * The distinct tests an issue covers, each carrying the verdict and Impact Analysis reasoning from the most recent
- * run that attributed it - one finding exists per (run, test), so the newest run's row is the current story for that
- * test. Slug-ordered so the list is stable across requests.
+ * The distinct tests an issue covers - one finding exists per (run, test), so the newest run's row is the current
+ * story for that test. Deduped by test case, slug-ordered so the list is stable across requests. The single source
+ * of truth for "which tests does this issue cover", projected by each caller into the fields it needs.
  */
-function coveredTestsForIssue(issue: Issue): AnalysisPrCoveredTest[] {
+function newestFindingPerTest(issue: Issue): CoveredFinding[] {
     const newestByTest = new Map<string, CoveredFinding>();
     for (const finding of issue.coveredFindings) {
         const seen = newestByTest.get(finding.testCaseId);
@@ -198,14 +197,17 @@ function coveredTestsForIssue(issue: Issue): AnalysisPrCoveredTest[] {
             newestByTest.set(finding.testCaseId, finding);
         }
     }
-    return [...newestByTest.values()]
-        .map((finding) => ({
-            slug: finding.slug,
-            origin: parseAnalysisTestOrigin(finding.origin),
-            selectionReason: finding.selectionReason,
-            category: finding.category ?? "",
-        }))
-        .sort((left, right) => left.slug.localeCompare(right.slug));
+    return [...newestByTest.values()].sort((left, right) => left.slug.localeCompare(right.slug));
+}
+
+/** The PR-level projection: each covered test with the verdict and Impact Analysis reasoning from its newest run. */
+function coveredTestsForIssue(issue: Issue): AnalysisPrCoveredTest[] {
+    return newestFindingPerTest(issue).map((finding) => ({
+        slug: finding.slug,
+        origin: parseAnalysisTestOrigin(finding.origin),
+        selectionReason: finding.selectionReason,
+        category: finding.category ?? "",
+    }));
 }
 
 /**
@@ -485,9 +487,12 @@ export class BranchesService extends Service {
                     : Promise.resolve(undefined),
             ]);
 
-            const findingInstances = this.toIssueFindingInstances(issue.coveredFindings);
+            const coveredTests = newestFindingPerTest(issue).map((finding) => ({
+                slug: finding.slug,
+                findingId: finding.findingId,
+            }));
             this.logger.info("Analysis issue detail assembled", {
-                extra: { issueId, instanceCount: findingInstances.length, evidenceCount: evidence.length },
+                extra: { issueId, coveredTestCount: coveredTests.length, evidenceCount: evidence.length },
             });
             return {
                 id: issue.id,
@@ -502,7 +507,7 @@ export class BranchesService extends Service {
                 suspectedCause: issue.suspectedCause,
                 primaryScreenshot,
                 resolvedAt: issue.resolvedAt,
-                findingInstances,
+                coveredTests,
             };
         } catch (error) {
             this.logger.warn("Could not load analysis issue detail; treating as absent", {
@@ -782,30 +787,6 @@ export class BranchesService extends Service {
             thumbnailUrl,
             runCount,
         };
-    }
-
-    /**
-     * Flatten an issue's covered findings into cross-snapshot instances, newest snapshot first. Each instance
-     * shows the verdict its run stands behind, so a finding still mid-run (no classification yet) is skipped
-     * rather than listed with nothing to say.
-     */
-    private toIssueFindingInstances(findings: CoveredFinding[]): AnalysisIssueFindingInstance[] {
-        return findings
-            .flatMap((finding) => {
-                if (finding.category == null || finding.headline == null) return [];
-                return [
-                    {
-                        snapshotId: finding.snapshotId,
-                        snapshotCreatedAt: finding.snapshotCreatedAt,
-                        headSha: finding.headSha,
-                        findingId: finding.findingId,
-                        slug: finding.slug,
-                        category: finding.category,
-                        headline: finding.headline,
-                    },
-                ];
-            })
-            .sort((a, b) => b.snapshotCreatedAt.getTime() - a.snapshotCreatedAt.getTime());
     }
 
     /**

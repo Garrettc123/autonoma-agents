@@ -993,26 +993,21 @@ export const analysisIssueSummarySchema = z.object({
 export type AnalysisIssueSummary = z.infer<typeof analysisIssueSummarySchema>;
 
 /**
- * One of an issue's finding instances, resolved for the issue-detail page's cross-snapshot timeline: which
- * snapshot surfaced it (with its head sha + time) and the finding-detail routing id, so the row links to the
- * per-snapshot finding page.
+ * One distinct test an issue covers, deduped server-side to the newest finding per test (one finding exists per
+ * (run, test), so the newest run's row is the current story for that test). The issue header already carries the
+ * verdict, severity and cross-snapshot recurrence, so a row needs only the slug and the finding-detail routing id.
  */
-export const analysisIssueFindingInstanceSchema = z.object({
-    snapshotId: z.string(),
-    snapshotCreatedAt: z.date(),
-    headSha: z.string().optional(),
-    /** The stable per-report routing id the finding-detail page is keyed on. */
-    findingId: z.string(),
+export const analysisIssueCoveredTestSchema = z.object({
     slug: z.string(),
-    category: z.string(),
-    headline: z.string(),
+    /** The stable per-report routing id the finding-detail page is keyed on (the newest finding for this test). */
+    findingId: z.string(),
 });
-export type AnalysisIssueFindingInstance = z.infer<typeof analysisIssueFindingInstanceSchema>;
+export type AnalysisIssueCoveredTest = z.infer<typeof analysisIssueCoveredTestSchema>;
 
 /**
  * The full issue-detail read: the header, the grounded narrative (with its signed evidence + hero + suspected
- * cause), and every finding instance the issue covers across the branch's snapshots. `evidence` resolves the
- * narrative's `evidence:` tokens; a token with no resolved asset renders as nothing.
+ * cause), and the distinct tests it covers. `evidence` resolves the narrative's `evidence:` tokens; a token with no
+ * resolved asset renders as nothing.
  */
 export const analysisIssueDetailSchema = z.object({
     id: z.string(),
@@ -1027,7 +1022,7 @@ export const analysisIssueDetailSchema = z.object({
     suspectedCause: suspectedCauseSchema.optional(),
     primaryScreenshot: resolvedPrimaryScreenshotSchema.optional(),
     resolvedAt: z.date().optional(),
-    findingInstances: z.array(analysisIssueFindingInstanceSchema),
+    coveredTests: z.array(analysisIssueCoveredTestSchema),
 });
 export type AnalysisIssueDetail = z.infer<typeof analysisIssueDetailSchema>;
 
