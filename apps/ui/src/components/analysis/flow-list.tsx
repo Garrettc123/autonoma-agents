@@ -66,8 +66,7 @@ export const FLOW_OWNER_META: Record<AnalysisFlow["owner"], OwnerMeta | undefine
 
 /** What a "flow" is, in the reader's language - the copy behind the (i) on the panel title. */
 const FLOW_CONCEPT_HELP =
-  'A flow is one piece of your app\'s behaviour - like "Guest checkout" or "Reset password" - that a group of ' +
-  "Autonoma's tests covers together. This PR's changes are grouped into the flows they touch.";
+  "A slice of your app's behaviour - like \"Guest checkout\" - that a group of Autonoma's tests covers together.";
 
 /**
  * The branch's flow itemization: which parts of the app this PR has established, and which it has not.

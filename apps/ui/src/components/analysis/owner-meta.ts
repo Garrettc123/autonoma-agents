@@ -22,8 +22,7 @@ export const OWNER_META: Record<AnalysisOwner, OwnerMeta> = {
     client: {
         label: "Yours to fix",
         variant: "warn",
-        description:
-            "On your side to fix - a defect in your app, its preview configuration, or its test data. Autonoma reproduced it, but the fix is yours to make.",
+        description: "On your side to fix - a defect in your app, its preview configuration, or its test data.",
         icon: UserIcon,
     },
     autonoma: {

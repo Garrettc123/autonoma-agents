@@ -45,8 +45,7 @@ type PRExecutedTest = ExecutedTest & { snapshotId: string; category?: EntryCateg
 type PRTestRunSection = { key: string; title: string; entries: PRExecutedTest[] };
 
 const CHECKPOINT_HISTORY_HELP =
-  "A checkpoint is one analysis of the branch at a specific commit. This lists them newest-first, so you can see " +
-  "how the verdict changed as you pushed.";
+  "One analysis of the branch at a specific commit, newest first - so you can see how the verdict changed as you pushed.";
 
 export const Route = createFileRoute("/_blacklight/_app-shell/app/$appSlug/pull-requests/$prNumber/_tabs/")({
   loader: async ({ context, params: { appSlug, prNumber } }) => {

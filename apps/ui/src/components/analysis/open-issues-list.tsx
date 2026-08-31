@@ -2,7 +2,12 @@ import { Button, Panel, PanelBody, PanelHeader, PanelTitle } from "@autonoma/bla
 import type { AnalysisIssueSummary } from "@autonoma/types";
 import { RobotIcon } from "@phosphor-icons/react/Robot";
 import { IssueSummaryCard } from "components/analysis/issue-summary-card";
+import { InfoHint } from "components/info-hint";
 import { AppLink } from "routes/_blacklight/_app-shell/-app-link";
+
+/** What "open issues" are, in the reader's language - the copy behind the (i) on the panel title. */
+const OPEN_ISSUES_HELP =
+  "Problems Autonoma found in this PR that are still open. Bugs block the PR; environment and scenario issues are yours to fix too.";
 
 /**
  * The PR page's open-issues list. Bugs come first (their own group), then environment/scenario issues in a
@@ -18,7 +23,12 @@ export function AnalysisOpenIssuesList({ issues, prNumber }: { issues: AnalysisI
       {/* min-h matches the flows panel's header so the two read level side by side, despite this one carrying the
           taller "Fix issues" button and that one only text. */}
       <PanelHeader className="min-h-16">
-        <PanelTitle>Open issues</PanelTitle>
+        <PanelTitle>
+          Open issues
+          <InfoHint ariaLabel="What open issues are" className="text-text-secondary">
+            {OPEN_ISSUES_HELP}
+          </InfoHint>
+        </PanelTitle>
         <div className="flex items-center gap-3">
           <span className="font-mono text-2xs text-text-secondary">
             {issues.length} {issues.length === 1 ? "issue" : "issues"}
