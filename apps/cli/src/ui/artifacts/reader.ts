@@ -1,5 +1,6 @@
 import { open, readFile, stat } from "node:fs/promises";
 import { debugLog } from "../../core/debug";
+import { isMissingFile } from "../../core/is-missing-file";
 import type { ContentKind } from "../types";
 import { kindOf } from "./registry";
 
@@ -44,7 +45,9 @@ export async function readForLive(absPath: string): Promise<LiveContent | undefi
             await fh.close();
         }
     } catch (err) {
-        debugLog("Hero panel could not read file", { absPath, err });
+        // A file that vanished between the watch event and this read is the routine race,
+        // and the hero panel simply renders nothing; only an unreadable file is news.
+        if (!isMissingFile(err)) debugLog("Hero panel could not read file", { absPath, err });
         return undefined;
     }
 }

@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { debugLog } from "../../core/debug";
+import { isMissingFile } from "../../core/is-missing-file";
 
 /**
  * Marker the interactive agent writes as its last act, once every entity and the
@@ -23,7 +24,11 @@ export async function readCompletion(outputDir: string): Promise<boolean> {
     try {
         raw = await readFile(join(outputDir, COMPLETION_MARKER_FILE), "utf-8");
     } catch (err) {
-        debugLog("No completion marker yet", { err });
+        // The marker is absent for the whole session until the agent's last act, so its
+        // absence is this function's normal answer, not an event. Anything else - a bad
+        // outputDir, permissions, a full disk - means the marker can never arrive and the
+        // watcher would wait forever, so that is the case worth a breadcrumb.
+        if (!isMissingFile(err)) debugLog("Cannot read the completion marker", { err });
         return false;
     }
 

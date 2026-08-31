@@ -2,6 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { debugLog } from "./debug";
+import { isMissingFile } from "./is-missing-file";
 
 /**
  * A project map is the very first thing the planner establishes: a partition of the
@@ -93,8 +94,7 @@ export async function loadProjectMap(outputDir: string): Promise<ProjectMap | un
         debugLog("project-map.json failed schema validation, ignoring it", { path, issues: parsed.error.issues });
         return undefined;
     } catch (err) {
-        const isMissingFile = err instanceof Error && "code" in err && err.code === "ENOENT";
-        if (!isMissingFile) debugLog("Failed to read project-map.json, ignoring it", { path, err });
+        if (!isMissingFile(err)) debugLog("Failed to read project-map.json, ignoring it", { path, err });
         return undefined;
     }
 }

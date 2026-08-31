@@ -2,6 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { debugLog } from "./debug";
+import { isMissingFile } from "./is-missing-file";
 
 const StepStatusSchema = z.enum(["pending", "running", "done", "failed", "paused"]);
 
@@ -48,8 +49,7 @@ export async function loadState(outputDir: string): Promise<PipelineState> {
     } catch (err) {
         // Missing file is the expected first-run path; a present-but-unreadable/invalid file
         // means we are silently discarding prior progress, so leave a breadcrumb for that case.
-        const isMissingFile = err instanceof Error && "code" in err && err.code === "ENOENT";
-        if (!isMissingFile) debugLog("Failed to load pipeline state, starting fresh", { path, err });
+        if (!isMissingFile(err)) debugLog("Failed to load pipeline state, starting fresh", { path, err });
         return initialState();
     }
 }

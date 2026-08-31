@@ -39,6 +39,11 @@ export function watchForCompletion(
     let killTimer: ReturnType<typeof setTimeout> | undefined;
     let stopped = false;
 
+    // Bracket the wait with one record at each end. The marker is missing on every tick
+    // until the last, so a per-tick breadcrumb says nothing thousands of times and buries
+    // the rest of the run; these two say when the wait began and how it ended.
+    debugLog("Waiting for the completion marker", { outputDir, pollMs: timing.pollMs });
+
     const poll = setInterval(() => {
         void readCompletion(outputDir).then((complete) => {
             // A read in flight when cleanup ran outlives it, and would otherwise arm the reclaim afterwards -
@@ -60,6 +65,9 @@ export function watchForCompletion(
 
     return () => {
         stopped = true;
+        // Torn down before the marker landed: the agent exited on its own without
+        // reporting done. That is the outcome the caller re-launches on, so name it.
+        if (graceTimer == null) debugLog("Completion watch stopped before the marker appeared", { outputDir });
         clearInterval(poll);
         if (graceTimer != null) clearTimeout(graceTimer);
         if (killTimer != null) clearTimeout(killTimer);
