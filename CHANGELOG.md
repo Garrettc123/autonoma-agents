@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.260831.1](https://github.com/Autonoma-AI/agent/compare/v1.260828.1...v1.260831.1) (2026-08-31)
+
+
+### Features
+
+* **ci:** scale alpha namespaces down outside working hours ([#2881](https://github.com/Autonoma-AI/agent/issues/2881)) ([fbe62c1](https://github.com/Autonoma-AI/agent/commit/fbe62c1a128fca9ef191b416e87a67ab1d2bab8e))
+* **diffs:** answer pushes-only empty-subject runs without the agent ([#2872](https://github.com/Autonoma-AI/agent/issues/2872)) ([f50a176](https://github.com/Autonoma-AI/agent/commit/f50a176b9ea2a75767a71e3864206af71761aee8))
+* **diffs:** scope impact analysis to the branch's owned, unassessed content ([#2851](https://github.com/Autonoma-AI/agent/issues/2851)) ([27f1b7a](https://github.com/Autonoma-AI/agent/commit/27f1b7a54258087e5910167e3dafb051367b3507))
+* drop credits compute columns ([#2871](https://github.com/Autonoma-AI/agent/issues/2871)) ([91932ea](https://github.com/Autonoma-AI/agent/commit/91932ea3efa69e87bde69564f75df248d19b793d))
+* **mcp-client:** add authenticated typed client for Autonoma's MCP server ([#2882](https://github.com/Autonoma-AI/agent/issues/2882)) ([7e0d50d](https://github.com/Autonoma-AI/agent/commit/7e0d50d989d174f2f59b4ba6918a4a42820507ac))
+* **platform:** encrypt EBS at rest and give the NAT instances stable EIPs ([#2902](https://github.com/Autonoma-AI/agent/issues/2902)) ([16c5905](https://github.com/Autonoma-AI/agent/commit/16c59055bb6ae0942e42bded3e4e0a4fa9067375))
+* rework finding page layout with pinned run rail and evidence masonry ([#2879](https://github.com/Autonoma-AI/agent/issues/2879)) ([89c47f5](https://github.com/Autonoma-AI/agent/commit/89c47f5c67524c496b2ba62160fbffe34932028e))
+
+
+### Bug Fixes
+
+* **analysis:** never re-run a blank self-heal plan ([#2900](https://github.com/Autonoma-AI/agent/issues/2900)) ([6c8202d](https://github.com/Autonoma-AI/agent/commit/6c8202d4dab175a32ec05adc1ffa2c38aa006988))
+* **cli:** accept ./-prefixed and trailing-slash paths in project-map selection ([#2893](https://github.com/Autonoma-AI/agent/issues/2893)) ([a6a6d3e](https://github.com/Autonoma-AI/agent/commit/a6a6d3e0c192f734949274637fa61af34514d7bc))
+* **github:** backfill denormalized repo names on repository.renamed ([#2901](https://github.com/Autonoma-AI/agent/issues/2901)) ([f012ade](https://github.com/Autonoma-AI/agent/commit/f012ade0ea1f2955cc71c1ef2a2965bfe11ee238))
+* **github:** retry the repo clone under an escalating timeout budget ([#2884](https://github.com/Autonoma-AI/agent/issues/2884)) ([811e614](https://github.com/Autonoma-AI/agent/commit/811e614de496d8cff466ef9569b678c470ef5669))
+* tidy PR overview flow/issue panels and correct checkpoint fixtures ([#2876](https://github.com/Autonoma-AI/agent/issues/2876)) ([410fa47](https://github.com/Autonoma-AI/agent/commit/410fa4705b350089e38b02cdd82feae7f01b61af))
+
+
+### Performance Improvements
+
+* **github:** cut redundant GitHub API calls and share the throttled client ([#2898](https://github.com/Autonoma-AI/agent/issues/2898)) ([bb89b13](https://github.com/Autonoma-AI/agent/commit/bb89b134cd3c488dc0d2c33dd1dbcd6f969f58e5))
+
 ## [1.260828.1](https://github.com/Autonoma-AI/agent/compare/v1.260827.1...v1.260828.1) (2026-08-28)
 
 
