@@ -3,6 +3,11 @@
  *
  * Usage:
  *   tsx evals/capture/capture-analysis-cli.ts <snapshotId> [--name <case-name>] [--force]
+ *       [--target-sha <sha>] [--fabricate-push-before <sha>]
+ *
+ * `--target-sha` freezes the PR's target-branch tip so the eval scopes the run subject;
+ * `--fabricate-push-before` synthesizes the `commits_pushed` event a pre-inbox run would have
+ * claimed, with the given pre-push head.
  *
  * Run via the `capture:analysis` package script so env is loaded from the repo
  * `.env`. Required env: DATABASE_URL + the GITHUB_APP_* credentials.
@@ -20,6 +25,8 @@ async function main(): Promise<void> {
         options: {
             name: { type: "string" },
             force: { type: "boolean", default: false },
+            "target-sha": { type: "string" },
+            "fabricate-push-before": { type: "string" },
         },
     });
 
@@ -28,7 +35,13 @@ async function main(): Promise<void> {
         throw new Error("Missing <snapshotId>. Usage: capture:analysis <snapshotId> [--name <case-name>] [--force]");
     }
 
-    const params: Parameters<typeof captureAnalysis>[0] = { snapshotId, force: values.force, name: values.name };
+    const params: Parameters<typeof captureAnalysis>[0] = {
+        snapshotId,
+        force: values.force,
+        name: values.name,
+        targetSha: values["target-sha"],
+        fabricatePushBeforeSha: values["fabricate-push-before"],
+    };
 
     const caseDir = await captureAnalysis(params);
 

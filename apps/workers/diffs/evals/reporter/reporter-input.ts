@@ -1,7 +1,7 @@
 import type { Codebase, ScreenshotLoader } from "@autonoma/diffs";
 import { type ReporterInput, type ReporterScenarioLoader, reporterInputPayloadSchema } from "@autonoma/diffs/analysis";
 import type { z } from "zod";
-import { codebaseCoordsSchema } from "../framework";
+import { codebaseCoordsSchema } from "../framework/codebase-cache";
 
 /**
  * The frozen, on-disk shape of a captured Reporter case (`input.json`): the runtime-serialized

@@ -1,8 +1,16 @@
+import path from "node:path";
 import { recordedEventShas } from "@autonoma/analysis";
-import { type Codebase, DiffsAgent, type DiffsAgentResult } from "@autonoma/diffs";
+import {
+    type Codebase,
+    computeRunSubject,
+    DiffsAgent,
+    type DiffsAgentResult,
+    skipSelectionForEmptySubject,
+} from "@autonoma/diffs";
 import type { ModelSession } from "@autonoma/diffs/analysis";
 import { type CheckFailure, type LoadedCase, type RunCaseHelpers } from "@autonoma/evals";
 import { type RunOutcome, ScoredReplayEvaluation, rehydrateOrSkip } from "../framework";
+import { writeAgentTranscript } from "../framework/transcript-artifact";
 import { type AnalysisFrontmatter, checkAnalysisResult } from "./analysis-frontmatter";
 import { type AnalysisCaseInput, type RehydratedAnalysisInput, rehydrateAnalysisInput } from "./analysis-input";
 
@@ -37,8 +45,13 @@ export class AnalysisEvaluation extends ScoredReplayEvaluation<
     AnalysisContext,
     DiffsAgentResult
 > {
+    private readonly transcriptDir: string;
+
     constructor(resultsDir: string, cases: AnalysisCase[]) {
         super({ name: "diffs-analysis", resultsDir, timeoutMs: TIMEOUT_MS }, cases);
+        // Stamped per suite run, so repeated runs keep every transcript - diffing two runs of an unchanged
+        // prompt is how selection variance gets diagnosed.
+        this.transcriptDir = path.join(resultsDir, "transcripts", String(Date.now()));
     }
 
     protected override testCaseInfo(testCase: AnalysisCase): Record<string, string> {
@@ -51,30 +64,55 @@ export class AnalysisEvaluation extends ScoredReplayEvaluation<
     }
 
     protected override async setUp(testCase: AnalysisCase, helpers: RunCaseHelpers): Promise<AnalysisContext> {
-        const { coords, agentInput } = rehydrateAnalysisInput(testCase.input);
+        const { coords, agentInput, targetSha } = rehydrateAnalysisInput(testCase.input);
+        const eventShas = recordedEventShas(agentInput.events ?? [], [coords.headSha, coords.baseSha]);
         const codebase = await rehydrateOrSkip(
             coords,
             helpers,
             { logger: this.logger, caseName: testCase.name },
-            { extraShas: recordedEventShas(agentInput.events ?? [], [coords.headSha, coords.baseSha]) },
+            { extraShas: targetSha != null ? [...eventShas, targetSha] : eventShas },
         );
-        return { codebase, agentInput };
+        // The subject is a pure function of the clone + shas, so it is recomputed here through the same
+        // production call rather than frozen - a frozen copy could only go stale against `computeRunSubject`.
+        const subject =
+            targetSha != null
+                ? await computeRunSubject({
+                      root: codebase.primaryDir,
+                      headSha: coords.headSha,
+                      frontierSha: coords.baseSha,
+                      targetSha,
+                  })
+                : undefined;
+        return { codebase, agentInput: { ...agentInput, subject } };
     }
 
     protected override async runOnce(
         session: ModelSession,
-        _testCase: AnalysisCase,
+        testCase: AnalysisCase,
         context: AnalysisContext,
     ): Promise<RunOutcome<DiffsAgentResult>> {
+        // The same deterministic answer production gives a pushes-only empty-subject run - the case then grades
+        // the short-circuit wiring rather than an agent that was never invoked.
+        const skipped = skipSelectionForEmptySubject(context.agentInput.subject, context.agentInput.events ?? []);
+        if (skipped != null) {
+            return { result: skipped, info: { skippedSelection: true } };
+        }
+
         const model = session.getModel({ model: "impact", tag: "analysis-impact" });
         const agent = new DiffsAgent({ model });
-        const { result } = await agent.run({ ...context.agentInput, codebase: context.codebase });
+        const { result, conversation } = await agent.run({ ...context.agentInput, codebase: context.codebase });
+        const transcriptPath = await writeAgentTranscript({
+            dir: this.transcriptDir,
+            caseName: testCase.name,
+            conversation,
+        });
         return {
             result,
             info: {
                 affectedTests: result.affectedTests.map((t) => t.slug),
                 createdTestCount: result.createdTests.length,
                 createdTestFolders: result.createdTests.map((t) => t.folderName),
+                transcriptPath,
             },
         };
     }

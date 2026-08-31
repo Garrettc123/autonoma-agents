@@ -1,12 +1,14 @@
 import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import type { ResolvedAnalysisEvent } from "@autonoma/analysis";
+import { db } from "@autonoma/db";
 import { logger as rootLogger } from "@autonoma/logger";
 import { assembleDiffsAgentInput } from "../../src/analysis/assemble-input";
 import { getGitHubApp } from "../../src/github-app";
 import { serializeAnalysisInput } from "../analysis/analysis-input";
 import { casesDir } from "../framework/cases-dir";
-import { ensureFetchable } from "../framework/codebase-cache";
+import { type CodebaseCoords, ensureFetchable } from "../framework/codebase-cache";
 import { resolveSnapshotCoords } from "./snapshot-coords";
 
 export interface CaptureAnalysisParams {
@@ -15,6 +17,18 @@ export interface CaptureAnalysisParams {
     name?: string;
     /** Overwrite an existing case folder. */
     force?: boolean;
+    /**
+     * Freeze this sha as the PR's target-branch tip, so the eval scopes the run subject against it. Passed
+     * explicitly rather than resolved live: for a historical snapshot the target has long moved on, and the
+     * faithful tip is the one the head was built against (a rebased head's parent, a merge's second parent).
+     */
+    targetSha?: string;
+    /**
+     * Fabricate the `commits_pushed` event this run would have claimed, with the given pre-push head. For
+     * snapshots that predate the event inbox; the event carries `deliveryId: "eval-fabricated"` so it can
+     * never be mistaken for a real delivery.
+     */
+    fabricatePushBeforeSha?: string;
 }
 
 /**
@@ -49,13 +63,19 @@ export async function captureAnalysis(params: CaptureAnalysisParams): Promise<st
     // Warm the same cache the eval uses and validate SHA-fetchability (throws
     // UnfetchableShaError on a dead SHA, so we never write an unrunnable case).
     await ensureFetchable(coords, { githubApp });
+    // A frozen target tip is load-bearing for the case (the subject scoping keys on it), so its
+    // fetchability is validated as hard as the base/head - never best-effort.
+    if (params.targetSha != null) {
+        await ensureFetchable({ ...coords, baseSha: params.targetSha }, { githubApp });
+    }
 
     // Use the *previous* snapshot's suite as the baseline: by capture time the
     // pipeline has already rewritten this snapshot's own assignments, so reading
     // them would not reflect what analysis actually saw. The previous snapshot
     // holds the unmutated baseline the production run started from.
     const { agentInput } = await assembleDiffsAgentInput({ snapshotId });
-    const frozenInput = serializeAnalysisInput(coords, agentInput);
+    const events = await withFabricatedPush(snapshotId, coords, agentInput.events ?? [], params);
+    const frozenInput = serializeAnalysisInput(coords, { ...agentInput, events }, { targetSha: params.targetSha });
 
     const expectedPath = path.join(caseDir, "expected.md");
     // A re-capture refreshes the frozen inputs. The expectation is hand-authored, so it is never one of them.
@@ -75,6 +95,37 @@ export async function captureAnalysis(params: CaptureAnalysisParams): Promise<st
     });
 
     return caseDir;
+}
+
+/**
+ * Append the `commits_pushed` event a pre-inbox run would have claimed, when asked to. Timestamped at the
+ * snapshot's own creation so the prompt's event ordering reads as it would have in production.
+ */
+async function withFabricatedPush(
+    snapshotId: string,
+    coords: CodebaseCoords,
+    events: ResolvedAnalysisEvent[],
+    params: CaptureAnalysisParams,
+): Promise<ResolvedAnalysisEvent[]> {
+    if (params.fabricatePushBeforeSha == null) return events;
+    const snapshot = await db.branchSnapshot.findUniqueOrThrow({
+        where: { id: snapshotId },
+        select: { createdAt: true },
+    });
+    return [
+        ...events,
+        {
+            type: "commits_pushed",
+            payload: {
+                headSha: coords.headSha,
+                baseSha: params.targetSha,
+                beforeSha: params.fabricatePushBeforeSha,
+                deliveryId: "eval-fabricated",
+            },
+            source: "webhook",
+            createdAt: snapshot.createdAt,
+        },
+    ];
 }
 
 function blankExpected(snapshotId: string): string {

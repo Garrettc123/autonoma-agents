@@ -11,8 +11,9 @@ import { type Logger, logger as rootLogger } from "@autonoma/logger";
 import type { StorageProvider } from "@autonoma/storage";
 import { getGitHubApp } from "../../src/github-app";
 import { getStorage } from "../../src/services";
-import { ensureFetchable, probeEvidence } from "../framework";
 import { casesDir } from "../framework/cases-dir";
+import { ensureFetchable } from "../framework/codebase-cache";
+import { probeEvidence } from "../framework/evidence-probe";
 import { reporterCaseInputSchema } from "../reporter/reporter-input";
 import { resolveSnapshotCoords } from "./snapshot-coords";
 

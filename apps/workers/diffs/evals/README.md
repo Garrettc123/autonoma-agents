@@ -354,7 +354,7 @@ whose logs have aged out, or a machine that cannot reach Loki, needs `--skip-app
 default is to refuse rather than freeze a window nobody could read.
 
 ```bash
-pnpm --filter @autonoma/worker-diffs capture:analysis               <snapshotId>   [--name <case-name>] [--force]
+pnpm --filter @autonoma/worker-diffs capture:analysis               <snapshotId>   [--name <case-name>] [--force] [--target-sha <sha>] [--fabricate-push-before <sha>]
 pnpm --filter @autonoma/worker-diffs capture:classifier            <classificationId> [--name <case-name>] [--force] [--skip-app-logs]
 pnpm --filter @autonoma/worker-diffs capture:reporter               <snapshotId>   [--name <case-name>] [--force]
 ```
@@ -410,6 +410,15 @@ Classifier capture needs no model credentials and never downloads media: it take
 run's facts (`buildRunFacts`, which does no I/O) and writes the recording and final frame
 as storage keys for the evaluation to fetch. It does need `PREVIEWKIT_SECRETS_CMK` to
 read the env-var names; without it the case is still written, minus `get_preview_env`.
+
+**The run subject (Analysis).** A case may freeze `targetSha` - the PR's target-branch tip - and the
+eval then scopes the run subject through the same `computeRunSubject` production uses (the subject is
+a pure function of the clone + shas, so it is recomputed at run time, never frozen). Pass the tip
+explicitly via `--target-sha`: for a historical snapshot the live target has long moved on, and the
+faithful value is the tip the head was built against (a rebased head's parent, a merge's second
+parent). `--fabricate-push-before <sha>` synthesizes the `commits_pushed` event a pre-inbox run would
+have claimed, stamped `deliveryId: "eval-fabricated"` so it can never be mistaken for a real delivery.
+A case without `targetSha` runs unscoped, exactly like a main-branch run.
 
 **Baseline snapshot state (Analysis).** Analysis grades against the snapshot as it stood _before_
 this snapshot's pipeline ran. At production time the snapshot's own assignments are still that

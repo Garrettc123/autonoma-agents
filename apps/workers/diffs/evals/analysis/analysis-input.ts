@@ -2,7 +2,7 @@ import type { DiffsAgentInput, FlowInfo, ScenarioInfo } from "@autonoma/diffs";
 import { FlowIndex, ScenarioIndex, scenarioRecipeDataSchema } from "@autonoma/diffs";
 import { analysisEventBodySchema, analysisEventSourceSchema } from "@autonoma/types";
 import { z } from "zod";
-import { type CodebaseCoords, codebaseCoordsSchema } from "../framework";
+import { type CodebaseCoords, codebaseCoordsSchema } from "../framework/codebase-cache";
 
 /** The DiffsAgent input minus the on-disk clone (rehydrated from codebase coords at run time). */
 type DiffsAgentInputWithoutCodebase = Omit<DiffsAgentInput, "codebase">;
@@ -92,6 +92,11 @@ export const analysisCaseInputSchema = z.object({
     codebase: codebaseCoordsSchema,
     headSha: z.string(),
     baseSha: z.string(),
+    /**
+     * The PR's target-branch tip, frozen so the subject scoping is deterministic (the live tip drifts). The
+     * subject itself is a pure function of the clone + shas, so it is computed at run time, never frozen.
+     */
+    targetSha: z.string().optional(),
     existingTests: z.array(existingTestInfoSchema),
     flowIndex: z.array(flowInfoSchema),
     scenarios: z.array(scenarioInfoSchema).default([]),
@@ -109,6 +114,8 @@ export type AnalysisCaseInput = z.infer<typeof analysisCaseInputSchema>;
 export interface RehydratedAnalysisInput {
     coords: CodebaseCoords;
     agentInput: DiffsAgentInputWithoutCodebase;
+    /** The frozen target tip, when the case scopes a subject. */
+    targetSha?: string;
 }
 
 /**
@@ -134,7 +141,7 @@ export function rehydrateAnalysisInput(parsed: AnalysisCaseInput): RehydratedAna
         events: parsed.events ?? [],
     };
 
-    return { coords: parsed.codebase, agentInput };
+    return { coords: parsed.codebase, agentInput, targetSha: parsed.targetSha };
 }
 
 /**
@@ -146,11 +153,13 @@ export function rehydrateAnalysisInput(parsed: AnalysisCaseInput): RehydratedAna
 export function serializeAnalysisInput(
     coords: CodebaseCoords,
     agentInput: DiffsAgentInputWithoutCodebase,
+    options?: { targetSha?: string },
 ): AnalysisCaseInput {
     return analysisCaseInputSchema.parse({
         codebase: coords,
         headSha: agentInput.headSha,
         baseSha: agentInput.baseSha,
+        targetSha: options?.targetSha,
         existingTests: agentInput.existingTests,
         flowIndex: agentInput.flowIndex.toArray(),
         scenarios: agentInput.scenarios.toArray(),

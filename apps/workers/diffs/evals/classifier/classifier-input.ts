@@ -2,7 +2,7 @@ import { ApplicationArchitecture } from "@autonoma/db";
 import type { ClassifierInput, RunFacts } from "@autonoma/diffs/analysis";
 import { investigationEvidenceSchema, overlayPointSchema } from "@autonoma/types";
 import { z } from "zod";
-import { type CodebaseCoords, codebaseCoordsSchema } from "../framework";
+import { type CodebaseCoords, codebaseCoordsSchema } from "../framework/codebase-cache";
 import { appLogArtifactLocation } from "./app-log-artifact-location";
 import { frozenPreviewEnv } from "./frozen-preview-env";
 

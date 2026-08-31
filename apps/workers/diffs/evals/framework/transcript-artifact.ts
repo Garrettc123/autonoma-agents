@@ -9,30 +9,30 @@ const DATA_URL_ELIDE_THRESHOLD = 256;
 
 /**
  * Anything outside a flat filename slug. Case names are kebab slugs today, but a `/` would imply a nested path
- * under `dir` that {@link writeClassifierTranscript}'s `mkdirSync(dir)` never created (ENOENT) - or, worse, one
+ * under `dir` that {@link writeAgentTranscript}'s `mkdirSync(dir)` never created (ENOENT) - or, worse, one
  * that escapes it. Collapsing to a dash keeps the transcript a single flat file inside `dir`.
  */
 const FILENAME_UNSAFE = /[^A-Za-z0-9._-]/g;
 
 /**
- * Persist one classification's full model conversation to a debug artifact under `dir`, with binary image
+ * Persist one agent run's full model conversation to a debug artifact under `dir`, with binary image
  * payloads replaced by `[binary N bytes]` so the file stays a readable text transcript instead of megabytes
  * of base64. Returns the path written. The transcript is what makes a verdict's *reasoning* - every tool call,
  * tool result, and reasoning turn - recoverable after the run, which the scored result JSON does not carry.
  */
-export async function writeClassifierTranscript(opts: {
+export async function writeAgentTranscript(opts: {
     dir: string;
     caseName: string;
     conversation: ModelMessage[];
 }): Promise<string> {
-    const logger = rootLogger.child({ name: "writeClassifierTranscript" });
+    const logger = rootLogger.child({ name: "writeAgentTranscript" });
     const { dir, caseName, conversation } = opts;
 
     mkdirSync(dir, { recursive: true });
     const file = path.join(dir, `${caseName.replace(FILENAME_UNSAFE, "-")}.json`);
     await writeFile(file, JSON.stringify(conversation, elideBinary, 2));
 
-    logger.info("Wrote classifier transcript", { extra: { file, messages: conversation.length } });
+    logger.info("Wrote agent transcript", { extra: { file, messages: conversation.length } });
     return file;
 }
 

@@ -20,6 +20,7 @@ import {
     rehydrateOrSkip,
     skipIfEvidenceUnreachable,
 } from "../framework";
+import { writeAgentTranscript } from "../framework/transcript-artifact";
 import { type ClassifierFrontmatter, checkClassifierVerdict } from "./classifier-frontmatter";
 import {
     type FrozenAppLogArtifact,
@@ -33,7 +34,6 @@ import { type ClassifierResultRow, computeClassifierMetrics } from "./classifier
 import { formatClassifierMetrics } from "./classifier-metrics-report";
 import { FrozenAppLogArtifactError, FrozenAppLogArtifactStore } from "./frozen-app-log-artifact";
 import { createFrozenAppLogsLoader } from "./frozen-app-logs";
-import { writeClassifierTranscript } from "./transcript-artifact";
 
 /** A loaded Classifier eval case: frozen classification input + authored expectations. */
 export type ClassifierCase = LoadedCase<ClassifierCaseInput, ClassifierFrontmatter>;
@@ -211,7 +211,7 @@ export class ClassifierEvaluation extends ScoredReplayEvaluation<
             previewScript: undefined,
             loadAppLogs: this.appLogsFor(context.appLogWindow, context.input.run),
         });
-        const transcriptPath = await writeClassifierTranscript({
+        const transcriptPath = await writeAgentTranscript({
             dir: this.transcriptDir,
             caseName: testCase.name,
             conversation,
