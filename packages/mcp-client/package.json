@@ -1,0 +1,30 @@
+{
+    "name": "@autonoma/mcp-client",
+    "version": "0.0.1",
+    "private": true,
+    "type": "module",
+    "types": "./src/index.ts",
+    "exports": {
+        ".": "./src/index.ts",
+        "./env": "./src/env.ts"
+    },
+    "scripts": {
+        "build": "tsc --noCheck",
+        "typecheck": "tsc --noEmit",
+        "lint": "oxlint --fix src/ test/",
+        "fmt": "oxfmt --write src/ test/",
+        "test": "vitest run"
+    },
+    "dependencies": {
+        "@autonoma/errors": "workspace:*",
+        "@autonoma/logger": "workspace:*",
+        "@modelcontextprotocol/sdk": "catalog:",
+        "@t3-oss/env-core": "catalog:",
+        "zod": "catalog:"
+    },
+    "devDependencies": {
+        "@types/node": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:"
+    }
+}
