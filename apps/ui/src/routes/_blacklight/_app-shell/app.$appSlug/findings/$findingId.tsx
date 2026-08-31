@@ -16,7 +16,7 @@ import { SelfHealHistory } from "components/analysis/self-heal-history";
 import { DebugPanel } from "components/debug/debug-panel";
 import { SystemFailurePanel, isSystemFailure } from "components/system-failure-panel";
 import { ensureAnalysisFindingDetailData, useAnalysisFindingDetail } from "lib/query/branches.queries";
-import { Suspense } from "react";
+import { type ReactNode, Suspense } from "react";
 import { AppLink } from "routes/_blacklight/_app-shell/-app-link";
 import { z } from "zod";
 
@@ -33,6 +33,20 @@ const NAV_LINK_CLASS =
 
 /** The line tab's lean form: short text, a tight lime underline hugging it. */
 const RAIL_TAB_CLASS = "h-auto flex-none py-1 after:bottom-0";
+
+/** The run rail is pinned beside the verdict story on wide screens and capped at the viewport, so the story
+ * scrolls past it while each panel scrolls within the rail instead of growing the page. 6.5rem clears the top
+ * bar plus the rail's sticky offset and a bottom breath. */
+const RAIL_FRAME_CLASS = "lg:sticky lg:top-6 lg:self-start lg:max-h-[calc(100dvh-6.5rem)]";
+
+/** An always-visible, higher-contrast scrollbar so a panel that overflows plainly reads as scrollable. The default
+ * overlay scrollbar hides at rest on macOS, and the theme's border tones (#333/#444) vanish against the panel; a
+ * reserved gutter plus a light thumb keeps the indicator on screen. `scrollbar-width` is left unset on purpose - a
+ * non-auto value makes Chromium ignore the `::-webkit-scrollbar` rules and fall back to a hairline native bar. */
+const RAIL_SCROLLBAR_CLASS =
+  "[scrollbar-gutter:stable] " +
+  "[&::-webkit-scrollbar]:w-2.5 [&::-webkit-scrollbar-track]:bg-transparent " +
+  "[&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/40 [&::-webkit-scrollbar-thumb]:hover:bg-white/60";
 
 /**
  * The canonical, app-scoped test-result page for one finding: a test's analysis verdict and its raw execution
@@ -72,15 +86,16 @@ function FindingResultContent() {
         <IssueUpLink issueId={view.issueId} issueTitle={view.issueTitle} prNumber={view.prNumber} />
       </div>
 
-      <FindingHeader
-        view={view}
-        onIterationChange={(next) =>
-          void navigate({ search: (prev) => ({ ...prev, iteration: next, tab: undefined }), replace: true })
-        }
-      />
-
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-        <VerdictColumn view={view} />
+        <div className="flex min-w-0 flex-col gap-6">
+          <FindingHeader
+            view={view}
+            onIterationChange={(next) =>
+              void navigate({ search: (prev) => ({ ...prev, iteration: next, tab: undefined }), replace: true })
+            }
+          />
+          <VerdictColumn view={view} />
+        </div>
         <RunRail
           view={view}
           tab={tab}
@@ -152,7 +167,7 @@ function RunRail({
   const generation = view.generation;
 
   return (
-    <aside className="flex flex-col gap-4 lg:sticky lg:top-6 lg:self-start">
+    <aside className={cn("flex flex-col gap-4", RAIL_FRAME_CLASS)}>
       {view.classification != null && (
         <FindingMediaPanel classification={view.classification} generation={generation ?? undefined} />
       )}
@@ -163,9 +178,9 @@ function RunRail({
           const next = tabs.find((candidate) => candidate === value);
           if (next != null) onTabChange(next);
         }}
-        className="flex flex-col gap-3"
+        className="flex min-h-0 flex-1 flex-col gap-3"
       >
-        <TabsList variant="line" className="justify-start">
+        <TabsList variant="line" className="shrink-0 justify-start">
           {tabs.includes("steps") && (
             <TabsTrigger value="steps" className={RAIL_TAB_CLASS}>
               Steps
@@ -182,30 +197,49 @@ function RunRail({
         </TabsList>
 
         {generation != null && (
-          <TabsContent value="steps">
-            <FindingStepsList generation={generation} />
+          <TabsContent value="steps" className="flex min-h-0 flex-1 flex-col">
+            <RailPanel>
+              <FindingStepsList generation={generation} framed={false} />
+            </RailPanel>
           </TabsContent>
         )}
-        <TabsContent value="plan">
-          <div className="rounded-lg border border-border-dim bg-surface-base p-4">
+        <TabsContent value="plan" className="flex min-h-0 flex-1 flex-col">
+          <RailPanel className="p-4">
             <FindingDrawerPlan plan={view.plan} previousPlan={view.previousPlan ?? undefined} />
-          </div>
+          </RailPanel>
         </TabsContent>
         {generation?.debug != null && (
-          <TabsContent
-            value="debug"
-            className="flex flex-col gap-4 rounded-lg border border-border-dim bg-surface-base p-4"
-          >
-            <DebugPanel debug={generation.debug} conversationUrl={generation.conversationUrl ?? undefined} />
-            {generation.temporalWorkflow != null && (
-              <p className="font-mono text-3xs text-text-secondary">
-                Temporal: {generation.temporalWorkflow.workflowId}
-              </p>
-            )}
+          <TabsContent value="debug" className="flex min-h-0 flex-1 flex-col">
+            <RailPanel className="flex flex-col gap-4 p-4">
+              <DebugPanel debug={generation.debug} conversationUrl={generation.conversationUrl ?? undefined} />
+              {generation.temporalWorkflow != null && (
+                <p className="font-mono text-3xs text-text-secondary">
+                  Temporal: {generation.temporalWorkflow.workflowId}
+                </p>
+              )}
+            </RailPanel>
           </TabsContent>
         )}
       </Tabs>
     </aside>
+  );
+}
+
+/**
+ * A rail tab's body: a framed box that fills the rail's leftover height and scrolls internally, showing an
+ * always-visible scrollbar (see {@link RAIL_SCROLLBAR_CLASS}) so an overflowing panel plainly reads as scrollable
+ * rather than looking like it simply ends. `className` styles the inner scroll region (e.g. padding). */
+function RailPanel({ className, children }: { className?: string; children: ReactNode }) {
+  return (
+    <div
+      className={cn(
+        "min-h-0 flex-1 overflow-y-auto rounded-lg border border-border-dim bg-surface-base",
+        RAIL_SCROLLBAR_CLASS,
+        className,
+      )}
+    >
+      {children}
+    </div>
   );
 }
 

@@ -252,11 +252,19 @@ export function VerdictEvidence({
   const [open, setOpen] = useState(!collapsible);
   if (evidence.length === 0) return null;
 
+  // A masonry so the mixed cards (a one-line run note, a tall code snippet, a run frame) tile by height instead
+  // of leaving a ragged single column. Container-query driven, not viewport: it splits to two columns only once
+  // its own box is wide (the finding page's main column), staying single-column in the narrow drawer that also
+  // renders this list. Each card avoids breaking across the column gap.
   const items = (
-    <div className="flex flex-col gap-2">
-      {evidence.map((item, i) => (
-        <EvidenceItem key={i} item={item} repoFullName={repoFullName} commitSha={commitSha} />
-      ))}
+    <div className="@container">
+      <div className="columns-1 gap-2 @2xl:columns-2">
+        {evidence.map((item, i) => (
+          <div key={i} className="mb-2 break-inside-avoid">
+            <EvidenceItem item={item} repoFullName={repoFullName} commitSha={commitSha} />
+          </div>
+        ))}
+      </div>
     </div>
   );
 
