@@ -12,6 +12,7 @@ import { getDefaultLogger, type Logger } from "../logger";
 import type { LanguageModel } from "../model";
 import { redactForLog } from "./log-redaction";
 import { logStepContent } from "./log-step";
+import { withModelRetry } from "./retry-middleware";
 import type { ReportResultTool } from "./tools/agent-result";
 import type { AgentTool } from "./tools/agent-tool";
 import { FatalToolError, FixableToolError } from "./tools/tool-errors";
@@ -29,12 +30,17 @@ type AgentStepResult = StepResult<GenericToolSet>;
  */
 export const DEFAULT_MAX_STEPS = 1000;
 
-/**
- * The AI SDK's `maxRetries` for each model call in the loop. Well above the SDK default of 2 so a
- * transient provider failure (rate limit, 5xx, dropped connection) doesn't abort a run; the SDK's
- * own backoff is uncapped, so raising this trades a longer worst-case wait for fewer spurious fails.
- */
-export const MODEL_MAX_RETRIES = 10;
+export interface AgentBudget {
+    /** Ceiling on the whole loop. */
+    totalMs: number;
+    /** Ceiling on one step (model call + its retries). */
+    stepMs: number;
+}
+
+export const DEFAULT_AGENT_BUDGET: AgentBudget = {
+    totalMs: 15 * 60_000,
+    stepMs: 6 * 60_000,
+};
 
 export interface AgentConfig<TResult> {
     /** A descriptive name for this type of agent, used for observability. */
@@ -50,6 +56,12 @@ export interface AgentConfig<TResult> {
      * this cap is the loop's only other stop besides the report tool firing, so it is always set.
      */
     maxSteps?: number;
+
+    /**
+     * Wall-clock ceilings for a `runLoop` call. Set it from the deadline the caller itself runs under, so the
+     * loop fails on its own terms rather than being killed from outside with nothing to report.
+     */
+    budget?: AgentBudget;
 
     /**
      * The system prompt of the agent.
@@ -134,9 +146,9 @@ export class ToolCallFailedFatally extends AgentLoopError {
 }
 
 /**
- * The model call itself failed, so the loop never got to decide anything: the provider rejected after
- * {@link MODEL_MAX_RETRIES} attempts, the prompt could not be converted (an unreachable media part), or a
- * `prepareStep`/`onStepFinish` hook threw. A tool throwing does not land here - see {@link ToolCallFailedFatally}.
+ * The model call itself failed, so the loop never got to decide anything: the provider rejected every retry, the
+ * prompt could not be converted (an unreachable media part), or a `prepareStep`/`onStepFinish` hook threw. Running
+ * out of TIME instead is {@link AgentBudgetExceeded}. A tool throwing is {@link ToolCallFailedFatally}.
  */
 export class AgentGenerationFailed extends AgentLoopError {
     constructor(cause: Error, conversation: ModelMessage[], partialResult?: unknown) {
@@ -145,6 +157,38 @@ export class AgentGenerationFailed extends AgentLoopError {
         // that kept the reason only on `.cause` would erase it at exactly the point it gets read.
         super(`The agent loop's model call failed: ${cause.message}`, conversation, partialResult, { cause });
     }
+}
+
+export class AgentBudgetExceeded extends AgentLoopError {
+    constructor(
+        agentName: string,
+        public readonly elapsedMs: number,
+        cause: Error,
+        conversation: ModelMessage[],
+        partialResult?: unknown,
+    ) {
+        super(
+            `${agentName} ran out of time after ${formatElapsed(elapsedMs)} (${cause.message}). ` +
+                "The model provider stopped answering within the budget, or the run needed more time than it has.",
+            conversation,
+            partialResult,
+            { cause },
+        );
+    }
+}
+
+/**
+ * A budget bound firing, as opposed to a caller's own cancellation: the SDK aborts a timed-out call with a
+ * `TimeoutError`, while `AbortController.abort()` raises `AbortError`.
+ */
+function isBudgetTimeout(error: Error): boolean {
+    return error.name === "TimeoutError";
+}
+
+function formatElapsed(elapsedMs: number): string {
+    const seconds = Math.round(elapsedMs / 1000);
+    if (seconds < 90) return `${seconds}s`;
+    return `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, "0")}s`;
 }
 
 export class MultipleResultCalls extends FixableToolError {
@@ -196,6 +240,7 @@ export class AgentLoop<TResult = unknown> {
     private readonly tools: AgentTool<unknown, unknown>[];
     private readonly resultTool: ReportResultTool<unknown, TResult>;
     private readonly maxSteps: number;
+    private readonly budget: AgentBudget;
     private readonly compactor: { strategy: MessageCompactor; threshold: number } | undefined;
 
     constructor({
@@ -205,6 +250,7 @@ export class AgentLoop<TResult = unknown> {
         tools,
         reportTool: resultTool,
         maxSteps,
+        budget,
         compactor,
     }: AgentConfig<TResult>) {
         this.name = name;
@@ -213,6 +259,7 @@ export class AgentLoop<TResult = unknown> {
         this.tools = tools;
         this.resultTool = resultTool;
         this.maxSteps = maxSteps ?? DEFAULT_MAX_STEPS;
+        this.budget = budget ?? DEFAULT_AGENT_BUDGET;
         this.compactor = compactor;
 
         this.logger = getDefaultLogger().child({ name: this.name });
@@ -307,11 +354,9 @@ export class AgentLoop<TResult = unknown> {
         );
 
         const agent = new ToolLoopAgent({
-            model: this.model,
-            // The SDK default of 2 retries surfaced as AI_RetryError on brief provider blips; 10 rides
-            // them out. The SDK retries the model call per step (never replaying tool calls), with its
-            // own exponential backoff, Retry-After handling, and retryable-only (429/5xx) filtering.
-            maxRetries: MODEL_MAX_RETRIES,
+            model: withModelRetry(this.model),
+            // Zero, or the two retry layers multiply: 10 of the SDK's times 10 of ours is 121 calls.
+            maxRetries: 0,
             instructions: this.systemPrompt,
             tools,
             // Force a structured tool call on every step. Without this the AI SDK stops the loop as
@@ -333,7 +378,10 @@ export class AgentLoop<TResult = unknown> {
         });
 
         const generationResult = await this.generateWithTranscript(userPrompt, () =>
-            agent.generate({ messages: userPrompt }),
+            agent.generate({
+                messages: userPrompt,
+                timeout: this.budget,
+            }),
         );
         const conversation = this.transcriptFor(userPrompt, generationResult.responseMessages);
 
@@ -364,18 +412,25 @@ export class AgentLoop<TResult = unknown> {
      * transcript captured up to that point.
      */
     private async generateWithTranscript<T>(userPrompt: ModelMessage[], generate: () => Promise<T>): Promise<T> {
+        const startedAt = Date.now();
         try {
             return await generate();
         } catch (error) {
             const cause = error instanceof Error ? error : new Error(String(error));
+            const elapsedMs = Date.now() - startedAt;
+            const transcript = this.transcriptFor(userPrompt, this.modelMessages);
+
+            if (isBudgetTimeout(cause)) {
+                this.logger.fatal("Agent loop exceeded its budget", cause, {
+                    extra: { elapsedMs, budget: this.budget, messagesSoFar: this.modelMessages.length },
+                });
+                throw new AgentBudgetExceeded(this.name, elapsedMs, cause, transcript, this.snapshotPartial?.());
+            }
+
             this.logger.fatal("Agent loop's model call failed", cause, {
-                extra: { messagesSoFar: this.modelMessages.length },
+                extra: { elapsedMs, messagesSoFar: this.modelMessages.length },
             });
-            throw new AgentGenerationFailed(
-                cause,
-                this.transcriptFor(userPrompt, this.modelMessages),
-                this.snapshotPartial?.(),
-            );
+            throw new AgentGenerationFailed(cause, transcript, this.snapshotPartial?.());
         }
     }
 }

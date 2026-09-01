@@ -107,4 +107,32 @@ describe("DEFAULT_RETRY_CONFIG", () => {
         expect(DEFAULT_RETRY_CONFIG.maxRetries).toBeGreaterThanOrEqual(10);
         expect(DEFAULT_RETRY_CONFIG.maxDelayInMs).toBeGreaterThan(0);
     });
+
+    it("lets a Retry-After shorten the wait but never stretch it past the cap", async () => {
+        const waits: number[] = [];
+        const started = Date.now();
+        let attempts = 0;
+
+        // 45s is under the SDK's 60s ceiling for an acceptable header, and over our 30s cap.
+        const rateLimited = new APICallError({
+            message: "429",
+            url: "u",
+            requestBodyValues: {},
+            isRetryable: true,
+            responseHeaders: { "retry-after": "45" },
+        });
+
+        const run = buildRetry({ maxRetries: 1, initialDelayInMs: 1_000, backoffFactor: 2, maxDelayInMs: 20 })(
+            async () => {
+                attempts += 1;
+                waits.push(Date.now() - started);
+                throw rateLimited;
+            },
+        );
+
+        await expect(run).rejects.toThrow();
+        expect(attempts).toBe(2);
+        // Unclamped, the header would have made this sleep 45 seconds.
+        expect(waits[1]).toBeLessThan(2_000);
+    });
 });

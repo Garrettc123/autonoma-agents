@@ -10,6 +10,8 @@ export interface RetryConfig {
     backoffFactor: number;
     /** Cap on the delay between retries. Defaults to 10 seconds. */
     maxDelayInMs?: number;
+    /** Which failures are worth another attempt. An abort is never retried, whatever this returns. */
+    shouldRetry?: (error: unknown) => boolean;
 }
 
 /**
@@ -61,25 +63,61 @@ function getRetryDelayInMs(error: APICallError, exponentialBackoffDelay: number)
     return exponentialBackoffDelay;
 }
 
+/** Matched by name because an abort reaches us as whatever the aborter chose. */
+const ABORT_ERROR_NAMES: ReadonlySet<string> = new Set(["AbortError", "TimeoutError"]);
+
+function isAbort(error: unknown): boolean {
+    return error instanceof Error && ABORT_ERROR_NAMES.has(error.name);
+}
+
+/** Sleep, waking early if `abortSignal` fires. Resolves either way; the caller decides what an abort means. */
+function abortableDelay(ms: number, abortSignal?: AbortSignal): Promise<void> {
+    if (abortSignal == null) return new Promise((resolve) => setTimeout(resolve, ms));
+    if (abortSignal.aborted) return Promise.resolve();
+
+    return new Promise((resolve) => {
+        const timer = setTimeout(finish, ms);
+        function finish(): void {
+            clearTimeout(timer);
+            abortSignal?.removeEventListener("abort", finish);
+            resolve();
+        }
+        abortSignal.addEventListener("abort", finish, { once: true });
+    });
+}
+
 /**
  * Only retry errors that stand a chance of succeeding on a subsequent attempt. Provider errors
  * carry an explicit `isRetryable` signal (true for 408/409/429/5xx, false for 4xx like a bad
  * request or invalid API key) - honour it so we fail fast on permanent errors instead of
  * hammering them through the full backoff schedule. Non-`APICallError` failures (network drops,
- * timeouts, unknown errors) are treated as transient and retried.
+ * timeouts, unknown errors) are treated as transient and retried - except an abort, which is a
+ * decision to stop and is never retried.
  */
-function shouldRetry(error: Error | unknown): boolean {
+function shouldRetryByDefault(error: Error | unknown): boolean {
     if (APICallError.isInstance(error)) return error.isRetryable !== false;
     return true;
 }
 
+/** The AI SDK's own rule, for callers replacing its schedule but not its policy. */
+export function shouldRetryProviderErrorsOnly(error: Error | unknown): boolean {
+    return APICallError.isInstance(error) && error.isRetryable === true;
+}
+
+/**
+ * Build a retry wrapper for a policy. The optional `abortSignal` matters during the WAIT: without it a deadline
+ * expiring mid-backoff sleeps out the remaining delay before noticing.
+ */
 export function buildRetry({
     maxRetries = 5,
     initialDelayInMs = 100,
     backoffFactor = 2,
     maxDelayInMs = 10_000,
-}: RetryConfig): <T>(operation: () => Promise<T>) => Promise<T> {
-    return async (operation) => {
+    shouldRetry: shouldRetryError = shouldRetryByDefault,
+}: RetryConfig): <T>(operation: () => PromiseLike<T>, abortSignal?: AbortSignal) => Promise<T> {
+    const shouldRetry = (error: unknown): boolean => !isAbort(error) && shouldRetryError(error);
+
+    return async (operation, abortSignal) => {
         let delay = initialDelayInMs;
 
         for (let i = 0; i < maxRetries + 1; i++) {
@@ -93,9 +131,10 @@ export function buildRetry({
 
                 let currentDelay = Math.min(delay, maxDelayInMs);
 
-                // Check if the error is due to a rate limit and respect retry headers
+                // A `Retry-After` may only ever SHORTEN the wait. Unclamped it accepts up to a minute, which
+                // outweighs the cap the caller sized its budget on.
                 if (APICallError.isInstance(error)) {
-                    currentDelay = getRetryDelayInMs(error, currentDelay);
+                    currentDelay = Math.min(getRetryDelayInMs(error, currentDelay), maxDelayInMs);
                 }
 
                 getDefaultLogger().warn("AI request failed, retrying", {
@@ -105,10 +144,10 @@ export function buildRetry({
                     error: error instanceof Error ? error.message : String(error),
                 });
 
-                // Wait before retrying
-                // Inline rather than @autonoma/utils: this package is kept dependency-free
-                // so it bundles lean into the published planner CLI (see README).
-                await new Promise((resolve) => setTimeout(resolve, currentDelay));
+                await abortableDelay(currentDelay, abortSignal);
+                // The wait, not the attempt, is what an abort interrupts - so re-check rather than spending an
+                // attempt to discover it.
+                if (abortSignal?.aborted === true) throw error;
 
                 // Increase delay for next retry (exponential backoff)
                 delay *= backoffFactor;

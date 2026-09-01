@@ -7,10 +7,11 @@ export {
     NoAgentResultError,
     MaxStepsReached,
     AgentGenerationFailed,
+    AgentBudgetExceeded,
     ToolCallFailedFatally,
     MultipleResultCalls,
-    MODEL_MAX_RETRIES,
     DEFAULT_MAX_STEPS,
+    type AgentBudget,
 } from "./agent-loop";
 export {
     AgentTool,
@@ -25,5 +26,6 @@ export {
 export { ReportResultTool, FinishTool, type FinishToolParameters } from "./tools/agent-result";
 export { type ToolContentItem, type InlineImage, imageToolContent } from "./tools/image-tool-content";
 export { FixableToolError, FatalToolError } from "./tools/tool-errors";
+export { withModelRetry } from "./retry-middleware";
 export { declinable } from "./declinable";
 export { logStepContent } from "./log-step";

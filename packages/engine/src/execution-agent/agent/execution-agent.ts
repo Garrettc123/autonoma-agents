@@ -1,4 +1,4 @@
-import { AI_REQUEST_TIMEOUT_MS, MODEL_MAX_RETRIES, type LanguageModel } from "@autonoma/ai";
+import { AI_REQUEST_TIMEOUT_MS, type LanguageModel, withModelRetry } from "@autonoma/ai";
 import { external } from "@autonoma/errors";
 import type { Screenshot } from "@autonoma/image";
 import { type Logger, logger } from "@autonoma/logger";
@@ -174,10 +174,11 @@ export class ExecutionAgent<TSpec extends CommandSpec, TContext extends BaseComm
 
     private buildAgent() {
         return new ToolLoopAgent({
-            model: this.params.model,
+            model: withModelRetry(this.params.model),
             instructions: this.params.systemPrompt,
             timeout: AI_REQUEST_TIMEOUT_MS,
-            maxRetries: MODEL_MAX_RETRIES,
+            // Zero, or the two retry layers multiply. The capped schedule lives in `withModelRetry`.
+            maxRetries: 0,
             prepareStep: async (step) => {
                 this.stepResults = step.steps;
 

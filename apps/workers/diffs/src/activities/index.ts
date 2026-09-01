@@ -29,12 +29,16 @@ const HEARTBEAT_INTERVAL_MS = 30_000;
  * cannot heartbeat internally - so without this, Temporal's heartbeatTimeout (2m on these activities) kills any
  * run longer than two minutes. `heartbeat()` throws outside an activity context (e.g. an eval/test runner), so
  * we stop the timer on the first such failure - a no-op everywhere else.
+ *
+ * `elapsedMs` lands as `lastHeartbeatDetails` on a timeout event, which is what tells a lost worker (beats stop
+ * early) from a live run still waiting on something.
  */
 function withHeartbeat<A extends unknown[], R>(fn: (...args: A) => Promise<R>): (...args: A) => Promise<R> {
     return async (...args: A): Promise<R> => {
+        const startedAt = Date.now();
         const timer = setInterval(() => {
             try {
-                heartbeat();
+                heartbeat({ elapsedMs: Date.now() - startedAt });
             } catch (error) {
                 clearInterval(timer);
                 rootLogger.debug("Not in a Temporal activity context; skipping heartbeats", { err: error });
