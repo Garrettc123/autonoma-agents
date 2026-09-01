@@ -6,6 +6,11 @@ import type { BillingAlertNotifier, SpendCapStatus } from "./types";
 
 type TxClient = Prisma.TransactionClient;
 type RawTxClient = TxClient & Pick<PrismaClient, "$queryRaw">;
+/**
+ * The slice of a client {@link SpendCapService.recordRefund} needs, so a caller can hand it the
+ * transaction that revoked the credits instead of a standalone connection.
+ */
+type RawExecutor = Pick<PrismaClient, "$executeRaw">;
 
 /** 50/80/100% - hardcoded for v1, not admin-configurable. */
 const ALERT_THRESHOLDS: readonly (50 | 80 | 100)[] = [50, 80, 100];
@@ -169,8 +174,13 @@ export class SpendCapService extends Service {
 
     /**
      * Records a manual (Checkout) top-up purchase that has already been charged - there is nothing
-     * left to gate, only to record and threshold-check. Returns the period key the charge landed
-     * in, so the caller can carry it onto the `CreditTransaction` row for the refund path.
+     * left to gate, only to record and threshold-check. Returns the period key the charge landed in.
+     *
+     * Not idempotent, by design: nothing in the period row identifies which charge moved it, so a
+     * second call for the same purchase silently doubles that purchase's draw on the cap. The caller
+     * is responsible for calling this exactly once per charge - `CreditsService.grantTopupCredits`
+     * does so by calling it only after the grant transaction actually committed the grant, which is
+     * what makes a redelivered Stripe webhook a no-op here too.
      */
     async recordManualCharge(organizationId: string, priceCents: number): Promise<string> {
         const { periodId, periodKey, periodEnd } = await this.ensurePeriodRow(organizationId);
@@ -235,11 +245,27 @@ export class SpendCapService extends Service {
      * the decrement happen in one statement so a concurrent charge on the same period row (a
      * reservation, a manual charge, or a second refund) can't be overwritten by a total computed
      * from a stale read - `GREATEST` in SQL rather than `Math.max` around a separate `findUnique`.
+     *
+     * Not idempotent on its own - it subtracts, so a second call for the same refund takes the
+     * headroom back twice. Pass `client` the transaction that revokes the credits, whose unique
+     * ledger id already refuses a redelivered webhook: rolling that transaction back takes this
+     * decrement with it, which is what makes the pair exactly-once. Callers that cannot (no
+     * transaction to join) keep the default and own the once-per-refund guarantee themselves.
+     *
+     * Lock order matters when joining a transaction: this touches `billing_topup_spend_period`, and
+     * every other locker (`reserveForAutoTopUp`, `recordManualCharge`) takes `billing_customer`
+     * first. A caller holding a `billing_customer` row lock is therefore in the right order; one
+     * that later locks `billing_customer` would invert it and can deadlock.
      */
-    async recordRefund(organizationId: string, periodKey: string | null, refundedPriceCents: number): Promise<void> {
+    async recordRefund(
+        organizationId: string,
+        periodKey: string | null,
+        refundedPriceCents: number,
+        client: RawExecutor = this.db,
+    ): Promise<void> {
         if (periodKey == null) return;
 
-        const updatedRows = await this.db.$executeRaw`
+        const updatedRows = await client.$executeRaw`
             UPDATE billing_topup_spend_period
             SET amount_charged_cents = GREATEST(0, amount_charged_cents - ${refundedPriceCents})
             WHERE organization_id = ${organizationId} AND period_key = ${periodKey}
@@ -317,13 +343,15 @@ export class SpendCapService extends Service {
 }
 
 /**
- * The calendar-month period key an auto-top-up charge granted right now would land in. Used by
- * `CreditsService.grantTopupCredits` to stamp `billingPeriodKey` on the auto-top-up path, where the
- * spend was already reserved (and its period row already touched) by `reserveForAutoTopUp` before
- * the Stripe call - recomputing here rather than threading the reservation's periodId through the
- * Stripe round-trip. Assumes the grant lands in the same UTC month as the reservation, true for the
- * near-immediate auto-top-up flow; a charge that happens to straddle a month boundary is an
- * accepted, undocumented-elsewhere edge, same posture as the Checkout race noted on the class doc.
+ * The calendar-month period key a top-up charge granted right now would land in. Used by
+ * `CreditsService.grantTopupCredits` to stamp `billingPeriodKey` on the `CreditTransaction` for the
+ * refund path, on both top-up sources: auto-top-up reserved its spend via `reserveForAutoTopUp`
+ * before the Stripe call, and a manual Checkout purchase records it via `recordManualCharge` after
+ * the grant commits - so in neither case is the period row's identity available at the moment the
+ * ledger row is written, and recomputing it here beats threading a periodId through a Stripe
+ * round-trip. Assumes the grant lands in the same UTC month as the charge it records, true for both
+ * near-immediate flows; a charge that happens to straddle a month boundary is an accepted,
+ * undocumented-elsewhere edge, same posture as the Checkout race noted on the class doc.
  */
 export function getCurrentSpendPeriodKey(): string {
     return currentPeriodBounds().periodKey;

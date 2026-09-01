@@ -16,6 +16,7 @@ import type {
     StripeBillingService,
     UpdateTopupPackageInput,
 } from "./types";
+import { VercelCreditPurchaseService } from "./vercel-credit-purchase.service";
 import { VercelOverageService } from "./vercel-overage.service";
 
 export class EnabledBillingService implements BillingService, StripeBillingService {
@@ -26,21 +27,31 @@ export class EnabledBillingService implements BillingService, StripeBillingServi
     private readonly vercelOverageService: VercelOverageService;
     private readonly topupPackageService: BillingTopupPackageService;
     private readonly spendCapService: SpendCapService;
+    private readonly vercelCreditPurchaseService: VercelCreditPurchaseService;
 
     constructor(db: PrismaClient, options: BillingServiceOptions = {}) {
         const alertNotifier = options.alertNotifier ?? new LoggingBillingAlertNotifier();
         this.billingPricingService = new BillingPricingService(db);
         this.topupPackageService = new BillingTopupPackageService(db);
         this.spendCapService = new SpendCapService(db, alertNotifier);
+        this.billingCustomerService = new BillingCustomerService(db, this.topupPackageService, this.spendCapService);
+        this.billingPromoService = new BillingPromoService(db);
+        this.vercelOverageService = new VercelOverageService(db);
+        this.vercelCreditPurchaseService = new VercelCreditPurchaseService(
+            db,
+            this.topupPackageService,
+            this.spendCapService,
+            options.invoiceSubmitter,
+        );
+        // Constructed after the purchase service so a Vercel org's recharge can route through it -
+        // its own settlement path, since there is no card of theirs for a PaymentIntent.
         const autoTopUpService = new AutoTopUpService(
             db,
             this.topupPackageService,
             this.spendCapService,
+            this.vercelCreditPurchaseService,
             alertNotifier,
         );
-        this.billingCustomerService = new BillingCustomerService(db, this.topupPackageService, this.spendCapService);
-        this.billingPromoService = new BillingPromoService(db);
-        this.vercelOverageService = new VercelOverageService(db);
         this.creditsService = new CreditsService(
             db,
             autoTopUpService,
@@ -200,6 +211,10 @@ export class EnabledBillingService implements BillingService, StripeBillingServi
 
     updateVercelOverageCap(organizationId: string, maxOverageAmountUsd: number | undefined) {
         return this.vercelOverageService.updateOverageCap(organizationId, maxOverageAmountUsd);
+    }
+
+    purchaseVercelCredits(organizationId: string, packageId: string) {
+        return this.vercelCreditPurchaseService.purchase(organizationId, packageId);
     }
 
     getPricing(organizationId: string) {

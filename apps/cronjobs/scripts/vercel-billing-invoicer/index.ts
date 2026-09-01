@@ -1,4 +1,13 @@
-import { VercelInvoiceStatus } from "@autonoma/billing";
+import {
+    AutoTopUpService,
+    BILLING_PROVIDERS,
+    BillingTopupPackageService,
+    HttpVercelInvoiceSubmitter,
+    LoggingBillingAlertNotifier,
+    SpendCapService,
+    VercelCreditPurchaseService,
+    VercelInvoiceStatus,
+} from "@autonoma/billing";
 import { db, VercelBillingPeriodStatus, VercelInstallationStatus } from "@autonoma/db";
 import type { Prisma, VercelBillingPlan } from "@autonoma/db";
 import { logger as rootLogger } from "@autonoma/logger";
@@ -12,6 +21,14 @@ const encryptionHelper = new EncryptionHelper(env.VERCEL_ENCRYPTION_KEY);
 
 const JOB_NAME = "vercel-billing-invoicer";
 const VERCEL_BILLING_API = "https://api.vercel.com/v1";
+/** Bounded so one bad run cannot spend the whole window on retries and skip the cycle invoices. */
+const UNBILLED_PURCHASE_RETRY_LIMIT = 100;
+/**
+ * Runaway guard on the recharge sweep, not a real page size - the set is every Vercel organization
+ * currently below its threshold, and a recharged one drops straight out of the query. Oldest-touched
+ * first, so a fleet past this size rotates through its backlog rather than starving the tail.
+ */
+const VERCEL_RECHARGE_LIMIT = 200;
 
 async function main() {
     const mainCheckInId = captureCheckIn({
@@ -21,6 +38,10 @@ async function main() {
 
     try {
         await createInvoices();
+        await retryUnbilledCreditPurchases();
+        // Last: it can raise new invoices, and a period still owed its recurring charge, plus a
+        // purchase already holding credits nobody billed for, are both more time-critical.
+        await rechargeVercelOrganizations();
         captureCheckIn({
             checkInId: mainCheckInId,
             monitorSlug: JOB_NAME,
@@ -65,7 +86,7 @@ async function createInvoices() {
             where: {
                 startDate: { gte: startOfToday, lte: endOfToday },
                 status: VercelBillingPeriodStatus.pending,
-                invoices: { none: {} },
+                invoices: { none: { kind: "cycle" } },
             },
             include: periodInclude,
         }),
@@ -73,7 +94,7 @@ async function createInvoices() {
             where: {
                 endDate: { gte: startOfToday, lte: endOfToday },
                 status: VercelBillingPeriodStatus.active,
-                invoices: { none: {} },
+                invoices: { none: { kind: "cycle" } },
             },
             include: periodInclude,
         }),
@@ -159,6 +180,84 @@ async function createInvoices() {
     }
 
     logger.info("Invoice submission complete", { success, failed, skipped });
+}
+
+/**
+ * Settles credit purchases whose invoice call failed when the customer bought. Those orgs already
+ * hold the credits and are blocked from buying again until this clears, so leaving it to a human
+ * to notice is both a revenue hole and a stuck customer.
+ *
+ * Runs after the cycle invoices rather than before: a period that still needs its recurring charge
+ * is the more time-critical of the two, and a retry that has already waited a day can wait a
+ * minute longer.
+ */
+async function retryUnbilledCreditPurchases() {
+    const { purchaseService } = buildPurchaseServices();
+
+    const { attempted, invoiced } = await purchaseService.retryUnbilledPurchases(UNBILLED_PURCHASE_RETRY_LIMIT);
+    if (attempted > 0) {
+        logger.info("Unbilled credit purchase retry complete", { attempted, invoiced });
+    }
+}
+
+/**
+ * Recharges Vercel organizations that auto top-up should have already recharged.
+ *
+ * A recharge on this rail has to raise an invoice, which needs `VERCEL_ENCRYPTION_KEY` - so it can
+ * only happen on a host that holds it. Auto top-up otherwise fires as a side effect of a deduction,
+ * and deductions run on workers, which do not. This job does hold the key, so it is the one place a
+ * Vercel recharge can reliably run at all.
+ *
+ * Reads state rather than reacting to an event, so a recharge missed for any reason is picked up on
+ * the next run: a spend cap whose month rolled over, a package reactivated, an invoice finally
+ * settling and releasing the one-unpaid-purchase block. `AutoTopUpService` re-checks every condition
+ * and `purchase` owns the cap reservation and that block, so nothing here decides anything - the
+ * query only narrows what is worth asking about.
+ *
+ * The Stripe rail has its own sweep (`auto-topup-reconciler`), which excludes these organizations by
+ * requiring a `stripeCustomerId`. The two do not overlap.
+ */
+async function rechargeVercelOrganizations() {
+    const candidates = await db.billingCustomer.findMany({
+        where: {
+            provider: BILLING_PROVIDERS.VERCEL,
+            autoTopUpEnabled: true,
+            autoTopUpPackageId: { not: null },
+            creditBalance: { lt: db.billingCustomer.fields.autoTopUpThreshold },
+        },
+        select: { organizationId: true },
+        orderBy: { updatedAt: "asc" },
+        take: VERCEL_RECHARGE_LIMIT,
+    });
+
+    if (candidates.length === 0) return;
+    logger.info("Recharging Vercel organizations below their auto top-up threshold", {
+        extra: { count: candidates.length },
+    });
+
+    const { autoTopUpService } = buildPurchaseServices();
+
+    // Sequential on purpose: each one raises a real invoice against a customer, and a burst of
+    // concurrent submissions to Vercel is both unkind to their API and harder to read afterwards.
+    for (const candidate of candidates) {
+        await autoTopUpService.triggerAutoTopUp(candidate.organizationId);
+    }
+}
+
+function buildPurchaseServices(): { purchaseService: VercelCreditPurchaseService; autoTopUpService: AutoTopUpService } {
+    const packageService = new BillingTopupPackageService(db);
+    const spendCapService = new SpendCapService(db, new LoggingBillingAlertNotifier());
+    const purchaseService = new VercelCreditPurchaseService(
+        db,
+        packageService,
+        spendCapService,
+        new HttpVercelInvoiceSubmitter(db, (encrypted) => encryptionHelper.decrypt(encrypted)),
+    );
+
+    return {
+        purchaseService,
+        autoTopUpService: new AutoTopUpService(db, packageService, spendCapService, purchaseService),
+    };
 }
 
 type OverageCharge = {
@@ -307,6 +406,7 @@ async function submitInvoiceToVercel(params: {
                 installationId: params.installationId,
                 amount: totalAmount,
                 status: VercelInvoiceStatus.Pending,
+                kind: "cycle",
             },
         });
 

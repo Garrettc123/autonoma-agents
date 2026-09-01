@@ -165,6 +165,7 @@ model Organization {
   analysisIssueVersions    AnalysisIssueVersion[]
   analysisEvents           AnalysisEvent[]
   vercelInstallations      VercelInstallation[]
+  vercelCreditPurchases    VercelCreditPurchase[]
 
   @@map("organization")
 }
@@ -1537,9 +1538,16 @@ enum CreditTransactionType {
   RUN_CONSUMPTION
   LLM_PROXY_CONSUMPTION
   PREVIEW_RUNTIME_CONSUMPTION
+  /// Credits minted against the installation's overage allowance and billed in arrears, by
+  /// VercelOverageService. Distinct from VERCEL_TOPUP_GRANT: nobody asked for these, they are
+  /// sized by a cap rather than a package, and the org is not blocked from earning more.
   VERCEL_OVERAGE_GRANT
   AI_COST_CONSUMPTION
   PREVIEW_BUILD_CONSUMPTION
+  /// A credit package the customer chose to buy on the Vercel rail - the postpaid twin of
+  /// TOPUP_PURCHASE, invoiced on the installation instead of charged to a card. The revoking
+  /// row a refund writes is negative and carries this same type, so the pair nets to zero.
+  VERCEL_TOPUP_GRANT
 
   @@map("credit_transaction_type")
 }
@@ -1831,6 +1839,7 @@ model BillingTopupPackage {
 
   autoTopUpCustomers BillingCustomer[]
   creditTransactions CreditTransaction[]
+  vercelPurchases    VercelCreditPurchase[]
 
   @@map("billing_topup_package")
 }
@@ -3225,13 +3234,14 @@ model VercelInstallation {
   createdAt            DateTime                 @default(now()) @map("created_at")
   updatedAt            DateTime                 @updatedAt @map("updated_at")
 
-  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user           User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  billingPlan    VercelBillingPlan?    @relation(fields: [billingPlanId], references: [id])
-  resources      VercelResource[]
-  billingPeriods VercelBillingPeriod[]
-  invoices       VercelInvoice[]
-  projects       VercelProject[]
+  organization    Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user            User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  billingPlan     VercelBillingPlan?     @relation(fields: [billingPlanId], references: [id])
+  resources       VercelResource[]
+  billingPeriods  VercelBillingPeriod[]
+  invoices        VercelInvoice[]
+  projects        VercelProject[]
+  creditPurchases VercelCreditPurchase[]
 
   @@index([organizationId])
   @@index([userId])
@@ -3275,10 +3285,11 @@ model VercelBillingPeriod {
   createdAt             DateTime                  @default(now()) @map("created_at")
   updatedAt             DateTime                  @updatedAt @map("updated_at")
 
-  installation VercelInstallation? @relation(fields: [installationId], references: [id], onDelete: Cascade)
-  resource     VercelResource?     @relation(fields: [resourceId], references: [id], onDelete: Cascade)
-  plan         VercelBillingPlan   @relation(fields: [planId], references: [id])
-  invoices     VercelInvoice[]
+  installation    VercelInstallation?    @relation(fields: [installationId], references: [id], onDelete: Cascade)
+  resource        VercelResource?        @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  plan            VercelBillingPlan      @relation(fields: [planId], references: [id])
+  invoices        VercelInvoice[]
+  creditPurchases VercelCreditPurchase[]
 
   @@index([installationId, status])
   @@index([resourceId, status])
@@ -3293,17 +3304,85 @@ model VercelInvoice {
   installationId  String    @map("installation_id")
   amount          String
   status          String    @default("pending")
+  /// `cycle` - the plan's recurring charge, one per billing period, and the only kind whose
+  /// payment grants the plan allotment. `purchase` - a one-off credit-package sale, submitted
+  /// off-cycle the moment the customer buys.
+  ///
+  /// Load-bearing twice over: the invoicer selects periods that have no `cycle` invoice yet, so a
+  /// purchase invoice must not make a period look already-billed; and `invoice.paid` grants the
+  /// allotment only for `cycle`, since granting it for a purchase would hand out a second month
+  /// of plan credits for free.
+  kind            String    @default("cycle")
   createdAt       DateTime  @default(now()) @map("created_at")
   paidAt          DateTime? @map("paid_at")
 
-  billingPeriod VercelBillingPeriod @relation(fields: [billingPeriodId], references: [id], onDelete: Cascade)
-  installation  VercelInstallation  @relation(fields: [installationId], references: [id], onDelete: Cascade)
+  billingPeriod        VercelBillingPeriod   @relation(fields: [billingPeriodId], references: [id], onDelete: Cascade)
+  installation         VercelInstallation    @relation(fields: [installationId], references: [id], onDelete: Cascade)
+  vercelCreditPurchase VercelCreditPurchase?
 
   @@index([billingPeriodId])
   @@index([installationId])
   @@index([vercelInvoiceId])
   @@index([status])
   @@map("vercel_invoice")
+}
+
+/// One customer-initiated credit purchase on the Vercel rail. The credits are granted immediately
+/// and a one-off `purchase` invoice is raised on Vercel in the same breath, rather than waiting for
+/// the cycle invoice up to 30 days later.
+///
+/// The customer therefore holds credits before the money lands, and the bound on that exposure is
+/// exactly ONE unpaid purchase per org at a time. A row with `invoiceId` null means the invoice call
+/// itself failed - still owed, still blocking.
+///
+/// `VercelCreditPurchaseService.grant` enforces that by locking the org's `billing_customer` row
+/// before it re-reads this table, and the database enforces it independently through a partial
+/// unique index that Prisma cannot express:
+///
+///   CREATE UNIQUE INDEX "vercel_credit_purchase_one_unpaid_per_org"
+///       ON "vercel_credit_purchase" ("organization_id") WHERE "invoice_id" IS NULL;
+///
+/// It lives only in migration `20260826120000_vercel_credit_purchase_single_unpaid`. Because it is
+/// absent from this model, `prisma migrate dev` reads it as drift and will put a `DROP INDEX` in the
+/// next generated migration - delete that statement before committing.
+///
+/// Priced from the `BillingTopupPackage`'s own `priceCents` rather than the plan's
+/// `overagePricePerCredit`: the two rails then sell the identical catalog at the identical price,
+/// and no plan needs a per-credit rate configured (none has one).
+model VercelCreditPurchase {
+  id             String @id @default(cuid())
+  organizationId String @map("organization_id")
+
+  installationId  String @map("installation_id")
+  billingPeriodId String @map("billing_period_id")
+
+  /// The catalog entry bought. Kept as a real FK so a deactivated package still resolves for
+  /// historic rows, exactly as `CreditTransaction.topupPackageId` does on the Stripe rail.
+  packageId String @map("package_id")
+
+  /// Copied from the package at purchase time - an admin editing the catalog afterwards must not
+  /// retroactively change what a customer was charged or granted.
+  creditsGranted Int @map("credits_granted")
+  priceCents     Int @map("price_cents")
+
+  /// The off-cycle invoice raised for this purchase, set once Vercel accepts the submission.
+  /// Null means the sale happened but the invoice call has not succeeded yet - the credits are
+  /// already granted, so this doubles as the retry queue, and the org is blocked from buying
+  /// again until it clears.
+  invoiceId String? @unique @map("invoice_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  organization  Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  installation  VercelInstallation  @relation(fields: [installationId], references: [id], onDelete: Cascade)
+  billingPeriod VercelBillingPeriod @relation(fields: [billingPeriodId], references: [id], onDelete: Cascade)
+  topupPackage  BillingTopupPackage @relation(fields: [packageId], references: [id])
+  invoice       VercelInvoice?      @relation(fields: [invoiceId], references: [id])
+
+  @@index([organizationId])
+  @@index([installationId])
+  @@index([billingPeriodId])
+  @@map("vercel_credit_purchase")
 }
 
 model VercelProject {

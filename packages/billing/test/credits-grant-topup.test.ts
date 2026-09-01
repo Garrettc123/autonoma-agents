@@ -80,6 +80,39 @@ integrationTestSuite({
             expect(customer.creditBalance).toBe(150_000);
         });
 
+        test("a redelivered webhook does not charge the spend cap twice for one manual purchase", async ({
+            harness,
+        }) => {
+            const orgId = await harness.createOrgWithBalance(0);
+            const pkg = await harness.topupPackageService.create({
+                name: "Medium",
+                stripePriceId: `price_redeliver_${Date.now()}`,
+                priceCents: 10_000,
+                creditsGranted: 150_000,
+            });
+            const paymentIntentId = `pi_${Date.now()}`;
+
+            // Stripe redelivers `payment_intent.succeeded`; the second call grants nothing.
+            await harness.creditsService.grantTopupCredits(
+                orgId,
+                paymentIntentId,
+                pkg.id,
+                BILLING_TOPUP_SOURCES.MANUAL,
+            );
+            await harness.creditsService.grantTopupCredits(
+                orgId,
+                paymentIntentId,
+                pkg.id,
+                BILLING_TOPUP_SOURCES.MANUAL,
+            );
+
+            const customer = await harness.db.billingCustomer.findUniqueOrThrow({ where: { organizationId: orgId } });
+            expect(customer.creditBalance).toBe(150_000);
+            // The cap must track the credits: one purchase granted, one purchase charged.
+            const status = await harness.spendCapService.getStatus(orgId);
+            expect(status.amountChargedCentsThisPeriod).toBe(10_000);
+        });
+
         test("a manual purchase increments the spend-cap period total", async ({ harness }) => {
             const orgId = await harness.createOrgWithBalance(0);
             const pkg = await harness.topupPackageService.create({

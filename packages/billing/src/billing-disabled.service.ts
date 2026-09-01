@@ -13,6 +13,7 @@ import type {
     LlmProxyGateResult,
     PreviewDeployGateResult,
     UpdateTopupPackageInput,
+    VercelCreditPurchaseResult,
 } from "./types";
 
 export class DisabledBillingService implements BillingService {
@@ -141,6 +142,11 @@ export class DisabledBillingService implements BillingService {
 
     updateVercelOverageCap(_organizationId: string, _maxOverageAmountUsd: number | undefined) {
         return Promise.resolve();
+    }
+
+    purchaseVercelCredits(_organizationId: string, _packageId: string): Promise<VercelCreditPurchaseResult> {
+        // Billing disabled means no rails at all - self-host never reaches a Vercel installation.
+        return Promise.resolve({ purchased: false, reason: "spend_cap_exceeded" });
     }
 
     getPricing(organizationId: string) {

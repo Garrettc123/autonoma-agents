@@ -891,16 +891,9 @@ export class CreditsService extends Service {
         if (grant == null) return;
 
         const amount = grant.creditsGranted;
-        // Auto-top-up already reserved (and recorded) this spend against the cap before the Stripe
-        // call, via AutoTopUpService -> SpendCapService.reserveForAutoTopUp - recording it again here
-        // would double-count. A manual Checkout purchase was never reserved (see SpendCapService's
-        // class doc), so this is the only place its spend gets recorded.
-        const billingPeriodKey =
-            source === BILLING_TOPUP_SOURCES.MANUAL
-                ? await this.spendCapService.recordManualCharge(organizationId, grant.priceCents)
-                : getCurrentSpendPeriodKey();
+        const billingPeriodKey = getCurrentSpendPeriodKey();
 
-        await this.db
+        const granted = await this.db
             .$transaction(async (tx) => {
                 const customer = await tx.billingCustomer.findUnique({
                     where: { organizationId },
@@ -970,6 +963,22 @@ export class CreditsService extends Service {
                 }
                 throw error;
             });
+
+        // Auto-top-up already reserved (and recorded) this spend against the cap before the Stripe
+        // call, via AutoTopUpService -> SpendCapService.reserveForAutoTopUp - recording it again
+        // here would double-count. A manual Checkout purchase was never reserved (see
+        // SpendCapService's class doc), so this is the only place its spend gets recorded.
+        //
+        // It runs after the grant, and only when the grant actually happened: Stripe redelivers
+        // `payment_intent.succeeded`, and on a redelivery the unique constraint on
+        // `stripePaymentIntentId` turns the grant above into a no-op. Recording the charge first
+        // would move the org's monthly ceiling twice for one purchase - credits granted once, cap
+        // consumed twice - and nothing would ever reverse the surplus. The window this ordering
+        // opens instead (grant commits, the process dies before this line) under-counts the cap,
+        // which costs the customer nothing and no longer blocks a purchase they did not make.
+        if (granted && source === BILLING_TOPUP_SOURCES.MANUAL) {
+            await this.spendCapService.recordManualCharge(organizationId, grant.priceCents);
+        }
     }
 
     /**
@@ -1027,8 +1036,8 @@ export class CreditsService extends Service {
         refundedAmountCents: number,
         originalChargedAmountCents: number,
     ) {
-        const revokedPeriodKey = await this.db
-            .$transaction(async (tx): Promise<string | null | undefined> => {
+        await this.db
+            .$transaction(async (tx): Promise<void> => {
                 const rawTx = this.asRawTx(tx);
                 const customer = await tx.billingCustomer.findUnique({
                     where: { organizationId },
@@ -1156,6 +1165,18 @@ export class CreditsService extends Service {
                     return;
                 }
 
+                // Inside the transaction so the `ON CONFLICT` above governs it too: `recordRefund`
+                // subtracts, and a redelivered refund webhook that inserts no ledger row must not
+                // reopen the headroom a second time. Safe on lock order - the statement above
+                // already holds this org's `billing_customer` row, which is the order every other
+                // locker of `billing_topup_spend_period` uses.
+                await this.spendCapService.recordRefund(
+                    organizationId,
+                    purchase.billingPeriodKey,
+                    refundedAmountCents,
+                    rawTx,
+                );
+
                 this.logger.info("Top-up refund credits revoked", {
                     organizationId,
                     stripeRefundId,
@@ -1165,7 +1186,6 @@ export class CreditsService extends Service {
                     requestedAmount: amount,
                     newBalance,
                 });
-                return purchase.billingPeriodKey;
             })
             .catch((error: unknown) => {
                 if (isUniqueConstraintError(error)) {
@@ -1174,10 +1194,6 @@ export class CreditsService extends Service {
                 }
                 throw error;
             });
-
-        if (revokedPeriodKey != null) {
-            await this.spendCapService.recordRefund(organizationId, revokedPeriodKey, refundedAmountCents);
-        }
     }
 
     private asRawTx(tx: TxClient): RawTxClient {

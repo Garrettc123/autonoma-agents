@@ -84,10 +84,21 @@ Both compute rates default to zero, so compute is metered but not charged until 
 
 ## Getting credits
 
-- **Top-up purchases** - a fixed-size credit pack bought through Stripe Checkout.
-- **Auto top-up** - optional per organization: when the balance falls below `autoTopUpThreshold`,
-  charge the saved card for another top-up automatically. It cannot be enabled without a saved card,
-  because there would be nothing to charge, and a card is only saved by completing a purchase.
+- **Top-up purchases** - a credit package from the shared catalog, bought through Stripe Checkout or,
+  on the Vercel rail, granted on the spot and invoiced on the installation.
+- **Auto top-up** - optional per organization: when the balance falls below `autoTopUpThreshold`, buy
+  the chosen package again automatically. It settles by the organization's own rail, so a Stripe
+  organization is charged off-session and a Vercel one has the package invoiced. On the Stripe rail it
+  cannot be enabled without a saved card, because there would be nothing to charge, and a card is only
+  saved by completing a purchase.
+
+  Where it runs differs by rail, and not arbitrarily. A Stripe charge can go from any host that holds
+  the secret key, so it fires straight off the deduction. A Vercel recharge has to raise an invoice,
+  which needs `VERCEL_ENCRYPTION_KEY` - and the workers doing the deducting do not hold it, so there
+  it logs and skips rather than granting credits nothing can bill for. The `vercel-billing-invoicer`
+  cronjob, which does hold the key, sweeps for those organizations instead. That sweep reads state
+  rather than reacting to an event, so a recharge missed for any reason is picked up next run.
+
   A recharge that fails is recorded on the customer (`autoTopUpLastFailureReason`) and shown on the
   billing page, cleared by the next successful charge. That record exists because auto top-up fires
   from whichever host ran the deduction - a worker, the previewkit runner, a cronjob - and none of
@@ -133,14 +144,27 @@ easy to mistake for one.
 | | Stripe | Vercel Marketplace |
 |---|---|---|
 | Recurring credits | Subscription invoice | Plan allotment per cycle |
-| Extra credits | Buy a top-up via Checkout | Overage minted internally, billed in arrears |
-| Spending ceiling | none | Overage cap, per plan cycle |
-| Auto top-up | Yes, needs a saved card | No |
+| Buy a package | Checkout redirect, granted on the webhook | Granted immediately, invoiced on the installation |
+| Auto top-up | Yes, charges the saved card | Yes, buys the same package and invoices it |
+| Spending ceiling | Monthly spend cap | Monthly spend cap, plus the per-cycle overage cap |
+| Extra credits without buying | none | Overage minted internally, billed in arrears |
+
+Both rails sell the same catalog at the same price, and both honour the same monthly spend cap. Only
+the settlement differs, and it differs in one way worth knowing: **Stripe collects before it grants,
+Vercel grants before it collects.** A card is charged and the webhook then grants; a Vercel purchase
+is granted on the spot and an invoice raised on the installation for Vercel to collect. Reversed, a
+failure between the two would bill a customer for credits they never received.
+
+The exposure that ordering creates is bounded at **one unpaid purchase per organization**: until
+Vercel reports the invoice paid, that organization cannot buy again. This is also why a plan carrying
+no payment method is still sold to - Vercel owns collection, and an organization that never settles
+walks away with a single package rather than an open tab.
 
 Both rails call the same grant function when an invoice is paid, and the plan allotment for a Vercel
 organization is copied into the same pricing column a Stripe subscription uses. On both rails that
 grant is a **reset, not an addition** - each cycle overwrites the previous allotment and records the
-unused remainder as forfeited, so plan credits do not roll over.
+unused remainder as forfeited, so plan credits do not roll over. A purchased package is not part of
+that reset: it lands outside `subscriptionCreditBalance`, which is the portion the reset preserves.
 
 On the Vercel rail, an unset overage cap means a **hard stop** at the plan allotment, not "unlimited".
 
@@ -155,7 +179,8 @@ Documented because they are real, not because they are acceptable:
 
 - Vercel invoice submission is not atomic across the network call, so a submitted-then-crashed run can
   invoice the same period twice.
-- Refunding a Vercel invoice does not claw back the credits it granted.
+- Refunding a Vercel *cycle* invoice does not claw back the plan allotment it granted. A refunded
+  credit *purchase* does revoke its credits and reopen the cap headroom.
 - An organization can hold more than one active Vercel installation; reads arbitrarily pick the newest.
 - Overage is consulted only by the test-generation gate, so a Vercel organization with overage enabled
   is still blocked from preview deploys and analysis runs at its floor.

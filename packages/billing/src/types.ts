@@ -113,12 +113,65 @@ export type AnalysisCreditsGateResult = { allowed: true } | { allowed: false; re
 export type AutoTopUpFailureReasonValue = `${AutoTopUpFailureReason}`;
 
 /**
+ * A Vercel-rail credit purchase.
+ *
+ * - `spend_cap_exceeded` - would breach the org's own monthly ceiling.
+ * - `awaiting_payment` - an earlier purchase's invoice has not been paid yet. Credits are handed
+ *   over before the money arrives, so exactly one package may be outstanding at a time; that cap
+ *   is what bounds how much an org can walk away with.
+ * - `not_supported` - no way to raise an invoice on this deployment (no submitter configured).
+ */
+export type VercelCreditPurchaseResult =
+    | { purchased: true; creditsGranted: number; priceCents: number; newBalance: number }
+    | { purchased: false; reason: "spend_cap_exceeded" | "awaiting_payment" | "not_supported" };
+
+/**
+ * What Vercel did with a credit-purchase invoice submission. `already_submitted` is the answer to
+ * the retry problem: the submission carries a deterministic `externalId`, which Vercel requires to
+ * be unique per installation, so a re-submission of a purchase whose invoice already landed comes
+ * back rejected rather than billing the customer a second time. It carries no invoice id - Vercel's
+ * duplicate rejection does not name the invoice it collided with - so the caller can only record
+ * that the money is already owed, not link to it.
+ */
+export type VercelInvoiceSubmission =
+    | { outcome: "submitted"; vercelInvoiceId: string }
+    | { outcome: "already_submitted" };
+
+/**
+ * Raises a one-off invoice on Vercel for a credit purchase. A port rather than a direct call
+ * because `packages/billing` has no `VERCEL_ENCRYPTION_KEY` - the installation's access token can
+ * only be decrypted in `apps/api` - and because the hosts that merely *spend* credits (the general
+ * worker, the usage-meter cronjob) must keep working without any Vercel API access at all.
+ *
+ * Throws on failure; the caller has already granted the credits by then and treats a throw as
+ * "invoice still owed", not as "sale did not happen". A duplicate submission is not a failure -
+ * it comes back as `already_submitted`, since re-POSTing is the one thing that must not happen.
+ */
+export interface VercelInvoiceSubmitter {
+    submitCreditPurchaseInvoice(input: {
+        /** Also the invoice's `externalId` at Vercel, which is what makes a re-submission a no-op. */
+        purchaseId: string;
+        installationId: string;
+        billingPeriodId: string;
+        packageName: string;
+        creditsGranted: number;
+        priceCents: number;
+    }): Promise<VercelInvoiceSubmission>;
+}
+
+/**
  * Everything a billing service can optionally be given. An object rather than a growing list of
  * optional positional parameters, which is what unioning each consumer's needs would produce.
  */
 export interface BillingServiceOptions {
     /** Defaults to a logging no-op (see `LoggingBillingAlertNotifier`) when omitted. */
     alertNotifier?: BillingAlertNotifier;
+    /**
+     * Only available on hosts that can decrypt a Vercel access token (`apps/api`, and the invoicer
+     * cronjob). Omitting it disables Vercel credit purchases rather than letting credits be sold
+     * uninvoiced.
+     */
+    invoiceSubmitter?: VercelInvoiceSubmitter;
 }
 
 export type BillingSessionResult = {
@@ -188,6 +241,7 @@ export interface BillingService {
     setPromoCodeActive(promoCodeId: string, isActive: boolean): Promise<BillingPromoCodeItem>;
     getVercelOverageStatus(organizationId: string): Promise<VercelOverageStatus>;
     updateVercelOverageCap(organizationId: string, maxOverageAmountUsd: number | undefined): Promise<void>;
+    purchaseVercelCredits(organizationId: string, packageId: string): Promise<VercelCreditPurchaseResult>;
     getPricing(organizationId: string): Promise<BillingPricingValues>;
     updateComputePricing(
         organizationId: string,

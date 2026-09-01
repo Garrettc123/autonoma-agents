@@ -1,6 +1,6 @@
 export { createBillingService, createStripeBillingService, createBillingServices } from "./billing.service";
 export type { BillingServices } from "./billing.service";
-export type { BillingService, StripeBillingService } from "./types";
+export type { BillingService, StripeBillingService, VercelInvoiceSubmission, VercelInvoiceSubmitter } from "./types";
 export type {
     AnalysisCreditsGateResult,
     AutoTopUpFailedAlert,
@@ -18,6 +18,12 @@ export type {
     UpdateTopupPackageInput,
 } from "./types";
 export { LoggingBillingAlertNotifier } from "./logging-billing-alert-notifier";
+// Re-exported (not redefined) so a consumer that already depends on this package can name a rail
+// without also taking on @autonoma/types. Same binding, so the two paths cannot drift.
+export { BILLING_PROVIDERS, type BillingProvider } from "@autonoma/types";
+export { AutoTopUpService } from "./auto-topup.service";
+export { BillingTopupPackageService } from "./billing-topup-package.service";
+export { SpendCapService } from "./spend-cap.service";
 export { getStripe } from "./stripe-client";
 export { syncStripeDataToDb } from "./stripe-sync";
 export { processWebhookEvent } from "./webhook-handlers";
@@ -44,6 +50,8 @@ export { PrometheusClient } from "./preview-usage-meter/prometheus-client";
 export { PreviewUsageMeterSweepService } from "./preview-usage-meter/preview-usage-meter-sweep.service";
 export type { PreviewUsageMeterSweepResult } from "./preview-usage-meter/preview-usage-meter-sweep.service";
 export type { VercelOverageStatus } from "./vercel-overage.service";
+export { VercelCreditPurchaseService } from "./vercel-credit-purchase.service";
+export { HttpVercelInvoiceSubmitter } from "./http-vercel-invoice-submitter";
 export {
     AWS_EC2_REGION_US_EAST_1,
     AWS_PRICING_LOCATION_US_EAST_1,

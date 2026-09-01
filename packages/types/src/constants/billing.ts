@@ -1,3 +1,21 @@
+/**
+ * Which rail settles an organization's money, as stored on `BillingCustomer.provider`. The credit
+ * layer is identical either way - the same balance, the same deduction code, the same catalog - so
+ * this only ever decides how a charge is collected: Stripe directly, or an invoice raised on the
+ * Vercel installation.
+ *
+ * Deliberately not shared with `VERCEL_PROVIDER` in the API's posthog module, which happens to hold
+ * the same string for a different column: `User.provider`, marking an account created by the Vercel
+ * marketplace flow rather than better-auth. Two unrelated concepts that would have to move together
+ * if they shared a constant.
+ */
+export const BILLING_PROVIDERS = {
+    STRIPE: "stripe",
+    VERCEL: "vercel",
+} as const;
+
+export type BillingProvider = (typeof BILLING_PROVIDERS)[keyof typeof BILLING_PROVIDERS];
+
 export const BILLING_PAYMENT_INTENT_TYPES = {
     TOPUP: "topup",
 } as const;

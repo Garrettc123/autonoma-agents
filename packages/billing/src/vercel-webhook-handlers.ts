@@ -1,9 +1,13 @@
 import { db } from "@autonoma/db";
 import { logger } from "@autonoma/logger";
 import { BillingPricingService } from "./billing-pricing.service";
+import { BillingTopupPackageService } from "./billing-topup-package.service";
 import { createBillingService } from "./billing.service";
 import { env } from "./env";
+import { LoggingBillingAlertNotifier } from "./logging-billing-alert-notifier";
+import { SpendCapService } from "./spend-cap.service";
 import type { BillingServiceOptions } from "./types";
+import { VercelCreditPurchaseService } from "./vercel-credit-purchase.service";
 import { VercelInvoiceStatus } from "./vercel-invoice-status";
 
 export async function syncVercelPlanPricing(organizationId: string, creditsPerCycle: number): Promise<void> {
@@ -28,10 +32,27 @@ export async function processVercelInvoicePaid(
         return;
     }
 
+    const invoice = await db.vercelInvoice.findUnique({
+        where: { vercelInvoiceId: invoiceId },
+        select: { kind: true },
+    });
+
     await db.vercelInvoice.updateMany({
         where: { vercelInvoiceId: invoiceId },
         data: { status: VercelInvoiceStatus.Paid, paidAt: new Date() },
     });
+
+    // A credit-package invoice was already delivered when the customer bought it; paying it settles
+    // what they owed, it does not entitle them to anything more. Granting the plan allotment here
+    // would hand out a second month of credits for every package sold.
+    if (invoice?.kind === "purchase") {
+        logger.info("Vercel credit purchase invoice paid - marked settled, no grant", {
+            installationId,
+            organizationId: installation.organizationId,
+            invoiceId,
+        });
+        return;
+    }
 
     const billingService = createBillingService(db, options);
     await billingService.grantSubscriptionCredits(installation.organizationId, invoiceId);
@@ -72,6 +93,17 @@ export async function processVercelInvoiceRefunded(installationId: string, invoi
         where: { vercelInvoiceId: invoiceId },
         data: { status: VercelInvoiceStatus.Refunded },
     });
+
+    // Marked before revoking, so the invoice stops counting as an outstanding purchase even if the
+    // revoke below fails - a stuck revoke should not also lock the org out of buying again.
+    //
+    // No invoice submitter: revoking never raises one, and this runs wherever the webhook lands.
+    const purchases = new VercelCreditPurchaseService(
+        db,
+        new BillingTopupPackageService(db),
+        new SpendCapService(db, new LoggingBillingAlertNotifier()),
+    );
+    await purchases.revokeForRefundedInvoice(invoiceId);
 
     logger.info("Vercel invoice marked refunded", {
         installationId,

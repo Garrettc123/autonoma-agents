@@ -4,6 +4,8 @@ import {
     type PrismaClient,
     PreviewkitStatus,
     SubscriptionStatus,
+    VercelBillingPeriodStatus,
+    VercelInstallationStatus,
     createClient,
 } from "@autonoma/db";
 import { createTestDatabase, type IntegrationHarness } from "@autonoma/integration-test";
@@ -15,6 +17,8 @@ import { CreditsService } from "../src/credits.service";
 import { LoggingBillingAlertNotifier } from "../src/logging-billing-alert-notifier";
 import { SpendCapService } from "../src/spend-cap.service";
 import type { BillingService } from "../src/types";
+import type { VercelInvoiceSubmission, VercelInvoiceSubmitter } from "../src/types";
+import { VercelCreditPurchaseService } from "../src/vercel-credit-purchase.service";
 import { VercelInvoiceStatus, type VercelInvoiceStatusValue } from "../src/vercel-invoice-status";
 import { VercelOverageService } from "../src/vercel-overage.service";
 
@@ -49,9 +53,14 @@ export class BillingTestHarness implements IntegrationHarness {
     /** Direct access to reservation/refund internals not exposed on the `BillingService` facade. */
     public readonly spendCapService: SpendCapService;
     public readonly topupPackageService: BillingTopupPackageService;
+    public readonly vercelCreditPurchaseService: VercelCreditPurchaseService;
+    public readonly autoTopUpService: AutoTopUpService;
+    /** Records what would have been sent to Vercel, and can be made to fail on demand. */
+    public readonly vercelInvoiceSubmitter: FakeVercelInvoiceSubmitter;
     public readonly pricingService: BillingPricingService;
 
     private previewkitEnvironmentSeq = 0;
+    private vercelInstallationSeq = 0;
     private vercelInvoiceSeq = 0;
     private previewkitAppSeq = 0;
 
@@ -61,9 +70,24 @@ export class BillingTestHarness implements IntegrationHarness {
         this.spendCapService = new SpendCapService(db, alertNotifier);
         this.topupPackageService = new BillingTopupPackageService(db);
         this.pricingService = new BillingPricingService(db);
+        this.vercelInvoiceSubmitter = new FakeVercelInvoiceSubmitter();
+        this.vercelCreditPurchaseService = new VercelCreditPurchaseService(
+            db,
+            this.topupPackageService,
+            this.spendCapService,
+            this.vercelInvoiceSubmitter,
+        );
+        // Mirrors the real wiring: auto top-up needs the purchase service to recharge a Vercel org,
+        // since that rail settles by invoice rather than by charging a card.
+        this.autoTopUpService = new AutoTopUpService(
+            db,
+            this.topupPackageService,
+            this.spendCapService,
+            this.vercelCreditPurchaseService,
+        );
         this.creditsService = new CreditsService(
             db,
-            new AutoTopUpService(db, this.topupPackageService, this.spendCapService),
+            this.autoTopUpService,
             this.pricingService,
             new VercelOverageService(db),
             this.topupPackageService,
@@ -93,6 +117,8 @@ export class BillingTestHarness implements IntegrationHarness {
         // sweep (which scans across all environments, not a single org) never
         // sees another test's leftover rows.
         await this.db.$executeRawUnsafe('TRUNCATE TABLE "organization" CASCADE');
+        // In-memory state, so truncating the database does not touch it.
+        this.vercelInvoiceSubmitter.reset();
     }
 
     async afterEach() {
@@ -113,6 +139,76 @@ export class BillingTestHarness implements IntegrationHarness {
             data: { organizationId: org.id, creditBalance },
         });
         return org.id;
+    }
+
+    /**
+     * An active Vercel installation with an active billing period, which is what a credit purchase
+     * needs to attach itself to. `paymentMethodRequired`/`initialCharge` default to a plan the
+     * invoicer will actually bill - pass `paymentMethodRequired: false` to build the free plan the
+     * purchase path is supposed to refuse.
+     */
+    async createVercelInstallation(input: {
+        organizationId: string;
+        paymentMethodRequired?: boolean;
+        withActivePeriod?: boolean;
+    }): Promise<{ installationId: string; billingPeriodId: string | undefined; planId: string }> {
+        const seq = this.vercelInstallationSeq++;
+        const user = await this.db.user.create({
+            data: { name: `Vercel User ${seq}`, email: `vercel-user-${seq}-${Date.now()}@example.com` },
+        });
+
+        const plan = await this.db.vercelBillingPlan.create({
+            data: {
+                name: `Vercel Plan ${seq}-${Date.now()}`,
+                description: "Test plan",
+                cost: "50.00",
+                initialCharge: "50.00",
+                paymentMethodRequired: input.paymentMethodRequired ?? true,
+                details: {},
+            },
+        });
+
+        const installation = await this.db.vercelInstallation.create({
+            data: {
+                vercelInstallationId: `icfg_${seq}_${Date.now()}`,
+                vercelAccountId: `team_${seq}`,
+                vercelUserId: `vuser_${seq}`,
+                organizationId: input.organizationId,
+                userId: user.id,
+                status: VercelInstallationStatus.active,
+                billingPlanId: plan.id,
+                accessTokenEnc: "encrypted-test-token",
+            },
+        });
+
+        if (input.withActivePeriod === false) {
+            return { installationId: installation.id, billingPeriodId: undefined, planId: plan.id };
+        }
+
+        const period = await this.db.vercelBillingPeriod.create({
+            data: {
+                installationId: installation.id,
+                planId: plan.id,
+                endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+                status: VercelBillingPeriodStatus.active,
+            },
+        });
+
+        return { installationId: installation.id, billingPeriodId: period.id, planId: plan.id };
+    }
+
+    /** A purchasable catalog entry, uniquely named per call. */
+    async createTopupPackage(input: { priceCents: number; creditsGranted: number }): Promise<string> {
+        const seq = this.vercelInstallationSeq;
+        const pkg = await this.db.billingTopupPackage.create({
+            data: {
+                name: `Pack ${seq}-${input.creditsGranted}-${Date.now()}`,
+                stripePriceId: `price_${seq}_${Date.now()}`,
+                priceCents: input.priceCents,
+                creditsGranted: input.creditsGranted,
+            },
+        });
+        return pkg.id;
     }
 
     /**
@@ -154,6 +250,10 @@ export class BillingTestHarness implements IntegrationHarness {
      *
      * A refunded invoice keeps its `paidAt`, exactly as `processVercelInvoiceRefunded` leaves it -
      * that is the shape `hasEverPaid` has to tell apart from a still-settled one.
+     *
+     * Its installation ids carry an `_inv_` marker so they cannot collide with
+     * {@link createVercelInstallation}'s: the two run off separate sequence counters, so both would
+     * otherwise mint `icfg_0_<ms>` on their first call within the same millisecond.
      */
     async recordVercelInvoice(
         organizationId: string,
@@ -168,9 +268,9 @@ export class BillingTestHarness implements IntegrationHarness {
         });
         const installation = await this.db.vercelInstallation.create({
             data: {
-                vercelInstallationId: `icfg_${seq}_${Date.now()}`,
-                vercelAccountId: `team_${seq}`,
-                vercelUserId: `vuser_${seq}`,
+                vercelInstallationId: `icfg_inv_${seq}_${Date.now()}`,
+                vercelAccountId: `team_inv_${seq}`,
+                vercelUserId: `vuser_inv_${seq}`,
                 organizationId,
                 userId: user.id,
                 billingPlanId: plan.id,
@@ -283,5 +383,48 @@ export class BillingTestHarness implements IntegrationHarness {
         });
 
         return config.id;
+    }
+}
+
+/**
+ * Stands in for Vercel's Submit Invoice API - no network, and failure is switchable. Enforces the
+ * real API's uniqueness rule on `externalId` (here, the purchase id) so a test can observe what a
+ * resubmission actually does rather than what the fake feels like doing.
+ */
+export class FakeVercelInvoiceSubmitter implements VercelInvoiceSubmitter {
+    public readonly submitted: Array<{ purchaseId: string; installationId: string; priceCents: number }> = [];
+    public shouldFail = false;
+    private seq = 0;
+
+    /**
+     * Back to a submitter that accepts everything and has seen nothing. Called from the harness's
+     * `beforeEach`, because `shouldFail` and `submitted` otherwise carry into the next test - and a
+     * leaked `shouldFail` is silent: the purchase still succeeds and only the invoice is missing, so
+     * the next test fails somewhere unrelated to the line that set it.
+     */
+    reset(): void {
+        this.submitted.length = 0;
+        this.shouldFail = false;
+        this.seq = 0;
+    }
+
+    async submitCreditPurchaseInvoice(input: {
+        purchaseId: string;
+        installationId: string;
+        billingPeriodId: string;
+        packageName: string;
+        creditsGranted: number;
+        priceCents: number;
+    }): Promise<VercelInvoiceSubmission> {
+        if (this.shouldFail) throw new Error("Vercel invoice submission failed");
+        if (this.submitted.some((entry) => entry.purchaseId === input.purchaseId)) {
+            return { outcome: "already_submitted" };
+        }
+        this.submitted.push({
+            purchaseId: input.purchaseId,
+            installationId: input.installationId,
+            priceCents: input.priceCents,
+        });
+        return { outcome: "submitted", vercelInvoiceId: `inv_test_${this.seq++}_${Date.now()}` };
     }
 }

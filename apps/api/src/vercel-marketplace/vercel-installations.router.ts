@@ -4,6 +4,7 @@ import { hashApiKey } from "@autonoma/auth";
 import { syncVercelPlanPricing } from "@autonoma/billing";
 import { db, VercelBillingPeriodStatus, VercelInstallationStatus } from "@autonoma/db";
 import { logger as rootLogger } from "@autonoma/logger";
+import { BILLING_PROVIDERS } from "@autonoma/types";
 import { toSlug } from "@autonoma/utils";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -698,7 +699,7 @@ vercelInstallationsRouter.post("/:installationId/resources", async (c) => {
         });
         if (existingCustomer == null) {
             await tx.billingCustomer.create({
-                data: { organizationId: installation.organizationId, provider: "vercel" },
+                data: { organizationId: installation.organizationId, provider: BILLING_PROVIDERS.VERCEL },
             });
         }
 

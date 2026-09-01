@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@autonoma/blacklight";
+import { BILLING_PROVIDERS } from "@autonoma/types";
 import { CreditCardIcon } from "@phosphor-icons/react/CreditCard";
 import { GiftIcon } from "@phosphor-icons/react/Gift";
 import { LightningIcon } from "@phosphor-icons/react/Lightning";
@@ -26,6 +27,7 @@ import {
   useBillingStatus,
   useCreateCheckoutSession,
   useCreatePortalSession,
+  usePurchaseVercelCredits,
   useRedeemPromoCode,
   useTopupPackages,
   useUpdateAutoTopUp,
@@ -36,6 +38,13 @@ import { ComputePricingPanel } from "./-compute-pricing-panel";
 import { SpendCapFields } from "./-spend-cap-fields";
 import { VercelOveragePanel } from "./-vercel-overage-panel";
 
+/** Why a Vercel credit purchase was refused, in the customer's terms. */
+const PURCHASE_REFUSAL_TITLES: Record<"spend_cap_exceeded" | "awaiting_payment" | "not_supported", string> = {
+  spend_cap_exceeded: "This purchase would exceed your spend cap for this period",
+  awaiting_payment: "Your previous credit purchase is still awaiting payment",
+  not_supported: "Credit purchases are not available on this plan",
+};
+
 export function BillingPanel() {
   const { data } = useBillingStatus();
   const { data: topupPackages } = useTopupPackages();
@@ -43,6 +52,7 @@ export function BillingPanel() {
   const createPortal = useCreatePortalSession();
   const updateAutoTopUp = useUpdateAutoTopUp();
   const redeemPromo = useRedeemPromoCode();
+  const purchaseVercelCredits = usePurchaseVercelCredits();
 
   const [promoCode, setPromoCode] = useState("");
   const [autoTopUpEnabled, setAutoTopUpEnabled] = useState(data.autoTopUpEnabled);
@@ -55,12 +65,13 @@ export function BillingPanel() {
     setAutoTopUpPackageId(data.autoTopUpPackageId ?? "");
   }, [data.autoTopUpEnabled, data.autoTopUpThreshold, data.autoTopUpPackageId]);
 
-  // Vercel-provisioned orgs pay through Vercel's own billing, never Stripe - Upgrade,
-  // Open billing portal, and Buy top-up all create Stripe checkout/portal sessions,
-  // which is the wrong destination (and would fail: these orgs have no
-  // stripeCustomerId). Auto top-up is the Stripe-rail equivalent of the Vercel-native
-  // pay-per-usage overage panel, so the two are swapped in, not stacked.
-  const isVercel = data.provider === "vercel";
+  // Vercel-provisioned orgs pay through Vercel's own billing, never Stripe: the billing portal is
+  // the wrong destination and would fail outright, since these orgs have no stripeCustomerId. Both
+  // rails DO sell the same credit packages - the buy button routes by rail rather than hiding.
+  // Top-up controls show on both rails: a Vercel org buys the same packages, and its recharge is
+  // granted and invoiced on the installation rather than charged to a card here. The overage panel
+  // sits above them and is Vercel-only, being that rail's own pay-per-usage ceiling.
+  const isVercel = data.provider === BILLING_PROVIDERS.VERCEL;
 
   const topupBalance = Math.max(0, data.creditBalance - data.subscriptionCreditBalance);
   const thresholdValue = Number.parseInt(autoTopUpThreshold, 10);
@@ -72,7 +83,31 @@ export function BillingPanel() {
       thresholdValue !== data.autoTopUpThreshold ||
       autoTopUpPackageId !== (data.autoTopUpPackageId ?? ""));
 
-  function handleCreateCheckout(packageId?: string) {
+  /**
+   * Both rails sell the same catalog at the same price; only the settlement differs. Stripe
+   * redirects to Checkout and grants on the webhook; Vercel grants immediately and puts the charge
+   * on the installation's next invoice, so there is nowhere to redirect to.
+   */
+  function handleBuyPackage(packageId: string) {
+    if (isVercel) {
+      purchaseVercelCredits.mutate(
+        { packageId },
+        {
+          onSuccess: (result) => {
+            if (!result.purchased) {
+              toastManager.add({ type: "error", title: PURCHASE_REFUSAL_TITLES[result.reason] });
+              return;
+            }
+            toastManager.add({
+              type: "success",
+              title: `+${result.creditsGranted.toLocaleString()} credits, billed on your next Vercel invoice`,
+            });
+          },
+        },
+      );
+      return;
+    }
+
     const returnPath = `${window.location.pathname}${window.location.search}`;
     createCheckout.mutate(
       { returnPath, packageId },
@@ -155,38 +190,36 @@ export function BillingPanel() {
           </PanelHeader>
           <PanelBody className="space-y-3">
             <p className="text-3xl font-semibold text-text-primary">{topupBalance.toLocaleString()}</p>
-            {!isVercel && (
-              <div className="space-y-1.5">
-                {topupPackages.length === 0 ? (
-                  <p className="text-2xs text-text-secondary">No top-up packages are available yet.</p>
-                ) : (
-                  topupPackages.map((pkg) => (
-                    <Button
-                      key={pkg.id}
-                      variant="outline"
-                      className="h-auto w-full flex-col items-start gap-1 py-2"
-                      onClick={() => handleCreateCheckout(pkg.id)}
-                      disabled={createCheckout.isPending}
-                      aria-label={`billing-buy-topup-${pkg.id}`}
-                    >
-                      {/* Stacked, not name-left/price-right: this panel is one of four columns, so a
+            <div className="space-y-1.5">
+              {topupPackages.length === 0 ? (
+                <p className="text-2xs text-text-secondary">No top-up packages are available yet.</p>
+              ) : (
+                topupPackages.map((pkg) => (
+                  <Button
+                    key={pkg.id}
+                    variant="outline"
+                    className="h-auto w-full flex-col items-start gap-1 py-2"
+                    onClick={() => handleBuyPackage(pkg.id)}
+                    disabled={createCheckout.isPending || purchaseVercelCredits.isPending}
+                    aria-label={`billing-buy-topup-${pkg.id}`}
+                  >
+                    {/* Stacked, not name-left/price-right: this panel is one of four columns, so a
                           single row cannot hold a name beside "$100.00 · 150,000 credits" without the
                           Button's whitespace-nowrap pushing it out through the side of the panel. Each
                           line gets the full width, and min-w-0 lets an overlong name ellipse instead. */}
-                      <span className="flex w-full min-w-0 items-center gap-2">
-                        <LightningIcon size={14} />
-                        <span className="truncate" title={pkg.name}>
-                          {pkg.name}
-                        </span>
+                    <span className="flex w-full min-w-0 items-center gap-2">
+                      <LightningIcon size={14} />
+                      <span className="truncate" title={pkg.name}>
+                        {pkg.name}
                       </span>
-                      <span className="w-full truncate text-left font-mono text-2xs text-text-secondary">
-                        ${(pkg.priceCents / 100).toFixed(2)} · {pkg.creditsGranted.toLocaleString()} credits
-                      </span>
-                    </Button>
-                  ))
-                )}
-              </div>
-            )}
+                    </span>
+                    <span className="w-full truncate text-left font-mono text-2xs text-text-secondary">
+                      ${(pkg.priceCents / 100).toFixed(2)} · {pkg.creditsGranted.toLocaleString()} credits
+                    </span>
+                  </Button>
+                ))
+              )}
+            </div>
           </PanelBody>
         </Panel>
 
@@ -240,101 +273,101 @@ export function BillingPanel() {
           </PanelBody>
         </Panel>
 
-        {isVercel ? (
-          <VercelOveragePanel />
-        ) : (
-          <Panel>
-            <PanelHeader>
-              <PanelTitle>Top-up controls</PanelTitle>
-            </PanelHeader>
-            <PanelBody className="space-y-4">
-              <p className="font-mono text-2xs uppercase tracking-widest text-text-secondary">Auto top-up</p>
+        {isVercel ? <VercelOveragePanel /> : null}
 
-              {/* The only place a failed recharge surfaces reliably: it fires from whichever host ran
+        <Panel>
+          <PanelHeader>
+            <PanelTitle>Top-up controls</PanelTitle>
+          </PanelHeader>
+          <PanelBody className="space-y-4">
+            <p className="font-mono text-2xs uppercase tracking-widest text-text-secondary">Auto top-up</p>
+
+            {/* The only place a failed recharge surfaces reliably: it fires from whichever host ran
                   the deduction, and only the API host can send the email. Recorded on the customer
                   row, so this renders regardless. */}
-              {data.autoTopUpLastFailureReason != null ? (
-                <Alert variant="warning" aria-label="billing-auto-topup-failure">
-                  <AlertTitle>Automatic top-up did not go through</AlertTitle>
-                  <AlertDescription>
-                    {data.autoTopUpLastFailureReason === "no_payment_method"
-                      ? "There is no saved payment method to charge. Buy a package once to save a card."
-                      : "The saved payment method was declined. Update it, then buy a package to confirm the new card works."}
-                    {data.autoTopUpLastFailureAt != null ? ` Last attempted ${formatDate(data.autoTopUpLastFailureAt)}.` : ""}
-                  </AlertDescription>
-                </Alert>
-              ) : null}
+            {data.autoTopUpLastFailureReason != null ? (
+              <Alert variant="warning" aria-label="billing-auto-topup-failure">
+                <AlertTitle>Automatic top-up did not go through</AlertTitle>
+                <AlertDescription>
+                  {data.autoTopUpLastFailureReason === "no_payment_method"
+                    ? "There is no saved payment method to charge. Buy a package once to save a card."
+                    : "The saved payment method was declined. Update it, then buy a package to confirm the new card works."}
+                  {data.autoTopUpLastFailureAt != null
+                    ? ` Last attempted ${formatDate(data.autoTopUpLastFailureAt)}.`
+                    : ""}
+                </AlertDescription>
+              </Alert>
+            ) : null}
 
-              <label htmlFor="billing-auto-topup-enabled" className="flex items-center gap-3">
-                <Checkbox
-                  id="billing-auto-topup-enabled"
-                  checked={autoTopUpEnabled}
-                  disabled={!data.hasSavedPaymentMethod}
-                  onCheckedChange={(checked) => setAutoTopUpEnabled(checked === true)}
-                />
-                <span className="text-sm text-text-secondary">Enable automatic top-up when credits are low</span>
-              </label>
+            <label htmlFor="billing-auto-topup-enabled" className="flex items-center gap-3">
+              <Checkbox
+                id="billing-auto-topup-enabled"
+                checked={autoTopUpEnabled}
+                disabled={!data.hasSavedPaymentMethod}
+                onCheckedChange={(checked) => setAutoTopUpEnabled(checked === true)}
+              />
+              <span className="text-sm text-text-secondary">Enable automatic top-up when credits are low</span>
+            </label>
 
-              {/* A card is only saved by completing a purchase, so an org that has never bought one has
+            {/* A card is only saved by completing a purchase, so an org that has never bought one has
                   nothing for auto top-up to charge. Said here rather than left to fail on save, which is
                   how it read before: the setting stored fine and simply never fired. */}
-              {!data.hasSavedPaymentMethod ? (
-                <p className="text-2xs text-text-secondary">
-                  Buy a package once to save a payment method. Auto top-up charges that card, so it cannot be enabled
-                  until there is one.
-                </p>
-              ) : null}
+            {!data.hasSavedPaymentMethod ? (
+              <p className="text-2xs text-text-secondary">
+                Buy a package once to save a payment method. Auto top-up charges that card, so it cannot be enabled
+                until there is one.
+              </p>
+            ) : null}
 
-              <div className="space-y-2">
-                <Label htmlFor="billing-auto-topup-threshold">Threshold</Label>
-                <Input
-                  id="billing-auto-topup-threshold"
-                  type="number"
-                  min={0}
-                  value={autoTopUpThreshold}
-                  onChange={(e) => setAutoTopUpThreshold(e.target.value)}
-                  aria-label="billing-auto-topup-threshold"
-                />
-                <p className="font-mono text-3xs text-text-secondary">
-                  When balance goes below this value, a top-up payment is attempted automatically.
-                </p>
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="billing-auto-topup-threshold">Threshold</Label>
+              <Input
+                id="billing-auto-topup-threshold"
+                type="number"
+                min={0}
+                value={autoTopUpThreshold}
+                onChange={(e) => setAutoTopUpThreshold(e.target.value)}
+                aria-label="billing-auto-topup-threshold"
+              />
+              <p className="font-mono text-3xs text-text-secondary">
+                When balance goes below this value, a top-up payment is attempted automatically.
+              </p>
+            </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="billing-auto-topup-package">Package to recharge</Label>
-                <Select value={autoTopUpPackageId} onValueChange={(value) => setAutoTopUpPackageId(value ?? "")}>
-                  <SelectTrigger id="billing-auto-topup-package" className="w-full">
-                    <SelectValue placeholder="Select a package">
-                      {topupPackages.find((pkg) => pkg.id === autoTopUpPackageId)?.name}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {topupPackages.map((pkg) => (
-                      <SelectItem key={pkg.id} value={pkg.id}>
-                        {pkg.name} - ${(pkg.priceCents / 100).toFixed(2)} for {pkg.creditsGranted.toLocaleString()}{" "}
-                        credits
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="billing-auto-topup-package">Package to recharge</Label>
+              <Select value={autoTopUpPackageId} onValueChange={(value) => setAutoTopUpPackageId(value ?? "")}>
+                <SelectTrigger id="billing-auto-topup-package" className="w-full">
+                  <SelectValue placeholder="Select a package">
+                    {topupPackages.find((pkg) => pkg.id === autoTopUpPackageId)?.name}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {topupPackages.map((pkg) => (
+                    <SelectItem key={pkg.id} value={pkg.id}>
+                      {pkg.name} - ${(pkg.priceCents / 100).toFixed(2)} for {pkg.creditsGranted.toLocaleString()}{" "}
+                      credits
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-              <Button
-                variant="outline"
-                onClick={handleSaveAutoTopUp}
-                disabled={!canSaveAutoTopUp || updateAutoTopUp.isPending}
-                aria-label="billing-auto-topup-save"
-              >
-                Save auto top-up
-              </Button>
-            </PanelBody>
-          </Panel>
-        )}
+            <Button
+              variant="outline"
+              onClick={handleSaveAutoTopUp}
+              disabled={!canSaveAutoTopUp || updateAutoTopUp.isPending}
+              aria-label="billing-auto-topup-save"
+            >
+              Save auto top-up
+            </Button>
+          </PanelBody>
+        </Panel>
       </div>
 
-      {/* Its own panel rather than a section of "Top-up controls": the cap applies to credit
-          purchases on BOTH rails, and the Vercel side has no top-up panel to host it - VercelOveragePanel
-          renders nothing at all unless the plan carries a pay-per-usage rate. */}
+      {/* Its own panel rather than a section of "Top-up controls": the cap governs credit purchases
+          on BOTH rails and both rails' auto top-up, so it reads as a peer of them rather than as a
+          detail of one. */}
       <Panel>
         <PanelHeader>
           <PanelTitle>Spend cap</PanelTitle>

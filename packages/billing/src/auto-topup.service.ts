@@ -1,17 +1,24 @@
-import { AutoTopUpFailureReason, type PrismaClient } from "@autonoma/db";
-import { BILLING_PAYMENT_INTENT_TYPES, BILLING_TOPUP_SOURCES } from "@autonoma/types";
+import { AutoTopUpFailureReason, type BillingCustomer, type PrismaClient } from "@autonoma/db";
+import { BILLING_PAYMENT_INTENT_TYPES, BILLING_PROVIDERS, BILLING_TOPUP_SOURCES } from "@autonoma/types";
 import type { BillingTopupPackageService } from "./billing-topup-package.service";
 import { buildAutoTopUpIdempotencyKey } from "./billing-utils";
 import { Service } from "./service";
 import type { SpendCapService } from "./spend-cap.service";
 import { getStripe } from "./stripe-client";
-import type { AutoTopUpFailureReasonValue, BillingAlertNotifier } from "./types";
+import type { AutoTopUpFailureReasonValue, BillingAlertNotifier, BillingTopupPackageItem } from "./types";
+import type { VercelCreditPurchaseService } from "./vercel-credit-purchase.service";
 
 export class AutoTopUpService extends Service {
     constructor(
         private readonly db: PrismaClient,
         private readonly packageService: BillingTopupPackageService,
         private readonly spendCapService: SpendCapService,
+        /**
+         * How a Vercel-billed organization recharges: there is no card of theirs to charge, so the
+         * package is granted and invoiced on the installation instead. Absent on a host that cannot
+         * raise an invoice, which is why the Vercel branch skips rather than assuming it is there.
+         */
+        private readonly vercelCreditPurchaseService?: VercelCreditPurchaseService,
         /**
          * Only the API host has one that can send email; everywhere else this is absent and the
          * recorded failure on `BillingCustomer` is the whole notification. Optional rather than a
@@ -43,10 +50,6 @@ export class AutoTopUpService extends Service {
 
         if (customer == null) return;
         if (!customer.autoTopUpEnabled || customer.creditBalance >= customer.autoTopUpThreshold) return;
-        if (customer.stripeCustomerId == null) {
-            this.logger.warn("Auto top-up skipped: Stripe customer not linked yet", { organizationId });
-            return;
-        }
         if (customer.autoTopUpPackageId == null) {
             this.logger.warn("Auto top-up skipped: no package selected", { organizationId });
             return;
@@ -67,7 +70,55 @@ export class AutoTopUpService extends Service {
             threshold: customer.autoTopUpThreshold,
             packageId: topupPackage.id,
             priceCents: topupPackage.priceCents,
+            provider: customer.provider,
         });
+
+        // Both rails buy the same package at the same price; only the settlement differs, exactly as
+        // it does for a manual purchase.
+        if (customer.provider === BILLING_PROVIDERS.VERCEL) {
+            await this.rechargeThroughVercel(organizationId, topupPackage);
+            return;
+        }
+
+        await this.rechargeThroughStripe(organizationId, customer, topupPackage);
+    }
+
+    /**
+     * Delegates wholesale to the purchase path, which already owns everything this needs: the
+     * spend-cap reservation and its release, the one-unpaid-purchase bound, the grant, and the
+     * invoice. Reserving here as well would double-count the charge against the org's ceiling.
+     */
+    private async rechargeThroughVercel(organizationId: string, topupPackage: BillingTopupPackageItem): Promise<void> {
+        if (this.vercelCreditPurchaseService == null) {
+            this.logger.warn("Auto top-up skipped: this host cannot raise a Vercel invoice", { organizationId });
+            return;
+        }
+
+        const result = await this.vercelCreditPurchaseService.purchase(organizationId, topupPackage.id);
+
+        if (!result.purchased) {
+            this.logger.info("Auto top-up did not go through on the Vercel rail", {
+                organizationId,
+                extra: { packageId: topupPackage.id, reason: result.reason },
+            });
+            return;
+        }
+
+        this.logger.info("Auto top-up granted and invoiced on the Vercel installation", {
+            organizationId,
+            extra: { packageId: topupPackage.id, creditsGranted: result.creditsGranted },
+        });
+    }
+
+    private async rechargeThroughStripe(
+        organizationId: string,
+        customer: BillingCustomer,
+        topupPackage: BillingTopupPackageItem,
+    ): Promise<void> {
+        if (customer.stripeCustomerId == null) {
+            this.logger.warn("Auto top-up skipped: Stripe customer not linked yet", { organizationId });
+            return;
+        }
 
         const stripe = getStripe();
         const paymentMethods = await stripe.customers.listPaymentMethods(customer.stripeCustomerId, { limit: 1 });

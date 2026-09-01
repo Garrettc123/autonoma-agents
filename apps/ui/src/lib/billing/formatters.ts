@@ -11,6 +11,13 @@ const TRANSACTION_TYPE_LABELS: Record<string, string> = {
     GENERATION_REFUND: "Generation refund",
     RUN_CONSUMPTION: "Test run",
     LLM_PROXY_CONSUMPTION: "AI CLI usage",
+    // Both rails' purchases read the same to a customer - what differs is how it is settled, which
+    // the transaction list is not the place to explain.
+    VERCEL_TOPUP_GRANT: "Top-up purchase",
+    VERCEL_OVERAGE_GRANT: "Pay-per-usage credits",
+    PREVIEW_RUNTIME_CONSUMPTION: "Preview runtime",
+    PREVIEW_BUILD_CONSUMPTION: "Preview build",
+    AI_COST_CONSUMPTION: "AI usage",
 };
 
 export function formatTransactionType(type: string): string {

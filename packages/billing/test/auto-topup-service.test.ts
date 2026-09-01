@@ -1,7 +1,10 @@
 import { integrationTestSuite } from "@autonoma/integration-test";
+import { BILLING_PROVIDERS } from "@autonoma/types";
 import type Stripe from "stripe";
 import { expect, vi } from "vitest";
+import { AutoTopUpService } from "../src/auto-topup.service";
 import { getStripe } from "../src/stripe-client";
+import { VercelCreditPurchaseService } from "../src/vercel-credit-purchase.service";
 import { BillingTestHarness } from "./billing-harness";
 
 vi.mock("../src/stripe-client", () => ({ getStripe: vi.fn() }));
@@ -187,6 +190,96 @@ integrationTestSuite({
             await harness.creditsService.deductCreditsForLlmProxy(orgId, 0.001, `req_${Date.now()}`);
 
             expect(createCalled).toBe(false);
+        });
+
+        // A Vercel org has no card of ours to charge, so its recharge settles the way its manual
+        // purchases do: granted here, invoiced on the installation for Vercel to collect.
+        test("recharges a Vercel organization by invoicing the package, never by charging a card", async ({
+            harness,
+        }) => {
+            let createCalled = false;
+            stubStripe({
+                createPaymentIntent: async () => {
+                    createCalled = true;
+                    return { id: "pi_fixture" };
+                },
+            });
+
+            const orgId = await harness.createOrgWithBalance(10);
+            await harness.createVercelInstallation({ organizationId: orgId });
+            const pkg = await harness.topupPackageService.create({
+                name: "Medium",
+                stripePriceId: `price_vercel_auto_${Date.now()}`,
+                priceCents: 10_000,
+                creditsGranted: 150_000,
+            });
+            await harness.db.billingCustomer.update({
+                where: { organizationId: orgId },
+                data: {
+                    provider: BILLING_PROVIDERS.VERCEL,
+                    autoTopUpEnabled: true,
+                    autoTopUpThreshold: 100,
+                    autoTopUpPackageId: pkg.id,
+                },
+            });
+
+            await harness.autoTopUpService.triggerAutoTopUp(orgId);
+
+            expect(createCalled).toBe(false);
+            const purchase = await harness.db.vercelCreditPurchase.findFirstOrThrow({
+                where: { organizationId: orgId },
+                select: { creditsGranted: true, invoiceId: true },
+            });
+            expect(purchase.creditsGranted).toBe(150_000);
+            expect(purchase.invoiceId).not.toBeNull();
+
+            // Unlike the Stripe rail, this grants on the spot rather than waiting for a webhook.
+            const customer = await harness.db.billingCustomer.findUniqueOrThrow({
+                where: { organizationId: orgId },
+                select: { creditBalance: true },
+            });
+            expect(customer.creditBalance).toBe(150_010);
+
+            // Booked once against the cap, by the purchase path - not twice.
+            const status = await harness.spendCapService.getStatus(orgId);
+            expect(status.amountChargedCentsThisPeriod).toBe(10_000);
+        });
+
+        // The invoice submitter is absent on hosts without the Vercel encryption key, and granting
+        // credits there would be giving them away with nothing able to bill for them.
+        test("skips a Vercel recharge on a host that cannot raise an invoice", async ({ harness }) => {
+            const orgId = await harness.createOrgWithBalance(10);
+            await harness.createVercelInstallation({ organizationId: orgId });
+            const pkg = await harness.topupPackageService.create({
+                name: "Medium",
+                stripePriceId: `price_vercel_nosubmitter_${Date.now()}`,
+                priceCents: 10_000,
+                creditsGranted: 150_000,
+            });
+            await harness.db.billingCustomer.update({
+                where: { organizationId: orgId },
+                data: {
+                    provider: BILLING_PROVIDERS.VERCEL,
+                    autoTopUpEnabled: true,
+                    autoTopUpThreshold: 100,
+                    autoTopUpPackageId: pkg.id,
+                },
+            });
+
+            const withoutSubmitter = new AutoTopUpService(
+                harness.db,
+                harness.topupPackageService,
+                harness.spendCapService,
+                new VercelCreditPurchaseService(harness.db, harness.topupPackageService, harness.spendCapService),
+            );
+            await withoutSubmitter.triggerAutoTopUp(orgId);
+
+            expect(await harness.db.vercelCreditPurchase.count({ where: { organizationId: orgId } })).toBe(0);
+            const customer = await harness.db.billingCustomer.findUniqueOrThrow({
+                where: { organizationId: orgId },
+                select: { creditBalance: true },
+            });
+            expect(customer.creditBalance).toBe(10);
         });
 
         // The recorded failure is the only signal that survives every host, so it is the behaviour

@@ -55,6 +55,27 @@ export function useUpdateAutoTopUp() {
     });
 }
 
+/**
+ * Buys a credit package on the Vercel rail. Unlike the Stripe path there is no redirect - the
+ * credits are granted server-side and billed on the next Vercel invoice - so the balance is
+ * refetched in place and the toast is the whole confirmation.
+ *
+ * The spend cap is refetched alongside the balance: the purchase books its price against the org's
+ * monthly ceiling, which is the number {@link useSpendCapStatus} renders, and nothing else on the
+ * screen would refetch it.
+ */
+export function usePurchaseVercelCredits() {
+    const queryClient = useQueryClient();
+    return useAPIMutation({
+        ...trpc.billing.purchaseVercelCredits.mutationOptions({
+            onSuccess: () => {
+                void queryClient.invalidateQueries({ queryKey: trpc.billing.status.queryKey() });
+                void queryClient.invalidateQueries({ queryKey: trpc.billing.getSpendCapStatus.queryKey() });
+            },
+        }),
+    });
+}
+
 export function useRedeemPromoCode() {
     const queryClient = useQueryClient();
     return useAPIMutation({

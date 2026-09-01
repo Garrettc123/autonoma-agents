@@ -3,6 +3,7 @@ import { appShellHandlers, baseApplication } from "lib/storybook/base-fixtures";
 import { dashboardFixtures } from "lib/storybook/dashboard-fixtures";
 import { PageStory } from "lib/storybook/page-story";
 import type { TrpcFixtures } from "lib/storybook/trpc-handler";
+import type { RouterOutputs } from "lib/trpc";
 
 const FIXTURE_EPOCH = new Date("2026-01-01T00:00:00.000Z");
 const ORG_ID = "org_fixture_01";
@@ -185,6 +186,124 @@ export const OrgBillingLongPackageNames: Story = {
               updatedAt: FIXTURE_EPOCH,
             },
           ],
+        },
+      }),
+    },
+  },
+  args: { path: `/app/${baseApplication.slug}/settings/billing` },
+};
+
+/**
+ * A Vercel organization's ledger, which no other billing story populates - the baseline leaves
+ * `transactions` empty, so the panel has only ever been photographed in its empty state.
+ *
+ * Both directions of a purchase are here, because both are ledger writes rather than a Stripe
+ * balance we read back. The `+150,000` is a package bought on this rail and billed to the
+ * installation's next invoice; the `-75,000` above it is an earlier purchase whose invoice Vercel
+ * refunded, revoked as a negative grant of its own rather than by editing the original row.
+ */
+type LedgerRow = RouterOutputs["billing"]["status"]["transactions"][number];
+
+/** The ledger row's shape is mostly the union of every settlement rail's foreign keys, none of which the panel reads. */
+function ledgerRow(row: Pick<LedgerRow, "id" | "type" | "amount" | "balanceAfter" | "createdAt">): LedgerRow {
+  return {
+    id: row.id,
+    organizationId: ORG_ID,
+    type: row.type,
+    amount: row.amount,
+    balanceAfter: row.balanceAfter,
+    createdAt: row.createdAt,
+    generationId: null,
+    runId: null,
+    stripePaymentIntentId: null,
+    stripeInvoiceId: null,
+    stripeRefundId: null,
+    billingPeriodKey: null,
+    topupPackageId: null,
+    promoRedemptionId: null,
+    usageWindowId: null,
+    aiCostRecordId: null,
+    previewkitAppBuildId: null,
+  };
+}
+
+const vercelRailLedger: LedgerRow[] = [
+  ledgerRow({
+    id: "ctr_fixture_revoke",
+    type: "VERCEL_TOPUP_GRANT",
+    amount: -75_000,
+    balanceAfter: 163_120,
+    createdAt: new Date("2026-07-28T11:02:00.000Z"),
+  }),
+  ledgerRow({
+    id: "ctr_fixture_purchase",
+    type: "VERCEL_TOPUP_GRANT",
+    amount: 150_000,
+    balanceAfter: 238_120,
+    createdAt: new Date("2026-07-27T16:40:00.000Z"),
+  }),
+  ledgerRow({
+    id: "ctr_fixture_build",
+    type: "PREVIEW_BUILD_CONSUMPTION",
+    amount: -1_240,
+    balanceAfter: 88_120,
+    createdAt: new Date("2026-07-27T15:58:00.000Z"),
+  }),
+  ledgerRow({
+    id: "ctr_fixture_llm",
+    type: "AI_COST_CONSUMPTION",
+    amount: -430,
+    balanceAfter: 89_360,
+    createdAt: new Date("2026-07-27T15:44:00.000Z"),
+  }),
+];
+
+/**
+ * Billing on the Vercel rail, which is the whole point of the credit-purchase work: the same package
+ * catalog a Stripe organization buys from, on an organization that has no Stripe customer at all.
+ *
+ * The buy rows are what changed. They used to be hidden whenever `provider` was `vercel`, because the
+ * only thing behind them was a Stripe Checkout redirect that would have failed - so a Vercel
+ * organization could watch its balance run out with nothing on the page to do about it. They now
+ * route by rail instead of hiding, granting the credits server-side and billing the installation's
+ * next Vercel invoice.
+ *
+ * Everything Stripe-only stays swapped out around them: no billing portal, and the Vercel
+ * pay-per-usage panel in place of auto top-up, which needs a saved card this rail never has.
+ */
+export const OrgBillingVercelRail: Story = {
+  parameters: {
+    msw: {
+      handlers: appShellHandlers({
+        ...generalFixtures,
+        billing: {
+          status: {
+            creditBalance: 163_120,
+            subscriptionCreditBalance: 0,
+            topupCreditBalance: 163_120,
+            provider: "vercel",
+            subscriptionStatus: "active",
+            currentPeriodEnd: FIXTURE_EPOCH,
+            cancelAtPeriodEnd: false,
+            gracePeriodEndsAt: undefined,
+            autoTopUpEnabled: false,
+            autoTopUpThreshold: 0,
+            autoTopUpPackageId: undefined,
+            // No Stripe customer exists on this rail, so there is never a card on file - and with
+            // auto top-up settling by invoice here, nothing has failed a charge either.
+            hasSavedPaymentMethod: false,
+            autoTopUpLastFailureReason: undefined,
+            autoTopUpLastFailureAt: undefined,
+            cliCreditsSpent: 48_900,
+            transactions: vercelRailLedger,
+          },
+          getVercelOverageStatus: {
+            enabled: true,
+            maxOverageAmountUsd: 250,
+            overagePricePerCredit: 0.0008,
+            overageCreditsGrantedThisPeriod: 0,
+            overageAmountUsdThisPeriod: 0,
+          },
         },
       }),
     },

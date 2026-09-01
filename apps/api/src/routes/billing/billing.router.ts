@@ -80,6 +80,16 @@ const billingRouterImpl = router({
         .mutation(({ ctx: { services, organizationId }, input }) =>
             services.billing.updateVercelOverageCap(organizationId, input.maxOverageAmountUsd),
         ),
+    /**
+     * Buys a credit package on the Vercel rail. The credits land immediately and an invoice is
+     * raised on Vercel in the same breath - the postpaid mirror of `createCheckoutSession`, which
+     * is why this returns a result rather than a redirect URL.
+     */
+    purchaseVercelCredits: writeProcedure
+        .input(z.object({ packageId: z.string().min(1) }))
+        .mutation(({ ctx: { services, organizationId }, input }) =>
+            services.billing.purchaseVercelCredits(organizationId, input.packageId),
+        ),
 });
 
 export const billingRouter: typeof billingRouterImpl = billingRouterImpl;

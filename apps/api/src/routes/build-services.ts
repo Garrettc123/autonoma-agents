@@ -1,6 +1,6 @@
 import { AnalysisEventStore } from "@autonoma/analysis";
 import { analytics } from "@autonoma/analytics";
-import { createBillingService, type BillingService } from "@autonoma/billing";
+import { createBillingService, HttpVercelInvoiceSubmitter, type BillingService } from "@autonoma/billing";
 import type { PrismaClient } from "@autonoma/db";
 import type { GitHubApp } from "@autonoma/github";
 import { LokiLogStore } from "@autonoma/logger/loki-log-store";
@@ -155,6 +155,9 @@ export function buildServices({
     const resolvedEmailSender = emailSender ?? buildEmailSender(env.RESEND_API_KEY, env.RESEND_FROM_EMAIL);
     const billingService = createBillingService(conn, {
         alertNotifier: buildBillingAlertNotifier(conn, resolvedEmailSender),
+        invoiceSubmitter: new HttpVercelInvoiceSubmitter(conn, (encrypted) =>
+            getVercelEncryptionHelper().decrypt(encrypted),
+        ),
     });
     const secretValues = buildSecretValues(conn);
     const previewkitOperationsService = new PreviewkitOperationsService(conn, buildSecretKeys(conn));
