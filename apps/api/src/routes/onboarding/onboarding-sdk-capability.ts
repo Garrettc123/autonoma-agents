@@ -1,9 +1,10 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { type PreviewkitStatus, previewkitConfigRowsInclude, type PrismaClient } from "@autonoma/db";
 import { BadRequestError } from "@autonoma/errors";
 import { type Logger, logger } from "@autonoma/logger";
 import {
     type EncryptionHelper,
+    reconcileTestPlanScenarios,
     type ScenarioManager,
     type SdkCallOptions,
     SdkClient,
@@ -11,6 +12,8 @@ import {
 } from "@autonoma/scenario";
 import {
     documentFromPreviewkitConfigRows,
+    type DiscoverResponse,
+    normalizeProtocolVersion,
     type PreviewConfig,
     SDK_ERROR_CODE,
     resolveSdkAppName,
@@ -30,6 +33,11 @@ import type { OnboardingVercelCapabilityService } from "./onboarding-vercel-capa
 import { upsertConfig } from "./previewkit-config-helpers";
 import { listSdkDryRunTargets, type SdkDryRunTargets } from "./sdk-dry-run-targets";
 import { OnboardingApplicationNotFoundError, type ScenarioDryRunResult } from "./states/onboarding-state";
+
+/** Count of what a discover advertised: v2 scenarios if present, else v1 schema models. */
+function discoveredEntityCount(response: DiscoverResponse): number {
+    return response.scenarios?.length ?? response.schema?.models.length ?? 0;
+}
 
 /**
  * Raised timeout handles typical cold-start latency on the customer's SDK
@@ -188,30 +196,39 @@ export class OnboardingSdkCapabilityService {
                 customHeaders: hasHeaders ? mergedHeaders : undefined,
             });
             const response = await sdkClient.discover(DRY_RUN_SDK_OPTIONS);
+            await this.assertExpectedProtocol(applicationId, organizationId, response);
+            const discoveredAt = new Date();
+            const discoveryId = randomUUID();
 
             const signingSecretEnc = this.encryption.encrypt(signingSecret);
             await this.db.$transaction([
                 this.db.application.update({ where: { id: applicationId }, data: { signingSecretEnc } }),
                 this.db.branchDeployment.update({
                     where: { id: deploymentId },
-                    data: { webhookUrl, webhookHeaders: hasHeaders ? mergedHeaders : undefined },
+                    data: {
+                        webhookUrl,
+                        webhookHeaders: hasHeaders ? mergedHeaders : undefined,
+                    },
                 }),
                 this.db.onboardingState.update({
                     where: { applicationId },
                     data: {
                         discoveringStartedAt: null,
-                        lastDiscoveredAt: new Date(),
-                        lastDiscoveredModels: response.schema.models.length,
+                        lastDiscoveredAt: discoveredAt,
+                        lastDiscoveryId: discoveryId,
+                        lastDiscoveredModels: discoveredEntityCount(response),
                         lastDiscoveryError: null,
                     },
                 }),
             ]);
+            await Promise.all([
+                this.syncObservedScenarios(applicationId, response, discoveredAt, discoveryId),
+                this.recordVerifiedSdkPath(applicationId, webhookUrl),
+            ]);
             this.logger.info("Discovery succeeded; SDK config persisted", {
                 applicationId,
-                modelCount: response.schema.models.length,
+                modelCount: discoveredEntityCount(response),
             });
-
-            await this.recordVerifiedSdkPath(applicationId, webhookUrl);
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             this.logger.warn("Discovery failed; leaving SDK unconfigured", { applicationId, error: message });
@@ -344,17 +361,18 @@ export class OnboardingSdkCapabilityService {
                 customHeaders: buildBypassHeaders(context.bypassToken),
             });
             const response = await sdkClient.discover(DRY_RUN_SDK_OPTIONS);
+            await this.assertExpectedProtocol(applicationId, organizationId, response);
 
             await this.persistDiscoveredConfig(
                 applicationId,
                 context.deploymentId,
                 context.sdkUrl,
                 context.bypassToken,
-                response.schema.models.length,
+                response,
             );
             this.logger.info("Managed discovery succeeded; SDK config persisted", {
                 applicationId,
-                modelCount: response.schema.models.length,
+                modelCount: discoveredEntityCount(response),
             });
             return { status: "discovered" };
         } catch (err) {
@@ -539,8 +557,14 @@ export class OnboardingSdkCapabilityService {
         }
 
         const downResult = await this.scenarioManager.down(instance.id, DRY_RUN_SDK_OPTIONS);
-        if (downResult?.status === "DOWN_FAILED") {
-            return { success: false, phase: "down", error: downResult.lastError };
+        if (downResult?.status !== "DOWN_SUCCESS") {
+            return {
+                success: false,
+                phase: "down",
+                error: downResult?.lastError ?? {
+                    message: "Teardown did not report success; the provisioned environment may still be live.",
+                },
+            };
         }
 
         await this.db.onboardingState.update({
@@ -642,8 +666,10 @@ export class OnboardingSdkCapabilityService {
         deploymentId: string,
         webhookUrl: string,
         bypassToken: string | null,
-        modelCount: number,
+        response: DiscoverResponse,
     ): Promise<void> {
+        const discoveredAt = new Date();
+        const discoveryId = randomUUID();
         await this.db.$transaction([
             this.db.branchDeployment.update({
                 where: { id: deploymentId },
@@ -653,14 +679,70 @@ export class OnboardingSdkCapabilityService {
                 where: { applicationId },
                 data: {
                     discoveringStartedAt: null,
-                    lastDiscoveredAt: new Date(),
-                    lastDiscoveredModels: modelCount,
+                    lastDiscoveredAt: discoveredAt,
+                    lastDiscoveryId: discoveryId,
+                    lastDiscoveredModels: discoveredEntityCount(response),
                     lastDiscoveryError: null,
                 },
             }),
         ]);
 
-        await this.recordVerifiedSdkPath(applicationId, webhookUrl);
+        await Promise.all([
+            this.syncObservedScenarios(applicationId, response, discoveredAt, discoveryId),
+            this.recordVerifiedSdkPath(applicationId, webhookUrl),
+        ]);
+    }
+
+    /** Upsert the exact v2 scenarios observed in an explicitly selected preview without disabling main-only names. */
+    private async syncObservedScenarios(
+        applicationId: string,
+        response: DiscoverResponse,
+        discoveredAt: Date,
+        discoveryId: string,
+    ): Promise<void> {
+        // Only a v2 app has a scenario-name registry to sync. The app's flag decides - not the discover's shape.
+        const app = await this.db.application.findUnique({
+            where: { id: applicationId },
+            select: { protocolVersion: true },
+        });
+        if (normalizeProtocolVersion(app?.protocolVersion) !== "2.0") return;
+
+        const scenarios = (response.scenarios ?? []).map((scenario) => ({
+            name: scenario.name,
+            description: scenario.description,
+        }));
+        await this.scenarioManager.syncScenarioRegistry({
+            applicationId,
+            scenarios,
+            disableMissing: false,
+            discoveredAt,
+            discoveryId,
+        });
+        await reconcileTestPlanScenarios(
+            this.db,
+            applicationId,
+            scenarios.map((scenario) => scenario.name),
+            this.logger,
+        );
+    }
+
+    /** A v2 app must be backed by a v2 endpoint: fail loud if the flag says v2 but discover is v1-shaped. */
+    private async assertExpectedProtocol(
+        applicationId: string,
+        organizationId: string,
+        response: DiscoverResponse,
+    ): Promise<void> {
+        const app = await this.db.application.findUnique({
+            where: { id: applicationId },
+            select: { protocolVersion: true },
+        });
+        if (normalizeProtocolVersion(app?.protocolVersion) === "2.0" && response.scenarios == null) {
+            this.analytics.scenarioProtocolMismatch(applicationId, organizationId);
+            throw new BadRequestError(
+                "This app is set to Scenario v2, but the deployed SDK answered a v1-shaped discover (no scenarios). " +
+                    "Deploy an SDK v2 endpoint (or fix the app's protocol flag) and validate again.",
+            );
+        }
     }
 
     /**

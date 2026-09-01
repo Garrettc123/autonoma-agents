@@ -2,6 +2,7 @@ import {
     PreviewkitEnvFactoryDownInputSchema,
     PreviewkitEnvFactoryOptionsInputSchema,
     PreviewkitEnvFactoryUpInputSchema,
+    ScenarioProtocolVersionSchema,
 } from "@autonoma/types";
 import { z } from "zod";
 import { env } from "../../env";
@@ -102,6 +103,17 @@ export const adminRouter = router({
     repairTrunkPin: internalProcedure
         .input(z.object({ applicationId: z.string().min(1) }))
         .mutation(({ ctx: { services }, input }) => services.github.repairTrunkPin(input.applicationId)),
+
+    /**
+     * Hand-set an application's Scenario protocol (v1/v2). The single source of truth for the wire and
+     * every v1/v2 gate - there is no auto-detection - so only flip it once the app has actually shipped
+     * an SDK endpoint of that protocol.
+     */
+    setApplicationProtocolVersion: internalProcedure
+        .input(z.object({ applicationId: z.string().min(1), version: ScenarioProtocolVersionSchema }))
+        .mutation(({ ctx: { services }, input }) =>
+            services.admin.setApplicationProtocolVersion(input.applicationId, input.version),
+        ),
     /**
      * Resolves the manual Environment Factory options for a preview environment:
      * the linked application's scenarios, the preview's app URLs, and a suggested

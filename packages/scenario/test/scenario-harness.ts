@@ -167,7 +167,7 @@ export class ScenarioTestHarness implements IntegrationHarness {
 
     async createApp(
         organizationId: string,
-        opts?: { webhookUrl?: string; signingSecret?: string },
+        opts?: { webhookUrl?: string; signingSecret?: string; protocolVersion?: string },
     ): Promise<{ appId: string; deploymentId: string }> {
         const signingSecretEnc = opts?.signingSecret != null ? this.encryption.encrypt(opts.signingSecret) : undefined;
 
@@ -179,6 +179,7 @@ export class ScenarioTestHarness implements IntegrationHarness {
                 organizationId,
                 architecture: "WEB",
                 signingSecretEnc,
+                protocolVersion: opts?.protocolVersion,
             },
         });
 

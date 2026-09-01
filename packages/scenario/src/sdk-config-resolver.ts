@@ -2,9 +2,11 @@ import { type PrismaClient, previewkitConfigRowsInclude } from "@autonoma/db";
 import { logger as rootLogger } from "@autonoma/logger";
 import {
     documentFromPreviewkitConfigRows,
+    normalizeProtocolVersion,
     parseStringRecord,
     parseUrl,
     reResolveSdkEndpoint,
+    type ScenarioProtocolVersion,
     type SdkDocumentRoles,
     sdkRolesFromDocument,
 } from "@autonoma/types";
@@ -16,6 +18,8 @@ export interface SdkConfig {
     /** Plain signing secret - already decrypted from the stored encrypted value. */
     signingSecret: string;
     customHeaders?: Record<string, string>;
+    /** The application's hand-set Scenario protocol; always resolved (default "1.0"). Chooses the wire shape. */
+    protocolVersion: ScenarioProtocolVersion;
 }
 
 /**
@@ -39,7 +43,7 @@ export async function resolveSdkConfig(params: {
     const [application, deployment, configuredRoles] = await Promise.all([
         db.application.findUnique({
             where: { id: applicationId },
-            select: { id: true, signingSecretEnc: true, organizationId: true, disabled: true },
+            select: { id: true, signingSecretEnc: true, organizationId: true, disabled: true, protocolVersion: true },
         }),
         db.branchDeployment.findUnique({
             where: { id: deploymentId },
@@ -108,6 +112,7 @@ export async function resolveSdkConfig(params: {
         sdkUrl,
         signingSecret,
         customHeaders,
+        protocolVersion: normalizeProtocolVersion(application.protocolVersion),
     };
 }
 

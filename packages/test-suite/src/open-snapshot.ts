@@ -30,12 +30,14 @@ export interface AdoptTestInput {
     testCaseId: string;
     plan: string;
     scenarioId?: string;
+    scenarioName?: string;
 }
 
 export interface RevisePlanInput {
     testCaseId: string;
     plan: string;
     scenarioId?: string;
+    scenarioName?: string;
 }
 
 export interface RestorePlanInput {

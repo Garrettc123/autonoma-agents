@@ -40,6 +40,9 @@ integrationTestSuite({
         const { appId, deploymentId } = await harness.createApp(orgId, {
             webhookUrl: harness.webhookServer.url,
             signingSecret: SIGNING_SECRET,
+            // The app's hand-set protocol flag is the sole source of truth for the wire. Pin v1 so the
+            // shared recipe-path tests provision directly (this is also the column default).
+            protocolVersion: "1.0",
         });
         const manager = new ScenarioManager(harness.db, harness.encryption);
         const recipeStore = new ScenarioRecipeStore(harness.db);
@@ -86,6 +89,119 @@ integrationTestSuite({
                 select: { scenarioInstanceId: true },
             });
             expect(generation.scenarioInstanceId).toBe(instance.id);
+        });
+
+        test("up v2: provisions by name, stores the teardown token; down sends only the token", async ({
+            harness,
+            seedResult: { orgId, manager },
+        }) => {
+            const { appId, deploymentId } = await harness.createApp(orgId, {
+                webhookUrl: harness.webhookServer.url,
+                signingSecret: SIGNING_SECRET,
+                protocolVersion: "2.0",
+            });
+            harness.webhookServer.onRequest((_req, body) => {
+                const action =
+                    typeof body === "object" && body != null ? (body as { action?: string }).action : undefined;
+                if (action === "down") return { status: 200, body: { ok: true, version: "2.0" } };
+                return {
+                    status: 200,
+                    body: {
+                        auth: { token: "session-v2" },
+                        teardownToken: "teardown-tok-v2",
+                        version: "2.0",
+                    },
+                };
+            });
+
+            // No recipe: a v2 scenario is just a named registry row.
+            const scenarioId = await harness.createScenario(orgId, appId, "checkout");
+            const generationId = await harness.createGeneration(orgId, appId, deploymentId);
+            const subject = new GenerationSubject(harness.db, generationId);
+
+            const instance = await manager.up(subject, scenarioId);
+
+            expect(instance.status).toBe("UP_SUCCESS");
+            expect(instance.recipeVersionId).toBeNull();
+            // The opaque teardown token is stored in its own column; no plaintext refs (or refsToken) for v2.
+            expect(instance.teardownToken).toBe("teardown-tok-v2");
+            expect(instance.refsToken).toBeNull();
+            expect(instance.refs).toBeNull();
+
+            const upRequest = harness.webhookServer.requests.at(-1);
+            expect(upRequest?.body).toMatchObject({ action: "up", scenario: { name: "checkout" } });
+            expect(upRequest?.body).not.toHaveProperty("create");
+
+            // down speaks v2 (from the instance's recorded protocol) and sends only the token.
+            const torn = await manager.down(instance.id);
+            expect(torn?.status).toBe("DOWN_SUCCESS");
+            const downRequest = harness.webhookServer.requests.at(-1);
+            expect(downRequest?.body).toEqual({
+                action: "down",
+                teardownToken: "teardown-tok-v2",
+                testRunId: instance.id,
+            });
+        });
+
+        test("up: an app with no protocol flag provisions v1 by recipe and never probes with a discover", async ({
+            harness,
+            seedResult: { orgId, manager },
+        }) => {
+            // Application.protocolVersion is the only source of truth and defaults to v1; there is no
+            // discover-based detection. An unset flag must take the recipe path and issue exactly one
+            // `up` - never a probing `discover` (a discover here throws, failing the test loudly).
+            const { appId, deploymentId } = await harness.createApp(orgId, {
+                webhookUrl: harness.webhookServer.url,
+                signingSecret: SIGNING_SECRET,
+            });
+            harness.webhookServer.onRequest((_req, body) => {
+                const action =
+                    typeof body === "object" && body != null ? (body as { action?: string }).action : undefined;
+                if (action === "discover") {
+                    throw new Error("unexpected discover: the app flag decides the protocol, not a probe");
+                }
+                return { status: 200, body: { auth: { token: "session-v1" }, refs: {}, refsToken: "ref-tok" } };
+            });
+
+            const scenarioId = await harness.createScenario(orgId, appId, "checkout", {
+                Organization: [{ _alias: "org1", name: "Acme Corp" }],
+            });
+            const generationId = await harness.createGeneration(orgId, appId, deploymentId);
+            const instance = await manager.up(new GenerationSubject(harness.db, generationId), scenarioId);
+
+            expect(instance.status).toBe("UP_SUCCESS");
+            expect(instance.protocolVersion).toBe("1.0");
+            const actions = harness.webhookServer.requests.map(
+                (request) => (request.body as { action?: string }).action,
+            );
+            expect(actions).toEqual(["up"]);
+            expect(harness.webhookServer.requests.at(-1)?.body).toMatchObject({
+                action: "up",
+                create: { Organization: [{ name: "Acme Corp" }] },
+            });
+        });
+
+        test("up v2: fails before teardown when the SDK omits the teardown token", async ({
+            harness,
+            seedResult: { orgId, manager },
+        }) => {
+            const { appId, deploymentId } = await harness.createApp(orgId, {
+                webhookUrl: harness.webhookServer.url,
+                signingSecret: SIGNING_SECRET,
+                protocolVersion: "2.0",
+            });
+            harness.webhookServer.onRequest(() => ({
+                status: 200,
+                body: { auth: { token: "session-v2" }, version: "2.0" },
+            }));
+
+            const scenarioId = await harness.createScenario(orgId, appId, "missing-teardown-token");
+            const generationId = await harness.createGeneration(orgId, appId, deploymentId);
+            const instance = await manager.up(new GenerationSubject(harness.db, generationId), scenarioId);
+
+            expect(instance.status).toBe("UP_FAILED");
+            expect(instance.lastError).toMatchObject({ message: expect.stringContaining("teardownToken") });
+            expect(harness.webhookServer.requests).toHaveLength(1);
         });
 
         test("up: rejects a scenario that belongs to another application", async ({
@@ -454,6 +570,7 @@ integrationTestSuite({
             const { appId, deploymentId } = await harness.createApp(orgId, {
                 webhookUrl: "http://127.0.0.1:1/never-listening",
                 signingSecret: SIGNING_SECRET,
+                protocolVersion: "1.0",
             });
             const scenarioId = await harness.createScenario(orgId, appId, "targeted", {
                 Organization: [{ name: "Acme Corp" }],

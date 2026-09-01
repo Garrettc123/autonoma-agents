@@ -12,6 +12,7 @@ export { type SdkAction, type SdkCallEvent, type SdkCallRecorder, NOOP_RECORDER 
 export { DbSdkCallRecorder } from "./db-sdk-call-recorder";
 export { ScenarioManager } from "./scenario-manager";
 export { ScenarioRecipeStore } from "./scenario-recipe-store";
+export { reconcileTestPlanScenarios } from "./reconcile-test-plan-scenarios";
 export { applyScenarioRecipeUpdate } from "./apply-scenario-recipe-update";
 export type {
     ApplyScenarioRecipeUpdateParams,

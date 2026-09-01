@@ -42,8 +42,9 @@ export interface ApplyScenarioRecipeUpdateResult {
 
 /**
  * Apply a recipe update atomically: overwrite the scenario's active-pointer version and propagate the same recipe
- * to main's active and pending snapshot. This is the single write path for recipe edits - the API's `updateRecipe`
- * (UI) and the investigation agent's autofix both call it, so the mutation logic never diverges.
+ * to main's active and pending snapshot. This is the single write path for recipe edits - its only caller is
+ * `ScenariosService.updateRecipe` (reached from the admin UI editor and the MCP `update_recipe` tool), so the
+ * mutation logic never diverges.
  *
  * Writing main's snapshots is what makes the edit reach production: recipe versions are keyed by
  * `(scenarioId, snapshotId)` and the provisioning path looks a version up by the run's snapshot, never by the

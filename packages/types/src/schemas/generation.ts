@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ScenarioRecipesFileSchema } from "./scenarios";
+import { ScenarioProtocolVersionSchema, ScenarioRecipesFileSchema } from "./scenarios";
 
 export const SetupEventTypeSchema = z.enum([
     "step.started",
@@ -92,6 +92,7 @@ export const UpdateSetupBodySchema = z.object({
     name: z.string().optional(),
     status: z.enum(["completed", "partial_failure", "failed"]).optional(),
     errorMessage: z.string().optional(),
+    protocolVersion: ScenarioProtocolVersionSchema.optional(),
 });
 export type UpdateSetupBody = z.infer<typeof UpdateSetupBodySchema>;
 
@@ -148,6 +149,7 @@ export type ArtifactStatusItem = z.infer<typeof ArtifactStatusItemSchema>;
 
 /** Response shape for `applicationSetups.artifactStatus`. */
 export const ArtifactStatusSchema = z.object({
+    protocolVersion: ScenarioProtocolVersionSchema,
     /** True once a CLI run was marked completed (setup status `completed`). */
     complete: z.boolean(),
     /**

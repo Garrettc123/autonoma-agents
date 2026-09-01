@@ -54,6 +54,54 @@ async function createFixture(harness: APITestHarness, name: string) {
 apiTestSuite({
     name: "scenarios-service",
     cases: (test) => {
+        test("v2 app: recipe surfaces report v2 instead of an empty/404 recipe", async ({ harness }) => {
+            const app = await harness.services.applications.createApplication({
+                name: "Scenario V2 Surfaces",
+                organizationId: harness.organizationId,
+                architecture: ApplicationArchitecture.WEB,
+                url: "https://example.com",
+                file: "s3://bucket/file.png",
+            });
+            if (app.mainBranchId == null) throw new Error("Application has no main branch");
+            // The app's hand-set protocol flag is v2, an active main-branch deployment, and a bare
+            // scenario (no recipe) - so the recipe surfaces must report v2 rather than a 404/empty recipe.
+            await harness.db.application.update({ where: { id: app.id }, data: { protocolVersion: "2.0" } });
+            const deployment = await harness.db.branchDeployment.create({
+                data: {
+                    branchId: app.mainBranchId,
+                    organizationId: harness.organizationId,
+                    active: true,
+                },
+            });
+            await harness.db.branch.update({
+                where: { id: app.mainBranchId },
+                data: { deployment: { connect: { id: deployment.id } } },
+            });
+            const scenario = await harness.db.scenario.create({
+                data: { applicationId: app.id, organizationId: harness.organizationId, name: "standard" },
+            });
+            const svc = harness.services.scenarios;
+
+            const recipe = await svc.getRecipe(app.id, harness.organizationId, scenario.id);
+            expect(recipe.protocol).toBe("2.0");
+            expect(recipe.fixtureJson).toBeNull();
+            expect(recipe.v2Message ?? "").toContain("v2 scenarios");
+
+            await expect(
+                svc.updateRecipe({
+                    applicationId: app.id,
+                    organizationId: harness.organizationId,
+                    scenarioId: scenario.id,
+                    fixtureJson: JSON.stringify(makeRecipe()),
+                    source: "UI",
+                }),
+            ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+            const dry = await svc.dryRun(app.id, harness.organizationId, scenario.id, { recipe: makeRecipe() });
+            expect(dry).toMatchObject({ success: false, phase: "recipe" });
+            expect(dry.error?.message ?? "").toContain("v2 scenarios");
+        });
+
         test("updateRecipe updates the active recipe and scenario metadata", async ({ harness }) => {
             const { service, scenario, app } = await createFixture(harness, "Scenario Recipe Active Update");
             const nextRecipe = makeRecipe({

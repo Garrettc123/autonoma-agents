@@ -36,7 +36,7 @@ interface LoadParams {
 }
 
 interface LoadResult {
-    createPayload: unknown;
+    createPayload: Record<string, unknown>;
     resolvedVariables: Record<string, ScenarioVariableScalar>;
     /** Identity of the version this payload came from, for stamping provenance on the run. */
     recipeVersionId: string;
@@ -226,6 +226,77 @@ export class ScenarioRecipeStore {
             });
             return { scenarioCount: recipesFile.recipes.length, scenarios: ingestedScenarios };
         });
+    }
+
+    /**
+     * Sync the thin scenario registry for a v2 application from a discover response.
+     *
+     * v2 apps carry no recipe - the customer's code owns the data - so the `Scenario` row is just
+     * `{ name, description, isDisabled }`. This mirrors the recipe path's disable-not-delete: names in
+     * the discover are upserted and re-enabled, names absent are disabled (never deleted, so historical
+     * instances stay valid), and a rename is a disable + create. No schema snapshot, no recipe version,
+     * no fingerprint, no edit log - none of that exists in v2.
+     */
+    async syncScenarioRegistry(params: {
+        applicationId: string;
+        scenarios: Array<{ name: string; description: string }>;
+        disableMissing?: boolean;
+        discoveredAt?: Date;
+        discoveryId?: string;
+    }): Promise<{ scenarioCount: number }> {
+        const { applicationId, scenarios, disableMissing = true, discoveryId } = params;
+        this.logger.info("Syncing v2 scenario registry", {
+            applicationId,
+            extra: { scenarioCount: scenarios.length, discoveryId },
+        });
+
+        const application = await this.db.application.findUnique({
+            where: { id: applicationId },
+            select: { organizationId: true },
+        });
+        if (application == null) {
+            throw new Error(`Application ${applicationId} not found`);
+        }
+        const { organizationId } = application;
+        const now = params.discoveredAt ?? new Date();
+        const names = scenarios.map((scenario) => scenario.name);
+
+        await this.db.$transaction(async (tx) => {
+            for (const scenario of scenarios) {
+                await tx.scenario.upsert({
+                    where: { applicationId_name: { applicationId, name: scenario.name } },
+                    create: {
+                        applicationId,
+                        organizationId,
+                        name: scenario.name,
+                        description: scenario.description,
+                        lastDiscoveredAt: now,
+                        discoveryId,
+                        isDisabled: false,
+                    },
+                    update: {
+                        description: scenario.description,
+                        lastDiscoveredAt: now,
+                        discoveryId,
+                        isDisabled: false,
+                    },
+                });
+            }
+
+            if (disableMissing) {
+                await tx.scenario.updateMany({
+                    where: {
+                        applicationId,
+                        isDisabled: false,
+                        ...(names.length > 0 ? { name: { notIn: names } } : {}),
+                    },
+                    data: { isDisabled: true },
+                });
+            }
+        });
+
+        this.logger.info("v2 scenario registry synced", { applicationId, extra: { scenarioCount: names.length } });
+        return { scenarioCount: names.length };
     }
 
     /**

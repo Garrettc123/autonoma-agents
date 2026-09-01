@@ -27,6 +27,9 @@ export default defineConfig({
             // "Invalid URL" anywhere without one - which nothing noticed while it never ran in CI.
             APP_URL: "https://autonoma.app",
             ...config({ path: join(__dirname, "../../.env") }).parsed,
+            GITHUB_APP_PRIVATE_KEY: Buffer.from(
+                "-----BEGIN RSA PRIVATE KEY-----\ntest-only\n-----END RSA PRIVATE KEY-----\n",
+            ).toString("base64"),
             TESTING: "true",
             SENTRY_ENV: "test",
             NAMESPACE: "test",

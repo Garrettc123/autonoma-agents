@@ -85,6 +85,27 @@ describe("observability context", () => {
         });
     });
 
+    it("flattens the application group's protocol flag so telemetry segments v1 vs v2", () => {
+        expect(flattenObservabilityContext({ application: { applicationId: "app1", protocolVersion: "2.0" } })).toEqual(
+            {
+                applicationId: "app1",
+                protocolVersion: "2.0",
+            },
+        );
+        // Optional: an app group with just the id still flattens cleanly.
+        expect(flattenObservabilityContext({ application: { applicationId: "app1" } })).toEqual({
+            applicationId: "app1",
+        });
+    });
+
+    it("pickObservabilityContext lifts the app protocol only alongside its required applicationId", () => {
+        expect(pickObservabilityContext({ applicationId: "app1", protocolVersion: "2.0" })).toEqual({
+            application: { applicationId: "app1", protocolVersion: "2.0" },
+        });
+        // protocolVersion without applicationId is an incomplete application group -> dropped.
+        expect(pickObservabilityContext({ protocolVersion: "2.0" })).toEqual({});
+    });
+
     it("flattens the preview group, omitting an unset headRef", () => {
         expect(flattenObservabilityContext({ preview: { repo: "acme/web", headRef: "fix/login" } })).toEqual({
             repo: "acme/web",

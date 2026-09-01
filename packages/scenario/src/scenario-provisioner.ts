@@ -80,7 +80,7 @@ export async function provisionScenarioInstance(config: ProvisionConfig): Promis
         recorder: NOOP_RECORDER,
     });
 
-    const response = await client.up({ instanceId, create: createPayload }, sdkOptions);
+    const response = await client.up({ protocolVersion: "1.0", instanceId, create: createPayload }, sdkOptions);
 
     provisionLogger.info("Scenario instance provisioned", { applicationId, instanceId });
 
@@ -115,6 +115,7 @@ export async function teardownScenarioInstance(config: TeardownConfig): Promise<
 
     await client.down(
         {
+            protocolVersion: "1.0",
             instanceId,
             refs: config.refs ?? null,
             refsToken,

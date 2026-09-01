@@ -3,6 +3,7 @@ import { logger as rootLogger } from "@autonoma/logger";
 import { GenerationSubject, type ScenarioManager } from "@autonoma/scenario";
 import { SCENARIO_SETUP_FAILURE_TYPE } from "@autonoma/types";
 import { ApplicationFailure } from "@temporalio/activity";
+import { recordScenarioProvisionFailure } from "./scenario-failure-telemetry";
 
 export interface ScenarioUpParams {
     entityId: string;
@@ -36,7 +37,7 @@ export async function scenarioUp(params: ScenarioUpParams, deps: ScenarioUpDeps)
 
     if (instance.status === "UP_FAILED") {
         const lastError = instance.lastError;
-        logger.error("Scenario up failed", { instanceId: instance.id, lastError });
+        recordScenarioProvisionFailure({ instance, phase: "up", logger });
         // Surface the underlying message (e.g. "SDK returned HTTP 500") as the primary message so it flows to the
         // failure panel, and carry the structured `SdkFailure` tag in the ApplicationFailure `details` so the
         // analysis workflow classifies the failure from it rather than re-parsing the string. `details` is empty

@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from "@autonoma/db";
 import type { GitHubApp } from "@autonoma/github";
+import type { ScenarioProtocolVersion } from "@autonoma/types";
 import type { Auth } from "../../auth";
 import { env } from "../../env";
 import { setSessionActiveOrg } from "../auth/set-session-active-org";
@@ -200,6 +201,17 @@ export class AdminService extends Service {
         });
 
         this.logger.info("Org rejected", { orgId });
+    }
+
+    /**
+     * Hand-set an application's Scenario protocol flag. This is the single source of truth the wire and
+     * every v1/v2 gate read - there is no auto-detection - so flip it only once the app has actually shipped
+     * a v2 (or v1) SDK endpoint, or its next provision will fail loudly against the mismatched wire.
+     */
+    async setApplicationProtocolVersion(applicationId: string, version: ScenarioProtocolVersion) {
+        this.logger.info("Setting application Scenario protocol version", { applicationId, extra: { version } });
+        await this.db.application.update({ where: { id: applicationId }, data: { protocolVersion: version } });
+        this.logger.info("Application Scenario protocol version set", { applicationId, extra: { version } });
     }
 
     async createOrg(name: string, slug: string, domain: string) {

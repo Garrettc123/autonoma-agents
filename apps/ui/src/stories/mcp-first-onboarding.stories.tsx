@@ -24,6 +24,7 @@ function makeConfiguringState(): RouterOutputs["onboarding"]["getState"] {
     completedAt: null,
     lastDiscoveryError: null,
     lastDiscoveredAt: null,
+    lastDiscoveryId: null,
     lastDiscoveredModels: null,
     discoveringStartedAt: null,
     dryRunPassedAt: null,

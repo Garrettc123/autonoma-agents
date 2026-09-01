@@ -171,6 +171,12 @@ export const onboardingRouter = router({
             ctx.services.onboarding.listSdkDryRunTargets(input.applicationId, ctx.organizationId),
         ),
 
+    listDiscoveredScenarios: protectedProcedure
+        .input(applicationIdInput)
+        .query(({ ctx, input }) =>
+            ctx.services.onboarding.listDiscoveredScenarios(input.applicationId, ctx.organizationId),
+        ),
+
     redeploySdkDryRunTarget: onboardingWriteProcedure
         .input(z.object({ applicationId: z.string(), targetId: z.string() }))
         .mutation(({ ctx, input }) =>

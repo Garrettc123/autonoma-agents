@@ -1,5 +1,6 @@
 import { logger as rootLogger } from "@autonoma/logger";
 import type { ScenarioManager } from "@autonoma/scenario";
+import { recordScenarioProvisionFailure } from "./scenario-failure-telemetry";
 
 export interface ScenarioDownParams {
     scenarioInstanceId: string;
@@ -23,7 +24,7 @@ export async function scenarioDown(params: ScenarioDownParams, deps: ScenarioDow
     }
 
     if (instance.status === "DOWN_FAILED") {
-        logger.error("Scenario down failed", { instanceId: instance.id, lastError: instance.lastError });
+        recordScenarioProvisionFailure({ instance, phase: "down", logger });
         throw new Error(
             `Scenario down failed: instanceId=${instance.id}, lastError=${JSON.stringify(instance.lastError)}`,
         );

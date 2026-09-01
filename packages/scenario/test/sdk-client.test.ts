@@ -214,7 +214,8 @@ describe("SdkClient (DB-free)", () => {
         let callCount = 0;
         server.onRequest(() => {
             callCount += 1;
-            return { status: 200, body: { invalid: true } };
+            // `scenarios` must be an array of { name, description } when present; a string fails the schema.
+            return { status: 200, body: { scenarios: "not-an-array" } };
         });
 
         await expect(client.discover({ timeoutMs: 5_000 })).rejects.toThrow("response validation failed");
@@ -344,6 +345,7 @@ integrationTestSuite({
             const instanceId = await harness.createScenarioInstance(orgId, appId, "checkout", "REQUESTED");
 
             const result = await client.up({
+                protocolVersion: "1.0",
                 instanceId,
                 create: { Organization: [{ _alias: "org1", name: "Acme Corp" }] },
             });
@@ -366,6 +368,7 @@ integrationTestSuite({
             const instanceId = await harness.createScenarioInstance(orgId, appId, "checkout-down", "UP_SUCCESS");
 
             const result = await client.down({
+                protocolVersion: "1.0",
                 instanceId,
                 refs: { userId: "u1" },
                 refsToken: "tok-1",
@@ -379,4 +382,60 @@ integrationTestSuite({
             });
         });
     },
+});
+
+describe("SdkClient v2 wire shape (DB-free)", () => {
+    let server: TestServer;
+    let client: SdkClient;
+
+    beforeAll(async () => {
+        server = new TestServer();
+        await server.start();
+    });
+
+    afterAll(async () => {
+        await server.stop();
+    });
+
+    beforeEach(() => {
+        server.reset();
+        client = new SdkClient({ applicationId: "app-1", sdkUrl: server.url, signingSecret: SIGNING_SECRET });
+    });
+
+    it("up v2 sends { scenario: { name }, testRunId } and no create graph", async () => {
+        server.onRequest(() => ({ status: 200, body: { teardownToken: "ttok", version: "2.0" } }));
+
+        await client.up({ protocolVersion: "2.0", instanceId: "inst-1", scenarioName: "checkout" });
+
+        expect(server.requests[0]?.body).toEqual({
+            action: "up",
+            scenario: { name: "checkout" },
+            testRunId: "inst-1",
+        });
+    });
+
+    it("up v1 still sends the create graph", async () => {
+        server.onRequest(() => ({ status: 200, body: {} }));
+
+        await client.up({ protocolVersion: "1.0", instanceId: "inst-2", create: { User: [{ name: "A" }] } });
+
+        expect(server.requests[0]?.body).toEqual({
+            action: "up",
+            create: { User: [{ name: "A" }] },
+            testRunId: "inst-2",
+        });
+    });
+
+    it("down v2 sends only the teardown token (no plaintext refs or scenario); v1 sends refs", async () => {
+        server.onRequest(() => ({ status: 200, body: { ok: true } }));
+
+        await client.down({ protocolVersion: "2.0", instanceId: "inst-3", teardownToken: "ttok" });
+        expect(server.requests[0]?.body).toEqual({ action: "down", teardownToken: "ttok", testRunId: "inst-3" });
+
+        server.reset();
+        server.onRequest(() => ({ status: 200, body: { ok: true } }));
+        await client.down({ protocolVersion: "1.0", instanceId: "inst-4", refs: { a: 1 }, refsToken: "t" });
+        expect(server.requests[0]?.body).toMatchObject({ action: "down", refs: { a: 1 }, refsToken: "t" });
+        expect(server.requests[0]?.body).not.toHaveProperty("teardownToken");
+    });
 });

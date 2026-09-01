@@ -10,8 +10,9 @@ import { sentryServiceInterceptor } from "./sentry-service-interceptor";
 
 /**
  * Activities run concurrently PER POD, and this queue is memory-bound rather than CPU-bound: every concurrent
- * `scenarioUp` resolves its OWN copy of the scenario recipe (ScenarioRecipeStore.loadRecipePayload does not
- * cache, so activities sharing a scenarioId still each hold a resolved `fixtureJson`), on top of the off-heap
+ * `scenarioUp` on a v1 app resolves its OWN copy of the scenario recipe (ScenarioRecipeStore.loadRecipePayload
+ * does not cache, so activities sharing a scenarioId still each hold a resolved `fixtureJson`; v2 apps provision
+ * by name and hold no recipe payload, so they are lighter), on top of the off-heap
  * SDK request buffers. At 10, a snapshot fanning out many singleGenerationWorkflow runs at once drove the pod
  * from a ~500MiB baseline to ~1.0GiB and it was OOMKilled against its 1Gi limit mid-activity. Throughput here
  * comes from replicas, not from per-pod concurrency - KEDA scales this deployment on `general` queue depth up

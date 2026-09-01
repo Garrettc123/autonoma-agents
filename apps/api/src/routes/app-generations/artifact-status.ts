@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@autonoma/db";
 import { type ArtifactStatus, type ArtifactStatusItem, FileDataSchema } from "@autonoma/types";
+import { resolveAppProtocol } from "../onboarding/setup-protocol";
 import { artifactEventWhere } from "./artifact-file-events";
 import { areArtifactsComplete } from "./artifacts-complete";
 
@@ -8,11 +9,8 @@ import { areArtifactsComplete } from "./artifacts-complete";
  * onboarding Setup status endpoint and the onboarding state's `artifactsUploaded`
  * so the step-2 header, the per-item checks, and the bottom banner stay in sync.
  *
- * Status is aggregated across ALL of the app's setups, not just the newest one, so
- * an empty or stale setup can never shadow a completed CLI run and blank the checks
- * on refresh. `complete` is true once ANY setup was marked `completed`, and an
- * artifact counts as received once ANY setup produced it. The recipe is app-scoped
- * already (derived from active scenario recipe versions, not from a specific setup).
+ * Artifact receipt remains app-wide so a retry can reuse earlier uploads, while the
+ * latest non-failed setup selects the protocol and owns the completion signal.
  */
 export async function computeArtifactStatus(
     db: PrismaClient,
@@ -23,11 +21,8 @@ export async function computeArtifactStatus(
     // probe is an existence check or a targeted fetch; the recipe is a plain count of active scenario
     // recipe versions. Which events carry which artifact comes from `artifactEventWhere`, shared with
     // the Finish setup gate so the two cannot look in different places.
-    const [completedSetup, kbEvent, scenariosEvent, testEvents, scenarioCount] = await Promise.all([
-        db.applicationSetup.findFirst({
-            where: { applicationId, organizationId, status: "completed" },
-            select: { id: true },
-        }),
+    const [setup, kbEvent, scenariosEvent, testEvents, scenarioCount] = await Promise.all([
+        resolveAppProtocol(db, applicationId, { organizationId }),
         db.applicationSetupEvent.findFirst({
             where: artifactEventWhere(applicationId, "kb", organizationId),
             select: { id: true },
@@ -45,7 +40,7 @@ export async function computeArtifactStatus(
         }),
     ]);
 
-    const complete = completedSetup != null;
+    const { protocolVersion, setupCompleted: complete } = setup;
     const hasKb = kbEvent != null;
     const hasScenarios = scenariosEvent != null;
     // Dedupe across setups: the same file can be recorded under more than one setup
@@ -57,22 +52,30 @@ export async function computeArtifactStatus(
         }),
     ).size;
 
-    const artifacts: ArtifactStatusItem[] = [
-        {
-            key: "recipe",
-            received: scenarioCount > 0,
-            meta: scenarioCount > 0 ? `${scenarioCount} scenario${scenarioCount === 1 ? "" : "s"}` : undefined,
-        },
+    const sharedArtifacts: ArtifactStatusItem[] = [
         {
             key: "tests",
             received: testCount > 0,
             meta: testCount > 0 ? `${testCount} file${testCount === 1 ? "" : "s"}` : undefined,
         },
         { key: "kb", received: hasKb },
-        { key: "scenarios", received: hasScenarios },
     ];
+    const artifacts: ArtifactStatusItem[] =
+        protocolVersion === "2.0"
+            ? sharedArtifacts
+            : [
+                  {
+                      key: "recipe",
+                      received: scenarioCount > 0,
+                      meta:
+                          scenarioCount > 0 ? `${scenarioCount} scenario${scenarioCount === 1 ? "" : "s"}` : undefined,
+                  },
+                  ...sharedArtifacts,
+                  { key: "scenarios", received: hasScenarios },
+              ];
 
     const stepComplete = areArtifactsComplete({
+        protocolVersion,
         setupCompleted: complete,
         hasRecipe: scenarioCount > 0,
         hasTests: testCount > 0,
@@ -80,5 +83,5 @@ export async function computeArtifactStatus(
         hasScenarios,
     });
 
-    return { complete, stepComplete, artifacts };
+    return { protocolVersion, complete, stepComplete, artifacts };
 }

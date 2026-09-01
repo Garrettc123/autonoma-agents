@@ -24,6 +24,7 @@ export async function loadSnapshotObservabilityContext(snapshotId: string): Prom
                     id: true,
                     organizationId: true,
                     applicationId: true,
+                    application: { select: { protocolVersion: true } },
                     prInfo: { select: { prNumber: true } },
                 },
             },
@@ -38,10 +39,15 @@ export async function loadSnapshotObservabilityContext(snapshotId: string): Prom
     if (snapshot.prevSnapshotId != null) snapshotGroup.prevSnapshotId = snapshot.prevSnapshotId;
     if (snapshot.branch.prInfo != null) snapshotGroup.prNumber = snapshot.branch.prInfo.prNumber;
 
+    const applicationGroup: ObservabilityContext["application"] = { applicationId: snapshot.branch.applicationId };
+    if (snapshot.branch.application?.protocolVersion != null) {
+        applicationGroup.protocolVersion = snapshot.branch.application.protocolVersion;
+    }
+
     return {
         snapshot: snapshotGroup,
         branch: { branchId: snapshot.branch.id },
-        application: { applicationId: snapshot.branch.applicationId },
+        application: applicationGroup,
         organization: { organizationId: snapshot.branch.organizationId },
     };
 }

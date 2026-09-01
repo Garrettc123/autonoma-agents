@@ -72,7 +72,9 @@ integrationTestSuite({
     createHarness: () => OnboardingTestHarness.create(),
     seed: async (harness) => {
         const orgId = await harness.createOrg();
-        const manager = new OnboardingManager(harness.db, fakeScenarioManager, fakeEncryption);
+        const scenarioManager = new ScenarioManager(harness.db, fakeEncryption);
+        vi.spyOn(scenarioManager, "discover").mockResolvedValue(DISCOVER_RESPONSE);
+        const manager = new OnboardingManager(harness.db, scenarioManager, fakeEncryption);
         return { orgId, manager, createApp: () => harness.createApp(orgId) };
     },
     cases: (test) => {
@@ -1355,6 +1357,211 @@ integrationTestSuite({
             ).rejects.toThrow(OnboardingApplicationNotFoundError);
         });
 
+        test("Scenario v2 discovery fails loudly when the app flag is v2 but the endpoint answers a v1-shaped discover", async ({
+            harness,
+            seedResult: { orgId, manager, createApp },
+        }) => {
+            const appId = await createApp();
+            // Hand-set the app to Scenario v2 (what the planner mirror / admin toggle write). The live
+            // endpoint still answers a v1-shaped discover (no `scenarios`), so the guardrail must reject
+            // rather than silently provision against a mismatched wire.
+            await harness.db.application.update({ where: { id: appId }, data: { protocolVersion: "2.0" } });
+            vi.stubGlobal(
+                "fetch",
+                vi.fn(
+                    async () =>
+                        new Response(JSON.stringify(DISCOVER_RESPONSE), {
+                            status: 200,
+                            headers: { "content-type": "application/json" },
+                        }),
+                ),
+            );
+
+            try {
+                await expect(
+                    manager.configureAndDiscoverScenarios(
+                        appId,
+                        orgId,
+                        "https://preview.example.com/api/autonoma",
+                        "shared-secret",
+                    ),
+                ).rejects.toThrow(/set to Scenario v2.*v1-shaped discover/);
+
+                const state = await harness.db.onboardingState.findUniqueOrThrow({ where: { applicationId: appId } });
+                expect(state.lastDiscoveredAt).toBeNull();
+            } finally {
+                vi.unstubAllGlobals();
+            }
+        });
+
+        test("Scenario v2 preview discovery stamps one batch and exposes its scenario names", async ({
+            harness,
+            seedResult: { orgId, manager, createApp },
+        }) => {
+            const appId = await createApp();
+            // The registry only syncs for a v2-flagged app; hand-set the flag as onboarding would.
+            await harness.db.application.update({ where: { id: appId }, data: { protocolVersion: "2.0" } });
+            vi.stubGlobal(
+                "fetch",
+                vi.fn(
+                    async () =>
+                        new Response(
+                            JSON.stringify({
+                                version: "2.0",
+                                scenarios: [
+                                    { name: "admin-catalog", description: "Administrator catalog state" },
+                                    { name: "billing-owner", description: "Billing owner state" },
+                                ],
+                            }),
+                            { status: 200, headers: { "content-type": "application/json" } },
+                        ),
+                ),
+            );
+
+            try {
+                await manager.configureAndDiscoverScenarios(
+                    appId,
+                    orgId,
+                    "https://preview.example.com/api/autonoma",
+                    "shared-secret",
+                );
+
+                const scenarios = await manager.listDiscoveredScenarios(appId, orgId);
+                expect(scenarios.map((scenario) => scenario.name)).toEqual(["admin-catalog", "billing-owner"]);
+                expect(scenarios[0]?.lastDiscoveredAt).not.toBeNull();
+                expect(scenarios[0]?.lastDiscoveredAt).toEqual(scenarios[1]?.lastDiscoveredAt);
+                expect(scenarios.every((scenario) => scenario.activeRecipeVersionId == null)).toBe(true);
+            } finally {
+                vi.unstubAllGlobals();
+            }
+        });
+
+        test("discovery does not sync a registry for a v1-flagged app even when the endpoint answers v2-shaped", async ({
+            seedResult: { orgId, manager, createApp },
+        }) => {
+            // The app flag - not the discover shape - decides whether there is a v2 registry to sync.
+            // A default (v1) app whose endpoint happens to answer a v2-shaped discover must NOT get a
+            // scenario registry: the operator has to flip the flag first. (The guardrail only guards the
+            // opposite direction - flag v2, endpoint v1 - so this discover succeeds, it just syncs nothing.)
+            const appId = await createApp();
+            vi.stubGlobal(
+                "fetch",
+                vi.fn(
+                    async () =>
+                        new Response(
+                            JSON.stringify({
+                                version: "2.0",
+                                scenarios: [{ name: "admin-catalog", description: "Administrator catalog state" }],
+                            }),
+                            { status: 200, headers: { "content-type": "application/json" } },
+                        ),
+                ),
+            );
+
+            try {
+                await manager.configureAndDiscoverScenarios(
+                    appId,
+                    orgId,
+                    "https://preview.example.com/api/autonoma",
+                    "shared-secret",
+                );
+
+                expect(await manager.listDiscoveredScenarios(appId, orgId)).toEqual([]);
+            } finally {
+                vi.unstubAllGlobals();
+            }
+        });
+
+        test("a v2 main redeploy re-syncs the registry without dropping scenarios from the live batch", async ({
+            harness,
+            seedResult: { orgId, createApp },
+        }) => {
+            const appId = await createApp();
+            await linkRepository(harness, appId, 91_161);
+            const discoveredAt = new Date(Date.now() - 5 * 60 * 1000);
+            const discoveryId = "disc-batch-redeploy";
+            // A completed v2 app: the app's protocol flag set to 2.0, the onboarding discovery batch stamped
+            // with `discoveryId`, and two scenarios already in that batch.
+            await harness.db.application.update({
+                where: { id: appId },
+                data: { protocolVersion: "2.0" },
+            });
+            await harness.db.onboardingState.update({
+                where: { applicationId: appId },
+                data: {
+                    step: "completed",
+                    previewEnvironmentMode: "existing_deploys",
+                    lastDiscoveredAt: discoveredAt,
+                    lastDiscoveryId: discoveryId,
+                },
+            });
+            const user = await harness.db.user.create({
+                data: { name: "Redeploy User", email: `redeploy-${appId}@example.com` },
+            });
+            await harness.db.applicationSetup.create({
+                data: {
+                    applicationId: appId,
+                    organizationId: orgId,
+                    userId: user.id,
+                    status: "completed",
+                    protocolVersion: "2.0",
+                },
+            });
+            await harness.db.scenario.createMany({
+                data: [
+                    {
+                        applicationId: appId,
+                        organizationId: orgId,
+                        name: "checkout",
+                        description: "Checkout",
+                        lastDiscoveredAt: discoveredAt,
+                        discoveryId,
+                    },
+                    {
+                        applicationId: appId,
+                        organizationId: orgId,
+                        name: "signup",
+                        description: "Signup",
+                        lastDiscoveredAt: discoveredAt,
+                        discoveryId,
+                    },
+                ],
+            });
+
+            const scenarioManager = new ScenarioManager(harness.db, fakeEncryption);
+            vi.spyOn(scenarioManager, "discover").mockResolvedValue({
+                version: "2.0",
+                scenarios: [
+                    { name: "checkout", description: "Checkout" },
+                    { name: "signup", description: "Signup" },
+                ],
+            });
+            const diffsTrigger = {
+                triggerMainDiffs: vi.fn(async () => ({ snapshotId: "main-snap" })),
+                triggerPrDiffs: vi.fn(async () => ({ snapshotId: "pr-snap" })),
+            };
+            const manager = new OnboardingManager(harness.db, scenarioManager, fakeEncryption, { diffsTrigger });
+
+            expect(
+                (await manager.listDiscoveredScenarios(appId, orgId)).map((scenario) => scenario.name).sort(),
+            ).toEqual(["checkout", "signup"]);
+
+            const bodyText = deploymentSignalBody(appId, "https://main-redeploy.example.com");
+            await manager.acceptDeploymentSignal({
+                bodyText,
+                signature: deploymentSignalSignature(bodyText, "shared-secret"),
+            });
+
+            // The redeploy re-syncs against the same discovery batch, so the scenarios stay in it: the sync
+            // reuses `onboardingState.lastDiscoveredAt` rather than stamping `now`, which would advance them
+            // past the batch and empty the discovered list (regressing an already-completed setup).
+            const after = await manager.listDiscoveredScenarios(appId, orgId);
+            expect(after.map((scenario) => scenario.name).sort()).toEqual(["checkout", "signup"]);
+            expect(after.every((scenario) => scenario.lastDiscoveredAt?.getTime() === discoveredAt.getTime())).toBe(
+                true,
+            );
+        });
+
         test("external signal status reports nothing received before the first signal", async ({
             harness,
             seedResult: { manager, createApp, orgId },
@@ -2585,6 +2792,101 @@ integrationTestSuite({
             });
             const complete = await manager.getState(appId);
             expect(complete.artifactsUploaded).toBe(true);
+            expect(complete.setupComplete).toBe(true);
+        });
+
+        test("Scenario v2 stays incomplete until its latest discovered batch tears down successfully", async ({
+            harness,
+            seedResult: { orgId, manager, createApp },
+        }) => {
+            const appId = await createApp();
+            // The app's hand-set flag is what classifies the state as v2 (tests + kb, no recipe/scenarios).
+            await harness.db.application.update({ where: { id: appId }, data: { protocolVersion: "2.0" } });
+            const user = await harness.db.user.create({
+                data: { name: "Scenario V2 User", email: `scenario-v2-${appId}@example.com` },
+            });
+            const setup = await harness.db.applicationSetup.create({
+                data: {
+                    applicationId: appId,
+                    organizationId: orgId,
+                    userId: user.id,
+                    protocolVersion: "2.0",
+                    status: "completed",
+                },
+            });
+            await harness.db.applicationSetupEvent.createMany({
+                data: [
+                    { setupId: setup.id, type: "file.created", data: { filePath: "autonoma/qa-tests/catalog.md" } },
+                    { setupId: setup.id, type: "file.created", data: { filePath: "AUTONOMA.md" } },
+                ],
+            });
+
+            const beforeDiscovery = await manager.getState(appId);
+            expect(beforeDiscovery.artifactsUploaded).toBe(true);
+            expect(beforeDiscovery.sdkConfigured).toBe(false);
+            expect(beforeDiscovery.dryRunPassed).toBe(false);
+            expect(beforeDiscovery.setupComplete).toBe(false);
+
+            const discoveredAt = new Date("2026-08-21T12:00:00.000Z");
+            const discoveryId = "disc-batch-admin";
+            await harness.db.onboardingState.update({
+                where: { applicationId: appId },
+                data: { lastDiscoveredAt: discoveredAt, lastDiscoveryId: discoveryId },
+            });
+            const endpointDiscoveredWithoutScenarios = await manager.getState(appId);
+            expect(endpointDiscoveredWithoutScenarios.sdkConfigured).toBe(true);
+            expect(endpointDiscoveredWithoutScenarios.dryRunPassed).toBe(false);
+            expect(endpointDiscoveredWithoutScenarios.setupComplete).toBe(false);
+
+            const scenario = await harness.db.scenario.create({
+                data: {
+                    applicationId: appId,
+                    organizationId: orgId,
+                    name: "admin-catalog",
+                    lastDiscoveredAt: discoveredAt,
+                    discoveryId,
+                },
+            });
+            await harness.db.scenarioInstance.create({
+                data: {
+                    applicationId: appId,
+                    organizationId: orgId,
+                    scenarioId: scenario.id,
+                    protocolVersion: "2.0",
+                    status: "DOWN_SUCCESS",
+                    createdAt: new Date("2026-08-21T11:59:00.000Z"),
+                },
+            });
+
+            const discovered = await manager.getState(appId);
+            expect(discovered.sdkConfigured).toBe(true);
+            expect(discovered.dryRunPassed).toBe(false);
+            expect(discovered.setupComplete).toBe(false);
+
+            await harness.db.scenarioInstance.create({
+                data: {
+                    applicationId: appId,
+                    organizationId: orgId,
+                    scenarioId: scenario.id,
+                    protocolVersion: "2.0",
+                    status: "DOWN_FAILED",
+                    createdAt: new Date("2026-08-21T12:01:00.000Z"),
+                },
+            });
+            expect((await manager.getState(appId)).dryRunPassed).toBe(false);
+
+            await harness.db.scenarioInstance.create({
+                data: {
+                    applicationId: appId,
+                    organizationId: orgId,
+                    scenarioId: scenario.id,
+                    protocolVersion: "2.0",
+                    status: "DOWN_SUCCESS",
+                    createdAt: new Date("2026-08-21T12:02:00.000Z"),
+                },
+            });
+            const complete = await manager.getState(appId);
+            expect(complete.dryRunPassed).toBe(true);
             expect(complete.setupComplete).toBe(true);
         });
 

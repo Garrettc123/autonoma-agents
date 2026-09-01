@@ -456,6 +456,7 @@ const chromeFixtures: TrpcFixtures = {
       completedAt: FIXTURE_EPOCH,
       lastDiscoveryError: null,
       lastDiscoveredAt: FIXTURE_EPOCH,
+      lastDiscoveryId: null,
       lastDiscoveredModels: 12,
       discoveringStartedAt: null,
       dryRunPassedAt: FIXTURE_EPOCH,

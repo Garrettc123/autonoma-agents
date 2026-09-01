@@ -235,6 +235,10 @@ model OnboardingState {
   completedAt               DateTime?                           @map("completed_at")
   lastDiscoveryError        String?                             @map("last_discovery_error")
   lastDiscoveredAt          DateTime?                           @map("last_discovered_at")
+  // Identity of the discovery batch this onboarding recorded. v2 scenarios pin to a
+  // batch by `Scenario.discoveryId == this`; an explicit key replaces the earlier
+  // exact-timestamp-equality join. Null before the first v2 discover.
+  lastDiscoveryId           String?                             @map("last_discovery_id")
   lastDiscoveredModels      Int?                                @map("last_discovered_models")
   discoveringStartedAt      DateTime?                           @map("discovering_started_at")
   // SDK dry-run succeeded (a capability tracked outside the linear `step` so it
@@ -288,13 +292,14 @@ enum OnboardingAgentHolder {
 // ─── Application Setup ──────────────────────────────────────────────
 
 model ApplicationSetup {
-  id           String    @id @default(cuid())
-  name         String?
-  status       String    @default("running")
-  currentStep  Int       @default(0) @map("current_step")
-  totalSteps   Int       @default(5) @map("total_steps")
-  errorMessage String?   @map("error_message")
-  completedAt  DateTime? @map("completed_at")
+  id              String    @id @default(cuid())
+  name            String?
+  status          String    @default("running")
+  currentStep     Int       @default(0) @map("current_step")
+  totalSteps      Int       @default(5) @map("total_steps")
+  errorMessage    String?   @map("error_message")
+  completedAt     DateTime? @map("completed_at")
+  protocolVersion String    @default("1.0") @map("protocol_version")
 
   applicationId  String       @map("application_id")
   application    Application  @relation(fields: [applicationId], references: [id], onDelete: Cascade)
@@ -411,6 +416,11 @@ model Application {
   previewDeployRef String? @map("preview_deploy_ref")
 
   signingSecretEnc String? @map("signing_secret_enc")
+
+  /// Scenario SDK protocol this app speaks ("1.0" | "2.0"). Hand-set: the planner declares it at
+  /// onboarding and an operator can flip it in admin - there is no auto-detection. Single source of
+  /// truth for the wire and every v1/v2 gate. Default "1.0" (the installed base is v1).
+  protocolVersion String @default("1.0") @map("protocol_version")
 
   folders                  Folder[]
   testCases                TestCase[]
@@ -1281,6 +1291,10 @@ model Scenario {
 
   lastSeenFingerprint  String?   @map("last_seen_fingerprint")
   lastDiscoveredAt     DateTime? @map("last_discovered_at")
+  // The discovery batch (`OnboardingState.lastDiscoveryId`) this scenario was last
+  // seen in. A v2 scenario is "in the live batch" iff this equals the onboarding's
+  // recorded id. Null for v1 scenarios (which pin via activeRecipeVersionId instead).
+  discoveryId          String?   @map("discovery_id")
   fingerprintChangedAt DateTime? @map("fingerprint_changed_at")
   isDisabled           Boolean   @default(false) @map("is_disabled")
 
@@ -1412,6 +1426,9 @@ model ScenarioInstance {
   /// [ScenarioRefs]
   refs              Json?
   refsToken         String? @map("refs_token")
+  /// v2-only opaque teardown token returned by `up`, handed back verbatim at `down`. Distinct from
+  /// the v1 `refsToken` so a reader never has to consult `protocolVersion` to know which column means what.
+  teardownToken     String? @map("teardown_token")
   /// [ScenarioMetadata]
   metadata          Json?
   /// [ScenarioGeneratedData]
@@ -1420,6 +1437,11 @@ model ScenarioInstance {
   lastError         Json?   @map("last_error")
   /// [ScenarioResolvedVariables]
   resolvedVariables Json?   @map("resolved_variables")
+
+  /// The SDK protocol version this instance was provisioned with ("1.0" | "2.0"), captured at `up`
+  /// so `down` speaks the same wire shape even when the deployment row was never (or has since been)
+  /// updated - e.g. a dry-run against an overridden endpoint. Null on rows created before this field.
+  protocolVersion String? @map("protocol_version")
 
   deploymentId String?           @map("deployment_id")
   deployment   BranchDeployment? @relation(fields: [deploymentId], references: [id], onDelete: SetNull)

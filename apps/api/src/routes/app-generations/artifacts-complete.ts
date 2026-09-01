@@ -1,5 +1,8 @@
+import type { ScenarioProtocolVersion } from "@autonoma/types";
+
 /** Whether each artifact a planner run must produce has landed, plus whether the run itself finished. */
 export interface ArtifactSignals {
+    protocolVersion: ScenarioProtocolVersion;
     setupCompleted: boolean;
     hasRecipe: boolean;
     hasTests: boolean;
@@ -18,5 +21,7 @@ export interface ArtifactSignals {
  * the two can only ever disagree about the signals, never about what completion means.
  */
 export function areArtifactsComplete(signals: ArtifactSignals): boolean {
-    return signals.setupCompleted && signals.hasRecipe && signals.hasTests && signals.hasKb && signals.hasScenarios;
+    if (!signals.setupCompleted || !signals.hasTests || !signals.hasKb) return false;
+    if (signals.protocolVersion === "2.0") return true;
+    return signals.hasRecipe && signals.hasScenarios;
 }

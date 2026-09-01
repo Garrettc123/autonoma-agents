@@ -32,6 +32,7 @@ function makeOnboardingState(): RouterOutputs["onboarding"]["getState"] {
     completedAt: FIXTURE_EPOCH,
     lastDiscoveryError: null,
     lastDiscoveredAt: null,
+    lastDiscoveryId: null,
     lastDiscoveredModels: null,
     discoveringStartedAt: null,
     dryRunPassedAt: null,
@@ -75,6 +76,7 @@ function makeSdkValidatedState(): RouterOutputs["onboarding"]["getState"] {
     ...makeOnboardingState(),
     sdkConfigured: true,
     lastDiscoveredAt: FIXTURE_EPOCH,
+    lastDiscoveryId: null,
     lastDiscoveredModels: 12,
   };
 }
@@ -106,6 +108,7 @@ const agentHeldSession: RouterOutputs["onboarding"]["getAgentSession"] = {
 };
 
 const artifactStatus: RouterOutputs["applicationSetups"]["artifactStatus"] = {
+  protocolVersion: "1.0",
   complete: true,
   stepComplete: true,
   artifacts: [
@@ -117,6 +120,7 @@ const artifactStatus: RouterOutputs["applicationSetups"]["artifactStatus"] = {
 };
 
 const pendingArtifactStatus: RouterOutputs["applicationSetups"]["artifactStatus"] = {
+  protocolVersion: "1.0",
   complete: false,
   stepComplete: false,
   artifacts: [
@@ -124,6 +128,16 @@ const pendingArtifactStatus: RouterOutputs["applicationSetups"]["artifactStatus"
     { key: "tests", received: false },
     { key: "kb", received: false },
     { key: "scenarios", received: false },
+  ],
+};
+
+const v2ArtifactStatus: RouterOutputs["applicationSetups"]["artifactStatus"] = {
+  protocolVersion: "2.0",
+  complete: true,
+  stepComplete: true,
+  artifacts: [
+    { key: "tests", received: true, meta: "14 files" },
+    { key: "kb", received: true },
   ],
 };
 
@@ -419,7 +433,7 @@ function artifactsStepFixtures(): TrpcFixtures {
  * inherits the SDK step's target read-only, so no target picker fixture is
  * needed beyond the same `listSdkDryRunTargets`.
  */
-const scenarioList: RouterOutputs["scenarios"]["list"] = [
+const scenarioList: RouterOutputs["onboarding"]["listDiscoveredScenarios"] = [
   {
     id: "scenario_standard",
     applicationId: baseApplication.id,
@@ -428,6 +442,7 @@ const scenarioList: RouterOutputs["scenarios"]["list"] = [
     activeRecipeVersionId: "recipe_version_standard",
     lastSeenFingerprint: null,
     lastDiscoveredAt: FIXTURE_EPOCH,
+    discoveryId: null,
     fingerprintChangedAt: null,
     isDisabled: false,
     createdAt: FIXTURE_EPOCH,
@@ -436,11 +451,29 @@ const scenarioList: RouterOutputs["scenarios"]["list"] = [
   },
 ];
 
+const v2ScenarioList: RouterOutputs["onboarding"]["listDiscoveredScenarios"] = [
+  {
+    ...scenarioList[0]!,
+    id: "scenario_admin_catalog",
+    name: "admin-catalog",
+    description: "Administrator with a catalog product ready to update.",
+    activeRecipeVersionId: null,
+  },
+  {
+    ...scenarioList[0]!,
+    id: "scenario_billing_owner",
+    name: "billing-owner",
+    description: "Workspace owner with an active paid subscription.",
+    activeRecipeVersionId: null,
+  },
+];
+
 function makeDryRunState(): RouterOutputs["onboarding"]["getState"] {
   return {
     ...makeOnboardingState(),
     sdkConfigured: true,
     lastDiscoveredAt: FIXTURE_EPOCH,
+    lastDiscoveryId: null,
     lastDiscoveredModels: 2,
     dryRunPassed: false,
   };
@@ -452,10 +485,39 @@ function dryRunStepFixtures(targets: SdkDryRunTargets): TrpcFixtures {
       getAgentSession: humanHeldSession,
       getState: makeDryRunState(),
       listSdkDryRunTargets: targets,
+      listDiscoveredScenarios: scenarioList,
     },
     applicationSetups: { artifactStatus },
     applications: { list: [baseApplication] },
-    scenarios: { list: scenarioList },
+    ...sidebarFixtures,
+  };
+}
+
+function v2DryRunFixtures(
+  result: RouterOutputs["onboarding"]["runScenarioDryRun"] = {
+    success: true,
+    phase: "down",
+    error: undefined,
+  },
+  completed = false,
+): TrpcFixtures {
+  const state = {
+    ...makeDryRunState(),
+    lastDiscoveryId: null,
+    lastDiscoveredModels: 2,
+    dryRunPassed: completed,
+    setupComplete: completed,
+  };
+  return {
+    onboarding: {
+      getAgentSession: humanHeldSession,
+      getState: state,
+      listSdkDryRunTargets: readyTargets,
+      listDiscoveredScenarios: v2ScenarioList,
+      runScenarioDryRun: result,
+    },
+    applicationSetups: { artifactStatus: v2ArtifactStatus },
+    applications: { list: [baseApplication] },
     ...sidebarFixtures,
   };
 }
@@ -468,9 +530,13 @@ function dryRunStepFixtures(targets: SdkDryRunTargets): TrpcFixtures {
 function sdkValidatedFixtures(
   session: RouterOutputs["onboarding"]["getAgentSession"] = humanHeldSession,
 ): TrpcFixtures {
+  const fixtures = sdkStepFixtures(readyTargets, makeSdkValidatedState(), session);
   return {
-    ...sdkStepFixtures(readyTargets, makeSdkValidatedState(), session),
-    scenarios: { list: scenarioList },
+    ...fixtures,
+    onboarding: {
+      ...fixtures.onboarding,
+      listDiscoveredScenarios: scenarioList,
+    },
   };
 }
 
@@ -567,6 +633,35 @@ export const ArtifactsStepComplete: Story = {
   },
 };
 
+/** Scenario v2 has no recipe or scenarios artifact; its CLI step is complete at 2/2. */
+export const V2ArtifactsComplete: Story = {
+  args: { path: CLI_PATH },
+  parameters: {
+    msw: {
+      handlers: appShellHandlers({
+        ...sdkStepFixtures(readyTargets),
+        applicationSetups: { artifactStatus: v2ArtifactStatus, prepareCliSetup: cliSetup },
+      }),
+    },
+  },
+  play: async ({ canvasElement }) => {
+    await within(canvasElement).findByText("2/2", undefined, { timeout: 10_000 });
+  },
+};
+
+/** V2 code generation is complete, but runtime setup stays open until an SDK endpoint is discovered. */
+export const V2SdkUndiscovered: Story = {
+  args: { path: SDK_PATH },
+  parameters: {
+    msw: {
+      handlers: appShellHandlers({
+        ...sdkStepFixtures(readyTargets),
+        applicationSetups: { artifactStatus: v2ArtifactStatus },
+      }),
+    },
+  },
+};
+
 export const TargetReady: Story = {
   args: { path: SDK_PATH },
   parameters: { msw: { handlers: appShellHandlers(sdkStepFixtures(readyTargets)) } },
@@ -582,6 +677,21 @@ export const SdkValidated: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await canvas.findByText(/Discovered 12 models/, undefined, { timeout: 10_000 });
+  },
+};
+
+export const V2SdkDiscovered: Story = {
+  args: { path: SDK_PATH },
+  parameters: {
+    msw: {
+      handlers: appShellHandlers({
+        ...sdkValidatedFixtures(),
+        applicationSetups: { artifactStatus: v2ArtifactStatus },
+      }),
+    },
+  },
+  play: async ({ canvasElement }) => {
+    await within(canvasElement).findByText(/Discovered 12 scenarios/, undefined, { timeout: 10_000 });
   },
 };
 
@@ -685,6 +795,43 @@ export const TargetNoPreview: Story = {
 export const DryRunStep: Story = {
   args: { path: DRY_RUN_PATH },
   parameters: { msw: { handlers: appShellHandlers(dryRunStepFixtures(readyTargets)) } },
+};
+
+export const V2DryRunUpFailure: Story = {
+  args: { path: DRY_RUN_PATH },
+  parameters: {
+    msw: {
+      handlers: appShellHandlers(
+        v2DryRunFixtures({ success: false, phase: "up", error: { message: "Catalog seed API returned 409" } }),
+      ),
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole("button", { name: "Run dry run" }, { timeout: 10_000 }));
+    await canvas.findAllByText(/failed during up/, undefined, { timeout: 10_000 });
+  },
+};
+
+export const V2DryRunDownFailure: Story = {
+  args: { path: DRY_RUN_PATH },
+  parameters: {
+    msw: {
+      handlers: appShellHandlers(
+        v2DryRunFixtures({ success: false, phase: "down", error: { message: "Cleanup API timed out" } }),
+      ),
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole("button", { name: "Run dry run" }, { timeout: 10_000 }));
+    await canvas.findByText(/environment may still be live/i, undefined, { timeout: 10_000 });
+  },
+};
+
+export const V2SetupCompleted: Story = {
+  args: { path: DRY_RUN_PATH },
+  parameters: { msw: { handlers: appShellHandlers(v2DryRunFixtures(undefined, true)) } },
 };
 
 export const TargetBuilding: Story = {

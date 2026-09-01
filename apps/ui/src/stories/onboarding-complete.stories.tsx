@@ -6,6 +6,7 @@ import { userEvent, within } from "storybook/test";
 import { CompletePage, HandoffActions } from "../routes/_blacklight/onboarding/complete";
 
 const artifactStatus: RouterOutputs["applicationSetups"]["artifactStatus"] = {
+  protocolVersion: "1.0",
   complete: true,
   stepComplete: true,
   artifacts: [
@@ -13,6 +14,16 @@ const artifactStatus: RouterOutputs["applicationSetups"]["artifactStatus"] = {
     { key: "tests", received: true, meta: "14 files" },
     { key: "kb", received: true },
     { key: "scenarios", received: true },
+  ],
+};
+
+const v2ArtifactStatus: RouterOutputs["applicationSetups"]["artifactStatus"] = {
+  protocolVersion: "2.0",
+  complete: true,
+  stepComplete: true,
+  artifacts: [
+    { key: "tests", received: true, meta: "14 files" },
+    { key: "kb", received: true },
   ],
 };
 
@@ -52,6 +63,22 @@ type Story = StoryObj<typeof meta>;
 
 export const Finished: Story = {
   args: { appId: baseApplication.id },
+};
+
+/** A completed Scenario v2 setup has no recipe or scenarios artifact. */
+export const FinishedV2: Story = {
+  args: { appId: baseApplication.id },
+  parameters: {
+    msw: {
+      handlers: [
+        trpcHandler({
+          applications: { list: [baseApplication], suiteHealth: baseSuiteHealth },
+          applicationSetups: { artifactStatus: v2ArtifactStatus },
+          github: { getApplicationRepository: repository },
+        }),
+      ],
+    },
+  },
 };
 
 /**

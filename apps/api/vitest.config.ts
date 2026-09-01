@@ -17,6 +17,9 @@ const REQUIRED_ENV_STAND_INS = {
     GOOGLE_CLIENT_ID: "test-google-client-id",
     GOOGLE_CLIENT_SECRET: "test-google-client-secret",
     REDIS_URL: "redis://127.0.0.1:6379",
+    GITHUB_APP_PRIVATE_KEY: Buffer.from(
+        "-----BEGIN RSA PRIVATE KEY-----\ntest-only\n-----END RSA PRIVATE KEY-----\n",
+    ).toString("base64"),
 };
 
 export default defineConfig({
@@ -26,6 +29,7 @@ export default defineConfig({
         env: {
             ...REQUIRED_ENV_STAND_INS,
             ...config({ path: join(__dirname, "../../.env") }).parsed,
+            GITHUB_APP_PRIVATE_KEY: REQUIRED_ENV_STAND_INS.GITHUB_APP_PRIVATE_KEY,
             TESTING: "true",
         },
     },

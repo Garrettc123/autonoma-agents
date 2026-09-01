@@ -1,7 +1,10 @@
 import type { PrismaClient } from "@autonoma/db";
 import type { Logger } from "@autonoma/logger";
+import type { normalizeProtocolVersion } from "@autonoma/types";
 import { artifactEventWhere } from "../app-generations/artifact-file-events";
 import { areArtifactsComplete } from "../app-generations/artifacts-complete";
+import { isInDiscoveryBatch } from "./discovery-batch";
+import { resolveAppProtocol } from "./setup-protocol";
 
 /**
  * The four independent signals the Finish setup gate is derived from, plus the gate itself.
@@ -32,49 +35,52 @@ export interface SetupState {
  * drift.
  */
 export async function computeSetupState(db: PrismaClient, applicationId: string, logger: Logger): Promise<SetupState> {
-    const [row, scenarios, testCase, validatedInstances, completedSetup, kbEvent, scenariosEvent, testEvent] =
-        await Promise.all([
-            db.onboardingState.findUnique({ where: { applicationId }, select: { lastDiscoveredAt: true } }),
-            // One read answers all three scenario questions below: any scenario at all, any with an
-            // active recipe, and the stricter provisionable set. An application has a handful.
-            db.scenario.findMany({
-                where: { applicationId },
-                select: { id: true, isDisabled: true, activeRecipeVersionId: true },
-            }),
-            db.testCase.findFirst({ where: { applicationId }, select: { id: true } }),
-            db.scenarioInstance.findMany({
-                where: { applicationId, status: "DOWN_SUCCESS" },
-                select: { scenarioId: true },
-                distinct: ["scenarioId"],
-            }),
-            db.applicationSetup.findFirst({ where: { applicationId, status: "completed" }, select: { id: true } }),
-            db.applicationSetupEvent.findFirst({
-                where: artifactEventWhere(applicationId, "kb"),
-                select: { id: true },
-            }),
-            db.applicationSetupEvent.findFirst({
-                where: artifactEventWhere(applicationId, "scenarios"),
-                select: { id: true },
-            }),
-            // Existence, not a count: the checklist needs "3 files", the gate only needs "any". Probing
-            // stops at the first row instead of pulling every matching event's JSON payload back to
-            // dedupe paths in memory - the same question, asked the cheap way.
-            db.applicationSetupEvent.findFirst({
-                where: artifactEventWhere(applicationId, "tests"),
-                select: { id: true },
-            }),
-        ]);
+    const [row, scenarios, testCase, setup, kbEvent, scenariosEvent, testEvent] = await Promise.all([
+        db.onboardingState.findUnique({
+            where: { applicationId },
+            select: { lastDiscoveredAt: true, lastDiscoveryId: true },
+        }),
+        // One read answers all three scenario questions below: any scenario at all, any with an
+        // active recipe, and the stricter provisionable set. An application has a handful.
+        db.scenario.findMany({
+            where: { applicationId },
+            select: { id: true, isDisabled: true, activeRecipeVersionId: true, discoveryId: true },
+        }),
+        db.testCase.findFirst({ where: { applicationId }, select: { id: true } }),
+        resolveAppProtocol(db, applicationId),
+        db.applicationSetupEvent.findFirst({
+            where: artifactEventWhere(applicationId, "kb"),
+            select: { id: true },
+        }),
+        db.applicationSetupEvent.findFirst({
+            where: artifactEventWhere(applicationId, "scenarios"),
+            select: { id: true },
+        }),
+        // Existence, not a count: the checklist needs "3 files", the gate only needs "any". Probing
+        // stops at the first row instead of pulling every matching event's JSON payload back to
+        // dedupe paths in memory - the same question, asked the cheap way.
+        db.applicationSetupEvent.findFirst({
+            where: artifactEventWhere(applicationId, "tests"),
+            select: { id: true },
+        }),
+    ]);
 
-    const provisionable = scenarios.filter(
-        (scenario) => !scenario.isDisabled && scenario.activeRecipeVersionId != null,
-    );
-    const validatedScenarioIds = new Set(validatedInstances.map((instance) => instance.scenarioId));
+    const { protocolVersion, setupCompleted } = setup;
+    const lastDiscoveredAtDate = row?.lastDiscoveredAt ?? undefined;
+    const lastDiscoveryId = row?.lastDiscoveryId ?? undefined;
+    const provisionable = scenarios.filter((scenario) => {
+        if (scenario.isDisabled) return false;
+        if (protocolVersion === "1.0") return scenario.activeRecipeVersionId != null;
+        return isInDiscoveryBatch(scenario, lastDiscoveryId);
+    });
+    const validatedScenarioIds = await provisionedScenarioIds(db, applicationId, protocolVersion, lastDiscoveredAtDate);
 
     const sdkConfigured = row?.lastDiscoveredAt != null;
     const dryRunPassed =
         provisionable.length > 0 && provisionable.every((candidate) => validatedScenarioIds.has(candidate.id));
     const artifactsUploaded = areArtifactsComplete({
-        setupCompleted: completedSetup != null,
+        protocolVersion,
+        setupCompleted,
         hasRecipe: scenarios.some((scenario) => scenario.activeRecipeVersionId != null),
         hasTests: testEvent != null,
         hasKb: kbEvent != null,
@@ -83,13 +89,42 @@ export async function computeSetupState(db: PrismaClient, applicationId: string,
     const hasContent = scenarios.length > 0 && testCase != null;
 
     const completedTheRealFlow = sdkConfigured && dryRunPassed && artifactsUploaded;
-    const arrivedWithContentAlready = hasContent && !artifactsUploaded;
+    const arrivedWithContentAlready = protocolVersion === "1.0" && hasContent && !artifactsUploaded;
     const setupComplete = completedTheRealFlow || arrivedWithContentAlready;
 
     logger.info("Computed onboarding setup state", {
         application: { applicationId },
-        extra: { sdkConfigured, dryRunPassed, artifactsUploaded, hasContent, setupComplete },
+        extra: { protocolVersion, sdkConfigured, dryRunPassed, artifactsUploaded, hasContent, setupComplete },
     });
 
     return { sdkConfigured, dryRunPassed, artifactsUploaded, hasContent, setupComplete };
+}
+
+/**
+ * The scenario ids with at least one qualifying `DOWN_SUCCESS` teardown. Bounded and deduped at the query
+ * (distinct by scenario, and for v2 the recency predicate pushed into the WHERE) so a UI-polled path stays
+ * O(scenario count) rather than reading every DOWN_SUCCESS instance the app has ever produced.
+ */
+async function provisionedScenarioIds(
+    db: PrismaClient,
+    applicationId: string,
+    protocolVersion: ReturnType<typeof normalizeProtocolVersion>,
+    lastDiscoveredAt: Date | undefined,
+): Promise<Set<string>> {
+    // A v2 app that has not discovered yet can have no qualifying teardown, so skip the read entirely.
+    if (protocolVersion === "2.0" && lastDiscoveredAt == null) return new Set();
+    const rows = await db.scenarioInstance.findMany({
+        where:
+            protocolVersion === "2.0"
+                ? {
+                      applicationId,
+                      status: "DOWN_SUCCESS",
+                      protocolVersion: "2.0",
+                      createdAt: { gte: lastDiscoveredAt },
+                  }
+                : { applicationId, status: "DOWN_SUCCESS" },
+        select: { scenarioId: true },
+        distinct: ["scenarioId"],
+    });
+    return new Set(rows.map((instance) => instance.scenarioId));
 }

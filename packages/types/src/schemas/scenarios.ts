@@ -1,5 +1,24 @@
 import { z } from "zod";
 
+// The SDK reports a protocol version on every response. "2.0" selects the v2
+// path (named scenarios); absent or anything else selects the legacy v1 recipe
+// path - the installed base is v1, so an unknown version must never be treated
+// as v2.
+
+export const SCENARIO_PROTOCOL_VERSIONS = ["1.0", "2.0"] as const;
+export const ScenarioProtocolVersionSchema = z.enum(SCENARIO_PROTOCOL_VERSIONS);
+export type ScenarioProtocolVersion = (typeof SCENARIO_PROTOCOL_VERSIONS)[number];
+
+/**
+ * The single place the wire `version` field is interpreted. Matches major version 2, whether the SDK
+ * reports it as the string "2.0" or a JSON number (`String(2.0)` is "2", not "2.0", so a plain string
+ * compare would silently misread a numeric version as v1). Anything absent, unparseable, or below major
+ * 2 is v1 - the installed base - so an unknown version can never send a v2 body to a v1 endpoint.
+ */
+export function normalizeProtocolVersion(version: string | number | undefined): ScenarioProtocolVersion {
+    return Math.trunc(Number.parseFloat(String(version))) === 2 ? "2.0" : "1.0";
+}
+
 const SdkFieldSchema = z
     .object({
         name: z.string(),
@@ -45,11 +64,23 @@ const SdkSchemaSchema = z
     })
     .passthrough();
 
+/** A v2 discover's per-scenario listing: identity only, no schema. The real payload keys come from actual `up` responses. */
+export const SdkScenarioListingSchema = z
+    .object({
+        name: z.string(),
+        description: z.string(),
+    })
+    .passthrough();
+export type SdkScenarioListing = z.infer<typeof SdkScenarioListingSchema>;
+
 export const SdkDiscoverResponseSchema = z
     .object({
         version: z.union([z.string(), z.number()]).optional(),
         sdk: z.record(z.string(), z.unknown()).optional(),
-        schema: SdkSchemaSchema,
+        /** v1 only: the factory-derived model schema. */
+        schema: SdkSchemaSchema.optional(),
+        /** v2 only: the registered scenarios by name + description. */
+        scenarios: z.array(SdkScenarioListingSchema).optional(),
     })
     .passthrough();
 export type SdkDiscoverResponse = z.infer<typeof SdkDiscoverResponseSchema>;
@@ -68,7 +99,7 @@ const ScenarioRecipeValidationSchema = z
     })
     .passthrough();
 
-const ScenarioVariableScalarSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+export const ScenarioVariableScalarSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
 export type ScenarioVariableScalar = z.infer<typeof ScenarioVariableScalarSchema>;
 
 export const ScenarioVariableDefinitionSchema = z.discriminatedUnion("strategy", [
@@ -331,15 +362,21 @@ export type Refs = z.infer<typeof RefsSchema>;
 
 export const UpResponseSchema = z.object({
     auth: AuthPayloadSchema.optional(),
+    /** v1 only: plaintext teardown refs + their signing token. v2 carries teardown state solely in `teardownToken`. */
     refs: RefsSchema.optional(),
     refsToken: z.string().optional(),
+    /** v2 only: the opaque signed token carrying teardown state, testRunId, and the scenario name. */
+    teardownToken: z.string().optional(),
+    /** v1 only. */
     metadata: z.unknown().optional(),
     expiresInSeconds: z.number().optional(),
+    version: z.union([z.string(), z.number()]).optional(),
 });
 export type UpResponse = z.infer<typeof UpResponseSchema>;
 
 export const DownResponseSchema = z.object({
     ok: z.boolean().optional(),
+    version: z.union([z.string(), z.number()]).optional(),
 });
 export type DownResponse = z.infer<typeof DownResponseSchema>;
 

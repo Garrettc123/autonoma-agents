@@ -164,6 +164,66 @@ integrationTestSuite({
             expect(stale?.isDisabled).toBe(true);
         });
 
+        test("syncScenarioRegistry: preview batches do not disable main scenarios", async ({
+            harness,
+            seedResult: { appId, store },
+        }) => {
+            const mainDiscovery = new Date("2026-08-21T12:00:00.000Z");
+            await store.syncScenarioRegistry({
+                applicationId: appId,
+                scenarios: [
+                    { name: "admin-catalog", description: "Admin catalog" },
+                    { name: "billing-owner", description: "Billing owner" },
+                ],
+                discoveredAt: mainDiscovery,
+            });
+
+            const previewDiscovery = new Date("2026-08-21T12:05:00.000Z");
+            await store.syncScenarioRegistry({
+                applicationId: appId,
+                scenarios: [{ name: "admin-catalog", description: "Admin catalog from preview" }],
+                disableMissing: false,
+                discoveredAt: previewDiscovery,
+            });
+
+            const scenarios = await harness.db.scenario.findMany({
+                where: { applicationId: appId },
+                orderBy: { name: "asc" },
+                select: { name: true, isDisabled: true, lastDiscoveredAt: true },
+            });
+            expect(scenarios).toEqual([
+                { name: "admin-catalog", isDisabled: false, lastDiscoveredAt: previewDiscovery },
+                { name: "billing-owner", isDisabled: false, lastDiscoveredAt: mainDiscovery },
+            ]);
+        });
+
+        test("syncScenarioRegistry: canonical main discovery disables names no longer advertised", async ({
+            harness,
+            seedResult: { appId, store },
+        }) => {
+            await store.syncScenarioRegistry({
+                applicationId: appId,
+                scenarios: [
+                    { name: "admin-catalog", description: "Admin catalog" },
+                    { name: "billing-owner", description: "Billing owner" },
+                ],
+            });
+            await store.syncScenarioRegistry({
+                applicationId: appId,
+                scenarios: [{ name: "admin-catalog", description: "Admin catalog" }],
+            });
+
+            const scenarios = await harness.db.scenario.findMany({
+                where: { applicationId: appId },
+                orderBy: { name: "asc" },
+                select: { name: true, isDisabled: true },
+            });
+            expect(scenarios).toEqual([
+                { name: "admin-catalog", isDisabled: false },
+                { name: "billing-owner", isDisabled: true },
+            ]);
+        });
+
         test("replaceScenarioRecipes: re-uploading for the same snapshot replaces recipe versions", async ({
             harness,
             seedResult: { orgId, store },

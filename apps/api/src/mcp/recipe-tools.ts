@@ -41,7 +41,9 @@ export function registerRecipeTools(
             description:
                 "Save a corrected recipe as the scenario's active version - the recipe name must stay the " +
                 "scenario's name. Pass the `fingerprint` from get_recipe as `baseFingerprint` so a write that races " +
-                "another editor is rejected instead of overwriting them. Iterate with dry_run_scenario until it passes.",
+                "another editor is rejected instead of overwriting them. Iterate with dry_run_scenario until it passes. " +
+                "Only for v1 recipe apps: a v2 app (scenarios defined as code) returns an error telling you to edit the " +
+                "scenario's `up` function in the repo instead.",
             inputSchema: {
                 ...targetInputFields,
                 scenarioId: z.string().min(1),
@@ -92,7 +94,8 @@ export function registerRecipeTools(
                 "Run a recipe end to end against the deployed app (SDK `up` then `down`); on failure it reports " +
                 "which phase failed and the SDK's error. Pass a `recipe` to try an edit WITHOUT storing it, and " +
                 "`save: true` to promote one that passes. Pass a `target` from list_dry_run_targets to run against a " +
-                "specific preview instead of the app's configured endpoint.",
+                "specific preview instead of the app's configured endpoint. For a v2 app (scenarios defined as code), " +
+                "omit `recipe` - it dry-runs the named scenario as deployed; a passed `recipe` is rejected.",
             inputSchema: {
                 ...targetInputFields,
                 scenarioId: z.string().min(1),

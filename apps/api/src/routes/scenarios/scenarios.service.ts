@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 import type { PrismaClient, ScenarioRecipeEditSource } from "@autonoma/db";
 import { NotFoundError } from "@autonoma/errors";
 import { type ScenarioManager, applyScenarioRecipeUpdate, findRecipeProblems } from "@autonoma/scenario";
-import { type ScenarioRecipe, ScenarioRecipeSchema, isColdStartFailure } from "@autonoma/types";
+import {
+    type ScenarioRecipe,
+    ScenarioRecipeSchema,
+    isColdStartFailure,
+    normalizeProtocolVersion,
+} from "@autonoma/types";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { DryRunSubject } from "../onboarding/dry-run-subject";
@@ -19,10 +24,25 @@ import { RecipeConflictError } from "./recipe-conflict-error";
 /** How many of a scenario's most recent provisionings the instances drawer lists. */
 const RECENT_INSTANCE_LIMIT = 50;
 
+/**
+ * Shown to an agent/admin who reaches a recipe surface for a v2 application. v2 scenarios have no stored
+ * recipe - they are code in the customer's repo - so a recipe read/write/edit is meaningless; point the
+ * caller at the real edit surface instead of returning an empty recipe or a generic "not found".
+ */
+const V2_SCENARIO_MESSAGE =
+    "This application uses v2 scenarios defined as code in your repository, not a stored recipe. Edit the " +
+    "scenario's `up` function in your repo (via defineScenario) and redeploy; Autonoma's scenario registry " +
+    "re-syncs from your SDK's discover on the next deploy. There is no recipe to read or edit here.";
+
 const COLD_START_DRY_RUN_MESSAGE =
     "The app's preview appears to still be starting up (it returned 503 Service Unavailable). Previews scale to zero " +
     "when idle, so this is a cold start, not a recipe problem - we already waited for it to wake. Give it a few more " +
     "seconds and run the dry-run again, or confirm the preview is deployed and healthy.";
+
+/** The app's protocol flag reads as v2. Null/unknown is v1 (the installed base). */
+function isV2Protocol(protocolVersion: string | null | undefined): boolean {
+    return protocolVersion != null && normalizeProtocolVersion(protocolVersion) === "2.0";
+}
 
 /**
  * How a dry run deviates from "just run what is stored". Omit entirely for the UI button's behavior.
@@ -238,6 +258,19 @@ export class ScenariosService extends Service {
         });
         if (scenario == null) throw new NotFoundError("Scenario not found");
 
+        // A candidate recipe is a v1 concept; on a v2 app the manager would ignore it and `save:true`
+        // would 404. Reject it up front with the actionable message. A no-candidate dry run still
+        // provisions a v2 scenario by name below, so only the candidate path short-circuits.
+        if (recipe != null && (await this.isV2Application(applicationId))) {
+            this.logger.info("Dry run: candidate recipe rejected for a v2 application", { applicationId, scenarioId });
+            return {
+                success: false as const,
+                phase: "recipe" as const,
+                error: { message: V2_SCENARIO_MESSAGE },
+                saved: false as const,
+            };
+        }
+
         if (recipe != null) {
             // Fail a candidate that cannot resolve here, with the reason, rather than
             // spending a provisioning round trip to be told the same thing less clearly.
@@ -361,6 +394,19 @@ export class ScenariosService extends Service {
         });
     }
 
+    /**
+     * Whether the application speaks the v2 SDK protocol (scenarios are code, no recipe), from the app's
+     * hand-set `protocolVersion` flag; absent/unknown is treated as v1 (the installed base). Prefer folding
+     * the column into an existing select (see `getRecipe`) over calling this separately.
+     */
+    private async isV2Application(applicationId: string): Promise<boolean> {
+        const application = await this.db.application.findUnique({
+            where: { id: applicationId },
+            select: { protocolVersion: true },
+        });
+        return isV2Protocol(application?.protocolVersion);
+    }
+
     async getRecipe(applicationId: string, organizationId: string, scenarioId: string) {
         this.logger.info("Getting recipe", { applicationId, scenarioId });
 
@@ -382,6 +428,7 @@ export class ScenariosService extends Service {
                 },
                 application: {
                     select: {
+                        protocolVersion: true,
                         mainBranch: {
                             select: {
                                 activeSnapshotId: true,
@@ -418,7 +465,14 @@ export class ScenariosService extends Service {
         const isLiveRecipeInSync =
             liveRecipeVersion != null && liveRecipeVersion.fingerprint === scenario.activeRecipeVersion?.fingerprint;
 
+        // A v2 app has no recipe by design; tell the caller so it renders "scenarios are code" rather than
+        // an empty recipe editor. `protocol` is "1.0" for legacy recipe apps (the vast majority today).
+        // Read from the already-loaded deployment - no second round-trip.
+        const protocol = isV2Protocol(scenario.application.protocolVersion) ? ("2.0" as const) : ("1.0" as const);
+
         return {
+            protocol,
+            v2Message: protocol === "2.0" ? V2_SCENARIO_MESSAGE : null,
             fixtureJson: scenario.activeRecipeVersion?.fixtureJson ?? null,
             // Also at the top level because this is the value `updateRecipe` takes as
             // `baseFingerprint`: a caller that has to reach into `activeRecipeVersion`
@@ -488,6 +542,11 @@ export class ScenariosService extends Service {
             },
         });
         if (scenario == null) throw new NotFoundError("Scenario not found");
+        // A v2 app has no recipe to write - fail with the actionable message rather than the generic
+        // "No active recipe version", which an agent reads as a transient/missing state to retry.
+        if (await this.isV2Application(applicationId)) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: V2_SCENARIO_MESSAGE });
+        }
         if (scenario.activeRecipeVersionId == null || scenario.activeRecipeVersion == null) {
             throw new NotFoundError("No active recipe version");
         }

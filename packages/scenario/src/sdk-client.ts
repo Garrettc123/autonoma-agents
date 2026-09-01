@@ -27,16 +27,23 @@ export interface SdkClientOptions {
     recorder?: SdkCallRecorder;
 }
 
-interface UpParams {
-    instanceId: string;
-    create: Record<string, unknown>;
-}
+/**
+ * The protocol version discriminates the wire shape: v1 sends the resolved recipe
+ * `create` graph; v2 sends only the scenario name (the customer's code owns the
+ * data). Discriminated so a caller cannot pair a version with the wrong payload.
+ */
+export type SdkUpParams =
+    | { protocolVersion: "1.0"; instanceId: string; create: Record<string, unknown> }
+    | { protocolVersion: "2.0"; instanceId: string; scenarioName: string };
 
-interface DownParams {
-    instanceId: string;
-    refs: Record<string, unknown> | null;
-    refsToken?: string;
-}
+export type SdkDownParams =
+    | { protocolVersion: "1.0"; instanceId: string; refs: Record<string, unknown> | null; refsToken?: string }
+    | {
+          // v2 carries teardown state solely in the opaque teardownToken, which the SDK verifies and routes by.
+          protocolVersion: "2.0";
+          instanceId: string;
+          teardownToken?: string;
+      };
 
 interface CallParams<T> {
     instanceId?: string;
@@ -82,21 +89,31 @@ export class SdkClient {
         });
     }
 
-    async up({ instanceId, create }: UpParams, options?: SdkCallOptions): Promise<UpResponse> {
+    async up(params: SdkUpParams, options?: SdkCallOptions): Promise<UpResponse> {
+        const { instanceId } = params;
+        const body =
+            params.protocolVersion === "2.0"
+                ? { action: "up", scenario: { name: params.scenarioName }, testRunId: instanceId }
+                : { action: "up", create: params.create, testRunId: instanceId };
         return this.call({
             instanceId,
             action: "UP",
-            body: { action: "up", create, testRunId: instanceId },
+            body,
             responseSchema: UpResponseSchema,
             timeoutMs: options?.timeoutMs ?? 90_000,
         });
     }
 
-    async down({ instanceId, refs, refsToken }: DownParams, options?: SdkCallOptions): Promise<DownResponse> {
+    async down(params: SdkDownParams, options?: SdkCallOptions): Promise<DownResponse> {
+        const { instanceId } = params;
+        const body =
+            params.protocolVersion === "2.0"
+                ? { action: "down", teardownToken: params.teardownToken, testRunId: instanceId }
+                : { action: "down", refs: params.refs, refsToken: params.refsToken, testRunId: instanceId };
         return this.call({
             instanceId,
             action: "DOWN",
-            body: { action: "down", refs, refsToken, testRunId: instanceId },
+            body,
             responseSchema: DownResponseSchema,
             timeoutMs: options?.timeoutMs ?? 60_000,
         });

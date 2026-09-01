@@ -22,6 +22,12 @@ const ONBOARDING_EVENT = {
      * rather than throwing.
      */
     dryRunPassed: "onboarding.dry_run_passed",
+    /**
+     * The app is flagged Scenario v2 but its deployed endpoint answered a v1-shaped discover - a
+     * mistimed protocol flip (v2 set before the v2 SDK was live). Alertable on its own, since it
+     * otherwise surfaces only as a generic discovery warning + a 400.
+     */
+    scenarioProtocolMismatch: "onboarding.scenario_protocol_mismatch",
 } as const;
 
 /** The PostHog group type onboarding is attributed to - one org per customer. */
@@ -237,6 +243,19 @@ export class OnboardingAnalytics {
             applicationId: actor.applicationId,
             scenarioId,
         });
+    }
+
+    /**
+     * The app is set to Scenario v2 but its live endpoint answered a v1-shaped discover. Logs at error
+     * (searchable, distinct from the generic "Discovery failed" warning) and emits an alertable event -
+     * this is the manual-flag's signature failure (a flip that ran ahead of the v2 deploy).
+     */
+    scenarioProtocolMismatch(applicationId: string, organizationId: string): void {
+        this.logger.error(
+            "Scenario protocol mismatch: app is set to v2 but the deployed endpoint answered a v1-shaped discover",
+            { applicationId },
+        );
+        this.capture(applicationId, organizationId, ONBOARDING_EVENT.scenarioProtocolMismatch, { applicationId });
     }
 
     private async record(

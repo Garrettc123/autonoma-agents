@@ -231,6 +231,10 @@ export class OnboardingService extends Service {
         return this.manager.listSdkDryRunTargets(applicationId, organizationId);
     }
 
+    async listDiscoveredScenarios(applicationId: string, organizationId: string) {
+        return this.manager.listDiscoveredScenarios(applicationId, organizationId);
+    }
+
     async redeploySdkDryRunTarget(applicationId: string, organizationId: string, targetId: string) {
         return this.manager.redeploySdkDryRunTarget(applicationId, organizationId, targetId);
     }

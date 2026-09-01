@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { PrismaClient, ScenarioInstance } from "@autonoma/db";
 import { type Logger, logger } from "@autonoma/logger";
 import {
+    normalizeProtocolVersion,
     RefsSchema,
     type DiscoverResponse,
     type ScenarioRecipe,
@@ -16,7 +17,7 @@ import { hashRecipe } from "./hash-recipe";
 import { ScenarioRecipeStore } from "./scenario-recipe-store";
 import type { ScenarioSubject } from "./scenario-subject";
 import { SdkCallError } from "./sdk-call-error";
-import { SdkClient, type SdkCallOptions } from "./sdk-client";
+import { SdkClient, type SdkCallOptions, type SdkDownParams } from "./sdk-client";
 import { resolveSdkConfig, type SdkConfig } from "./sdk-config-resolver";
 
 const DEFAULT_EXPIRES_IN_SECONDS = 2 * 60 * 60; // 2 hours
@@ -66,9 +67,23 @@ export class ScenarioManager {
 
         this.logger.info("Discover completed", {
             applicationId,
-            modelCount: response.schema.models.length,
+            extra: { modelCount: response.schema?.models.length ?? 0, scenarioCount: response.scenarios?.length },
         });
         return response;
+    }
+
+    /**
+     * Sync the thin v2 scenario registry from a discover's `scenarios` listing (disable-not-delete).
+     * Delegates to the recipe store; exposed here because the deploy-signal handler already holds a manager.
+     */
+    async syncScenarioRegistry(params: {
+        applicationId: string;
+        scenarios: Array<{ name: string; description: string }>;
+        disableMissing?: boolean;
+        discoveredAt?: Date;
+        discoveryId?: string;
+    }): Promise<{ scenarioCount: number }> {
+        return this.recipeStore.syncScenarioRegistry(params);
     }
 
     /**
@@ -112,31 +127,38 @@ export class ScenarioManager {
         }
         const instanceId = randomUUID();
 
-        const candidateFingerprint = candidateRecipe != null ? hashRecipe(candidateRecipe) : undefined;
-        const recipeResult =
-            candidateRecipe != null
-                ? resolveRecipePayload(candidateRecipe, instanceId)
-                : await this.recipeStore.loadRecipePayload({
-                      scenarioId: scenario.id,
-                      snapshotId,
-                      testRunId: instanceId,
-                  });
-        if (recipeResult == null) {
-            throw new Error(
-                `Scenario "${scenario.name}" does not have a stored recipe version${snapshotId != null ? ` for snapshot ${snapshotId}` : ""}. Complete the Scenario Validation step so the plugin uploads scenario recipes to Autonoma.`,
-            );
+        // v2 provisions by scenario NAME - the customer's code owns the data, so there is no
+        // recipe to resolve and no create payload to send. A candidate recipe is a v1-only
+        // concept; on a v2 deployment it has nothing to dry-run against, so it is ignored.
+        // The protocol is the app's hand-set flag (resolved into sdkConfig), never auto-detected.
+        const protocolVersion = applicationData.sdkConfig.protocolVersion;
+        if (protocolVersion === "2.0") {
+            if (candidateRecipe != null) {
+                this.logger.warn("Ignoring candidate recipe: deployment speaks protocol v2", {
+                    applicationId,
+                    scenarioName: scenario.name,
+                });
+            }
+            return await this.upV2({
+                subject,
+                scenarioId: scenario.id,
+                scenarioName: scenario.name,
+                instanceId,
+                applicationId,
+                organizationId,
+                deploymentId,
+                sdkClient,
+                sdkOptions,
+                coldStartRetry,
+            });
         }
-        const { createPayload, resolvedVariables } = recipeResult;
 
-        // Record WHICH recipe this run provisioned. Without it a result only carries the
-        // resolved payload, so a run that has since been edited out of existence still reads
-        // as current. The stored path gets its identity from the load above rather than a
-        // second read of the same row; a candidate has no version row, so its fingerprint
-        // alone identifies it.
-        const recipeProvenance =
-            "recipeVersionId" in recipeResult
-                ? { recipeVersionId: recipeResult.recipeVersionId, recipeFingerprint: recipeResult.recipeFingerprint }
-                : { recipeFingerprint: candidateFingerprint };
+        const { createPayload, resolvedVariables, recipeProvenance } = await this.resolveV1Payload({
+            scenario,
+            candidateRecipe,
+            snapshotId,
+            instanceId,
+        });
 
         const instance = await this.db.scenarioInstance.create({
             data: {
@@ -146,40 +168,60 @@ export class ScenarioManager {
                 deploymentId,
                 scenarioId: scenario.id,
                 status: "REQUESTED",
+                protocolVersion,
                 expiresAt: new Date(Date.now() + DEFAULT_EXPIRES_IN_SECONDS * 1000),
                 recipeVersionId: recipeProvenance.recipeVersionId,
                 recipeFingerprint: recipeProvenance.recipeFingerprint,
             },
         });
 
-        await subject.linkInstance?.(instance.id);
-
-        this.logger.info("Calling up on SDK endpoint", {
-            applicationId,
-            scenarioName: scenario.name,
-            instanceId: instance.id,
+        return this.executeUp({
+            instance,
+            subject,
+            coldStartRetry,
+            logContext: { applicationId, scenarioName: scenario.name },
+            callUp: () =>
+                sdkClient.up({ protocolVersion: "1.0", instanceId: instance.id, create: createPayload }, sdkOptions),
+            onSuccess: (response) => this.markUpSuccess(instance.id, response, createPayload, resolvedVariables),
         });
+    }
 
-        let response: UpResponse;
-        try {
-            // A scaled-to-zero ("serverless") preview 503s on the first hit while it wakes.
-            // When the caller opts in (e.g. an onboarding dry-run), ride through that with a
-            // bounded retry so a cold environment isn't mistaken for a broken recipe.
-            const callUp = (): Promise<UpResponse> =>
-                sdkClient.up(
-                    { instanceId: instance.id, create: createPayload as Record<string, unknown[]> },
-                    sdkOptions,
-                );
-            response =
-                coldStartRetry === true ? await withColdStartRetry(callUp, { logger: this.logger }) : await callUp();
-        } catch (err) {
-            const lastError = toScenarioLastError(err);
-            this.logger.error("Scenario up failed", { error: lastError.message, instanceId: instance.id });
-            return this.markUpFailure(instance.id, lastError);
+    /**
+     * Resolve the v1 create payload and the provenance to stamp on the run. A candidate recipe is
+     * dry-run only (its fingerprint alone identifies it, no version row); a stored recipe is loaded
+     * from the pinned/active version, whose identity travels with the payload. Kept branch-typed so
+     * `createPayload` stays `Record<string, unknown>` for the SDK call - no post-union sniffing.
+     */
+    private async resolveV1Payload(params: {
+        scenario: { id: string; name: string };
+        candidateRecipe?: ScenarioRecipe;
+        snapshotId?: string;
+        instanceId: string;
+    }): Promise<{
+        createPayload: Record<string, unknown>;
+        resolvedVariables: Record<string, ScenarioVariableScalar>;
+        recipeProvenance: { recipeVersionId?: string; recipeFingerprint?: string };
+    }> {
+        const { scenario, candidateRecipe, snapshotId, instanceId } = params;
+        if (candidateRecipe != null) {
+            const resolved = resolveRecipePayload(candidateRecipe, instanceId);
+            return { ...resolved, recipeProvenance: { recipeFingerprint: hashRecipe(candidateRecipe) } };
         }
-
-        this.logger.info("Scenario up succeeded", { instanceId: instance.id });
-        return this.markUpSuccess(instance.id, response, createPayload, resolvedVariables);
+        const loaded = await this.recipeStore.loadRecipePayload({
+            scenarioId: scenario.id,
+            snapshotId,
+            testRunId: instanceId,
+        });
+        if (loaded == null) {
+            throw new Error(
+                `Scenario "${scenario.name}" does not have a stored recipe version${snapshotId != null ? ` for snapshot ${snapshotId}` : ""}. Complete the Scenario Validation step so the plugin uploads scenario recipes to Autonoma.`,
+            );
+        }
+        return {
+            createPayload: loaded.createPayload,
+            resolvedVariables: loaded.resolvedVariables,
+            recipeProvenance: { recipeVersionId: loaded.recipeVersionId, recipeFingerprint: loaded.recipeFingerprint },
+        };
     }
 
     /**
@@ -226,15 +268,32 @@ export class ScenarioManager {
 
         this.logger.info("Calling down on SDK endpoint", { scenarioInstanceId, instanceId: instance.id });
 
+        // Down must speak the same protocol up did. The version captured on the INSTANCE at up
+        // governs - it is correct even when the deployment row was never updated (an override
+        // dry-run) or has since flipped; fall back to the deployment's version for legacy
+        // instances predating the column, then to v1 (the installed base). v2 sends only the
+        // opaque teardown token (its own column); the SDK verifies it and routes by the scenario
+        // name signed inside it - no plaintext refs or name on the wire.
+        const downProtocol =
+            instance.protocolVersion != null
+                ? normalizeProtocolVersion(instance.protocolVersion)
+                : applicationData.sdkConfig.protocolVersion;
+        const downParams: SdkDownParams =
+            downProtocol === "2.0"
+                ? {
+                      protocolVersion: "2.0",
+                      instanceId: instance.id,
+                      teardownToken: instance.teardownToken ?? undefined,
+                  }
+                : {
+                      protocolVersion: "1.0",
+                      instanceId: instance.id,
+                      refs: RefsSchema.nullable().catch(null).parse(instance.refs),
+                      refsToken: instance.refsToken ?? undefined,
+                  };
+
         try {
-            await sdkClient.down(
-                {
-                    instanceId: instance.id,
-                    refs: RefsSchema.nullable().catch(null).parse(instance.refs),
-                    refsToken: instance.refsToken ?? undefined,
-                },
-                options,
-            );
+            await sdkClient.down(downParams, options);
         } catch (err) {
             const lastError = toScenarioLastError(err);
             this.logger.error("Scenario down failed", { error: lastError.message, instanceId: instance.id });
@@ -243,6 +302,102 @@ export class ScenarioManager {
 
         this.logger.info("Scenario down succeeded", { instanceId: instance.id });
         return this.markDownSuccess(instance.id);
+    }
+
+    /**
+     * The v2 provisioning path: no recipe, no create payload. The SDK is asked for the
+     * scenario by name and returns auth plus the opaque teardown token.
+     */
+    private async upV2(params: {
+        subject: ScenarioSubject;
+        scenarioId: string;
+        scenarioName: string;
+        instanceId: string;
+        applicationId: string;
+        organizationId: string;
+        deploymentId: string;
+        sdkClient: SdkClient;
+        sdkOptions?: SdkCallOptions;
+        coldStartRetry?: boolean;
+    }): Promise<ScenarioInstance> {
+        const { subject, scenarioId, scenarioName, instanceId, applicationId, organizationId, deploymentId } = params;
+        const { sdkClient, sdkOptions, coldStartRetry } = params;
+
+        const instance = await this.db.scenarioInstance.create({
+            data: {
+                id: instanceId,
+                applicationId,
+                organizationId,
+                deploymentId,
+                scenarioId,
+                status: "REQUESTED",
+                protocolVersion: "2.0",
+                expiresAt: new Date(Date.now() + DEFAULT_EXPIRES_IN_SECONDS * 1000),
+            },
+        });
+
+        return this.executeUp({
+            instance,
+            subject,
+            coldStartRetry,
+            logContext: { applicationId, scenarioName },
+            callUp: () => sdkClient.up({ protocolVersion: "2.0", instanceId: instance.id, scenarioName }, sdkOptions),
+            validate: (response) =>
+                response.teardownToken == null || response.teardownToken.trim() === ""
+                    ? {
+                          message: `Scenario "${scenarioName}" returned no teardownToken. Scenario v2 up must return a non-empty opaque teardown token.`,
+                      }
+                    : undefined,
+            onSuccess: (response) => this.markUpSuccessV2(instance.id, response),
+        });
+    }
+
+    /**
+     * Shared provisioning shell for both protocols: link the instance, call `up` (riding through a
+     * cold-start 503 with a bounded retry when the caller opts in), optionally validate the response,
+     * and hand off to the protocol's success-writer. v1 and v2 differ only in the create data (written
+     * by the caller before this runs), the request body (`callUp`), the optional `validate`, and `onSuccess`.
+     */
+    private async executeUp(params: {
+        instance: ScenarioInstance;
+        subject: ScenarioSubject;
+        coldStartRetry?: boolean;
+        logContext: { applicationId: string; scenarioName: string };
+        callUp: () => Promise<UpResponse>;
+        validate?: (response: UpResponse) => PrismaJson.ScenarioLastError | undefined;
+        onSuccess: (response: UpResponse) => Promise<ScenarioInstance>;
+    }): Promise<ScenarioInstance> {
+        const { instance, subject, coldStartRetry, logContext, callUp, validate, onSuccess } = params;
+
+        await subject.linkInstance?.(instance.id);
+
+        this.logger.info("Calling up on SDK endpoint", { ...logContext, instanceId: instance.id });
+
+        let response: UpResponse;
+        try {
+            // A scaled-to-zero ("serverless") preview 503s on the first hit while it wakes. When the
+            // caller opts in (e.g. an onboarding dry-run), ride through that with a bounded retry so a
+            // cold environment isn't mistaken for a broken recipe.
+            response =
+                coldStartRetry === true ? await withColdStartRetry(callUp, { logger: this.logger }) : await callUp();
+        } catch (err) {
+            const lastError = toScenarioLastError(err);
+            this.logger.error("Scenario up failed", { error: lastError.message, instanceId: instance.id });
+            return this.markUpFailure(instance.id, lastError);
+        }
+
+        const invalid = validate?.(response);
+        if (invalid != null) {
+            this.logger.error("Scenario up returned an invalid response", {
+                ...logContext,
+                error: invalid.message,
+                instanceId: instance.id,
+            });
+            return this.markUpFailure(instance.id, invalid);
+        }
+
+        this.logger.info("Scenario up succeeded", { instanceId: instance.id });
+        return onSuccess(response);
     }
 
     // -----------------------------------------------------------------------
@@ -270,6 +425,23 @@ export class ScenarioManager {
                 metadata: response.metadata,
                 generatedData: createPayload,
                 ...(hasResolvedVariables ? { resolvedVariables } : {}),
+            },
+        });
+    }
+
+    /** v2 counterpart of {@link markUpSuccess}: never writes the v1-only recipe columns. */
+    private markUpSuccessV2(instanceId: string, response: UpResponse): Promise<ScenarioInstance> {
+        const expiresInSeconds = response.expiresInSeconds ?? DEFAULT_EXPIRES_IN_SECONDS;
+        return this.db.scenarioInstance.update({
+            where: { id: instanceId },
+            data: {
+                status: "UP_SUCCESS",
+                upAt: new Date(),
+                expiresAt: new Date(Date.now() + expiresInSeconds * 1000),
+                auth: response.auth,
+                // v2 carries teardown state only in the opaque token; store it in its own column
+                // (no plaintext refs) and hand it back verbatim at down.
+                teardownToken: response.teardownToken,
             },
         });
     }

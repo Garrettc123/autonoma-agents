@@ -3,7 +3,7 @@ import matter from "@11ty/gray-matter";
 import type { Prisma, PrismaClient } from "@autonoma/db";
 import { BadRequestError, NotFoundError } from "@autonoma/errors";
 import { logger } from "@autonoma/logger";
-import type { ScenarioManager, ScenarioRecipeStore } from "@autonoma/scenario";
+import { reconcileTestPlanScenarios, type ScenarioManager, type ScenarioRecipeStore } from "@autonoma/scenario";
 import { BranchAlreadyOpenError, type OpenSnapshot, TestSuiteStore } from "@autonoma/test-suite";
 import {
     type SetupEventBody,
@@ -30,6 +30,7 @@ const SCENARIO_RECIPES_ARTIFACT_PATH = "autonoma/scenario-recipes.json";
 type SetupWithBranch = {
     id: string;
     applicationId: string;
+    protocolVersion: string;
     application: {
         mainBranch: {
             id: string;
@@ -157,8 +158,16 @@ export class ApplicationSetupService {
             if (setup == null) throw new NotFoundError("Application setup not found");
             applicationId = setup.applicationId;
 
-            const data: Record<string, unknown> = {};
-            if (body.name != null) data.name = body.name;
+            const data: Prisma.ApplicationSetupUpdateInput = {
+                name: body.name,
+                protocolVersion: body.protocolVersion,
+            };
+            const protocolChanged = body.protocolVersion != null && body.protocolVersion !== setup.protocolVersion;
+            if (protocolChanged && body.status == null) {
+                data.status = "running";
+                data.completedAt = null;
+                data.errorMessage = null;
+            }
             if (body.status === "completed") {
                 data.status = "completed";
                 data.completedAt = new Date();
@@ -179,6 +188,27 @@ export class ApplicationSetupService {
                 where: { id: setupId },
                 data,
             });
+            // Mirror the planner's declared protocol onto the app: `Application.protocolVersion` is the
+            // single source of truth the wire + every v1/v2 gate read. The setup row keeps its own copy
+            // (it drives `setupCompleted`), but nothing downstream reads it as the live flag.
+            if (body.protocolVersion != null) {
+                await tx.application.update({
+                    where: { id: setup.applicationId },
+                    data: { protocolVersion: body.protocolVersion },
+                });
+            }
+            if (protocolChanged) {
+                await tx.onboardingState.updateMany({
+                    where: { applicationId: setup.applicationId },
+                    data: {
+                        lastDiscoveredAt: null,
+                        lastDiscoveredModels: null,
+                        lastDiscoveryError: null,
+                        discoveringStartedAt: null,
+                        dryRunPassedAt: null,
+                    },
+                });
+            }
         });
 
         if (setupCompleted && applicationId != null) {
@@ -288,7 +318,13 @@ export class ApplicationSetupService {
         this.assertNoScenarioRecipesInArtifacts(body.artifacts ?? []);
 
         const snapshot = await this.openSuite(branchId, organizationId);
-        await this.applyTests(snapshot, body.testCases ?? [], setup.applicationId, organizationId);
+        await this.applyTests(
+            snapshot,
+            body.testCases ?? [],
+            setup.applicationId,
+            organizationId,
+            setup.protocolVersion,
+        );
         await this.createFileEvents(setupId, body);
         if (body.commitSha != null) {
             await this.recordCommit(branchId, body.commitSha);
@@ -405,7 +441,12 @@ export class ApplicationSetupService {
         const setup = await this.getSetupWithBranch(setupId, organizationId);
         const result = await this.ingestScenarioRecipesForSetup(setup, body);
 
-        await this.relateTestPlansToScenarios(setup.applicationId, result.scenarios);
+        await reconcileTestPlanScenarios(
+            this.db,
+            setup.applicationId,
+            result.scenarios.map((scenario) => scenario.name),
+            log,
+        );
 
         return {
             ok: true as const,
@@ -420,6 +461,7 @@ export class ApplicationSetupService {
             select: {
                 id: true,
                 applicationId: true,
+                protocolVersion: true,
                 application: {
                     select: {
                         mainBranch: {
@@ -462,6 +504,7 @@ export class ApplicationSetupService {
         testCases: NonNullable<UploadArtifactsBody["testCases"]>,
         applicationId: string,
         organizationId: string,
+        protocolVersion: string,
     ): Promise<void> {
         const scenarios = await this.db.scenario.findMany({
             where: { applicationId },
@@ -469,31 +512,32 @@ export class ApplicationSetupService {
         });
         const scenarioByName = new Map(scenarios.map((s) => [s.name, s]));
 
-        // Idempotency: a re-upload (the `upload` CLI command / a retried run) must not
-        // duplicate test cases. Skip any whose (folder, name) already exists for the
-        // app - the CLI's file names are unique per folder, so this is the natural key.
-        // Push the filter into the DB (only the incoming names can collide) rather than
-        // pulling the app's whole test-case list into memory.
+        // Match existing test identities by folder + filename. An identical retry is a
+        // no-op; changed content mints a new plan on the open snapshot so a v1 -> v2
+        // migration can replace frontmatter without forking the test case identity.
         const incomingNames = testCases.map((tc) => tc.name);
         const existingTestCases = await this.db.testCase.findMany({
             where: { applicationId, name: { in: incomingNames } },
-            select: { name: true, folder: { select: { name: true } } },
+            select: { id: true, name: true, folder: { select: { name: true } } },
         });
-        const existingKeys = new Set(existingTestCases.map((t) => `${t.folder.name}::${t.name}`));
+        const existingByKey = new Map(existingTestCases.map((test) => [`${test.folder.name}::${test.name}`, test]));
+        const assignments = await this.db.testCaseAssignment.findMany({
+            where: { snapshotId: snapshot.snapshotId, testCaseId: { in: existingTestCases.map((test) => test.id) } },
+            select: {
+                testCaseId: true,
+                plan: { select: { prompt: true, scenarioId: true, scenarioName: true } },
+            },
+        });
+        const assignmentByTestCase = new Map(assignments.map((assignment) => [assignment.testCaseId, assignment]));
 
         const folderCache = new Map<string, string>();
+        const processedKeys = new Set<string>();
 
         for (const testCase of testCases) {
             const folderName = testCase.folder ?? "default";
             const dedupeKey = `${folderName}::${testCase.name}`;
-            if (existingKeys.has(dedupeKey)) {
-                log.info("Skipping already-uploaded test case (idempotent re-upload)", {
-                    name: testCase.name,
-                    folder: folderName,
-                    applicationId,
-                });
-                continue;
-            }
+            if (processedKeys.has(dedupeKey)) continue;
+            processedKeys.add(dedupeKey);
 
             const { data, content: plan } = matter(testCase.content);
             const frontmatter = TestCaseFrontmatterSchema.parse(data);
@@ -503,14 +547,18 @@ export class ApplicationSetupService {
             if (scenarioName != null) {
                 const scenario = scenarioByName.get(scenarioName);
                 if (scenario == null) {
-                    log.warn("Test references unknown scenario - scenario recipes must be uploaded before tests", {
-                        testCase: testCase.name,
-                        scenarioName,
-                        applicationId,
-                    });
+                    const context = { testCase: testCase.name, scenarioName, applicationId };
+                    if (protocolVersion === "2.0") {
+                        log.info("Deferring test scenario binding until SDK discovery", context);
+                    } else {
+                        log.warn(
+                            "Test references unknown scenario - scenario recipes must be uploaded before tests",
+                            context,
+                        );
+                    }
                 } else {
                     scenarioId = scenario.id;
-                    if (scenario.activeRecipeVersionId == null) {
+                    if (protocolVersion === "1.0" && scenario.activeRecipeVersionId == null) {
                         log.warn("Scenario has no active recipe version", {
                             testCase: testCase.name,
                             scenarioName,
@@ -518,6 +566,45 @@ export class ApplicationSetupService {
                         });
                     }
                 }
+            }
+
+            const existing = existingByKey.get(dedupeKey);
+            if (existing != null) {
+                const assignment = assignmentByTestCase.get(existing.id);
+                const unchanged =
+                    assignment?.plan?.prompt === plan.trim() &&
+                    assignment.plan.scenarioId === (scenarioId ?? null) &&
+                    assignment.plan.scenarioName === (scenarioName ?? null);
+                if (unchanged) {
+                    log.info("Skipping unchanged test case (idempotent re-upload)", {
+                        name: testCase.name,
+                        folder: folderName,
+                        applicationId,
+                    });
+                    continue;
+                }
+
+                if (assignment == null) {
+                    await snapshot.adoptTest({
+                        testCaseId: existing.id,
+                        plan: plan.trim(),
+                        scenarioId,
+                        scenarioName,
+                    });
+                } else {
+                    await snapshot.revisePlan({
+                        testCaseId: existing.id,
+                        plan: plan.trim(),
+                        scenarioId,
+                        scenarioName,
+                    });
+                }
+                log.info("Updated existing test case plan from artifact upload", {
+                    name: testCase.name,
+                    folder: folderName,
+                    applicationId,
+                });
+                continue;
             }
 
             const folderId = await this.findOrCreateFolder(applicationId, organizationId, folderName, folderCache);
@@ -530,9 +617,6 @@ export class ApplicationSetupService {
                 scenarioId,
                 scenarioName,
             });
-
-            // Guard against duplicates within this same batch too.
-            existingKeys.add(dedupeKey);
         }
     }
 
@@ -688,11 +772,13 @@ export class ApplicationSetupService {
             const response = await this.scenarioManager.discover(applicationId, deployment.id);
             // An endpoint advertising nothing is indistinguishable from a broken one, and reading it as
             // "can build nothing" would reject every recipe - so it counts as no answer, not an empty one.
-            if (response.schema.models.length === 0) {
+            // A v2 endpoint carries no `schema` at all; same handling - there is no recipe model check for it.
+            const discoveredModels = response.schema?.models ?? [];
+            if (discoveredModels.length === 0) {
                 log.warn("Discover advertised no models - skipping the recipe model check", { applicationId });
                 return undefined;
             }
-            const models = new Set(response.schema.models.map((model) => model.name));
+            const models = new Set(discoveredModels.map((model) => model.name));
             log.info("Discovered SDK models for the recipe model check", {
                 applicationId,
                 extra: { deploymentId: deployment.id, modelCount: models.size },
@@ -705,45 +791,6 @@ export class ApplicationSetupService {
                 err,
             });
             return undefined;
-        }
-    }
-
-    /**
-     * After scenario recipes are ingested, test plans that were uploaded before
-     * scenarios existed will have `scenarioId = NULL` but `scenarioName` set.
-     * Resolve the deferred reference by matching `scenarioName` against the
-     * just-created scenario records.
-     */
-    private async relateTestPlansToScenarios(applicationId: string, scenarios: Array<{ id: string; name: string }>) {
-        if (scenarios.length === 0) return;
-
-        const scenarioIdByName = new Map(scenarios.map((s) => [s.name, s.id]));
-
-        const unlinkedPlans = await this.db.testPlan.findMany({
-            where: {
-                scenarioId: null,
-                scenarioName: { not: null },
-                testCase: { applicationId },
-            },
-            select: { id: true, scenarioName: true },
-        });
-
-        if (unlinkedPlans.length === 0) return;
-
-        let linked = 0;
-        for (const plan of unlinkedPlans) {
-            const scenarioId = scenarioIdByName.get(plan.scenarioName!);
-            if (scenarioId == null) continue;
-
-            await this.db.testPlan.update({
-                where: { id: plan.id },
-                data: { scenarioId },
-            });
-            linked++;
-        }
-
-        if (linked > 0) {
-            log.info("Related test plans to scenarios", { applicationId, linked, total: unlinkedPlans.length });
         }
     }
 

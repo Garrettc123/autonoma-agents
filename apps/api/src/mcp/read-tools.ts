@@ -107,7 +107,8 @@ export function registerReadTools(server: McpServer, { services, analytics, reso
                 "another editor saved in the meantime. `liveRecipeVersion` is the version main's active snapshot " +
                 "pins, which is what production runs actually seed: when `isLiveRecipeInSync` is false it carries " +
                 "its own `fixtureJson` and what you read above is NOT what runs today; when true it is the same " +
-                "recipe and is not repeated.",
+                'recipe and is not repeated. If `protocol` is "2.0" the app defines scenarios as code (no recipe): ' +
+                "`fixtureJson` is null and `v2Message` explains to edit the scenario's `up` in the repo instead.",
             inputSchema: { ...targetInputFields, scenarioId: z.string().min(1) },
             annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
         },

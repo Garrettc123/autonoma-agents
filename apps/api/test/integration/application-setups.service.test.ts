@@ -1,5 +1,6 @@
 import { ApplicationArchitecture } from "@autonoma/db";
-import { ScenarioRecipeStore } from "@autonoma/scenario";
+import { logger } from "@autonoma/logger";
+import { reconcileTestPlanScenarios, ScenarioRecipeStore } from "@autonoma/scenario";
 import type { ArtifactKey } from "@autonoma/types";
 import { expect } from "vitest";
 import { ApplicationSetupService } from "../../src/application-setup/application-setup.service";
@@ -9,6 +10,7 @@ import type { APITestHarness } from "../harness";
 // Ingestion parses every uploaded test case's frontmatter with TestCaseFrontmatterSchema, which
 // requires a `description` of at least 20 characters - a fixture without one fails the upload.
 const TEST_CASE_DESCRIPTION = "Signing in with valid credentials lands the user on the dashboard.";
+const testLogger = logger.child({ name: "application-setups-service-test" });
 
 async function createSetupFixture(harness: APITestHarness, name: string) {
     const app = await harness.services.applications.createApplication({
@@ -144,6 +146,90 @@ apiTestSuite({
             expect(status.complete).toBe(true);
             expect(received(status.artifacts, "recipe")).toBe(false);
             expect(status.stepComplete).toBe(false);
+        });
+
+        test("changing the setup protocol resets discovery and dry-run proof", async ({ harness }) => {
+            const { app, setupId, service } = await createSetupFixture(harness, "Protocol Reset");
+            await service.updateSetup(setupId, harness.organizationId, { status: "completed" });
+            await harness.db.onboardingState.update({
+                where: { applicationId: app.id },
+                data: {
+                    lastDiscoveredAt: new Date(),
+                    lastDiscoveredModels: 3,
+                    lastDiscoveryError: "stale error",
+                    discoveringStartedAt: new Date(),
+                    dryRunPassedAt: new Date(),
+                },
+            });
+
+            await service.updateSetup(setupId, harness.organizationId, { protocolVersion: "2.0" });
+
+            const [setup, onboarding, application] = await Promise.all([
+                harness.db.applicationSetup.findUniqueOrThrow({ where: { id: setupId } }),
+                harness.db.onboardingState.findUniqueOrThrow({ where: { applicationId: app.id } }),
+                harness.db.application.findUniqueOrThrow({ where: { id: app.id } }),
+            ]);
+            expect(setup.status).toBe("running");
+            expect(setup.completedAt).toBeNull();
+            // The planner's per-run protocol mirrors into the app's hand-set flag - the single source of
+            // truth every v1/v2 gate reads - so the setup PATCH keeps the app flag in lockstep.
+            expect(application.protocolVersion).toBe("2.0");
+            expect(onboarding.lastDiscoveredAt).toBeNull();
+            expect(onboarding.lastDiscoveredModels).toBeNull();
+            expect(onboarding.lastDiscoveryError).toBeNull();
+            expect(onboarding.discoveringStartedAt).toBeNull();
+            expect(onboarding.dryRunPassedAt).toBeNull();
+        });
+
+        test("v2 completes with tests and knowledge base but no recipe or scenarios artifact", async ({ harness }) => {
+            const { app, setupId, service } = await createSetupFixture(harness, "Scenario V2 Artifact Gate");
+            await service.updateSetup(setupId, harness.organizationId, { protocolVersion: "2.0" });
+
+            await service.uploadArtifacts(setupId, harness.organizationId, {
+                testCases: [
+                    {
+                        name: "update-catalog.md",
+                        folder: "catalog",
+                        content:
+                            `---\nscenario: admin-catalog\ndescription: ${TEST_CASE_DESCRIPTION}\n---\n\n` +
+                            "Update the catalog product named {{scenario.product.name}}",
+                    },
+                ],
+                artifacts: [{ name: "AUTONOMA.md", content: "# Knowledge base" }],
+            });
+
+            const beforeCompletion = await harness.services.applicationSetups.artifactStatus(
+                harness.organizationId,
+                app.id,
+            );
+            expect(beforeCompletion.protocolVersion).toBe("2.0");
+            expect(beforeCompletion.artifacts.map((artifact) => artifact.key)).toEqual(["tests", "kb"]);
+            expect(beforeCompletion.stepComplete).toBe(false);
+
+            await service.updateSetup(setupId, harness.organizationId, { status: "completed" });
+            const completed = await harness.services.applicationSetups.artifactStatus(harness.organizationId, app.id);
+            expect(completed.stepComplete).toBe(true);
+
+            const unbound = await harness.db.testPlan.findFirstOrThrow({
+                where: { testCase: { applicationId: app.id } },
+                select: { scenarioName: true, scenarioId: true },
+            });
+            expect(unbound).toEqual({ scenarioName: "admin-catalog", scenarioId: null });
+
+            await harness.scenarioManager.syncScenarioRegistry({
+                applicationId: app.id,
+                scenarios: [{ name: "admin-catalog", description: "Administrator catalog state" }],
+                disableMissing: false,
+                discoveredAt: new Date(),
+            });
+            await reconcileTestPlanScenarios(harness.db, app.id, ["admin-catalog"], testLogger);
+
+            const bound = await harness.db.testPlan.findFirstOrThrow({
+                where: { testCase: { applicationId: app.id } },
+                select: { scenarioName: true, scenarioId: true },
+            });
+            expect(bound.scenarioName).toBe("admin-catalog");
+            expect(bound.scenarioId).not.toBeNull();
         });
 
         test("re-uploading recipe and artifacts is idempotent", async ({ harness }) => {

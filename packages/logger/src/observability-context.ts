@@ -38,6 +38,8 @@ const OrganizationContextSchema = z.object({
 
 const ApplicationContextSchema = z.object({
     applicationId: z.string().min(1),
+    /** The app's hand-set Scenario protocol flag ("1.0" / "2.0"), so telemetry segments v1 vs v2. */
+    protocolVersion: z.string().min(1).optional(),
 });
 
 const BranchContextSchema = z.object({
