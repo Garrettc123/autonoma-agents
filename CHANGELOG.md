@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.260902.1](https://github.com/Autonoma-AI/agent/compare/v1.260831.1...v1.260902.1) (2026-09-02)
+
+
+### Features
+
+* add open-issues info hint and trim over-long PR-page hints ([#2911](https://github.com/Autonoma-AI/agent/issues/2911)) ([4c4ddcf](https://github.com/Autonoma-AI/agent/commit/4c4ddcf4ff5c78f66b384b23b4acec93a3bacaf2))
+* **billing:** only honour a credit overdraft for an organization tha… ([#2830](https://github.com/Autonoma-AI/agent/issues/2830)) ([25a4634](https://github.com/Autonoma-AI/agent/commit/25a46344249042680f9d3fb1800ed5bdf115da38))
+* clickable findings step rows and a gallery loading state ([#2927](https://github.com/Autonoma-AI/agent/issues/2927)) ([6146c5f](https://github.com/Autonoma-AI/agent/commit/6146c5f69311674307c5ba6e9969f192af6dd499))
+* **db:** add GitHubRepository, the identity repo_full_name migrates onto ([#2921](https://github.com/Autonoma-AI/agent/issues/2921)) ([4d90116](https://github.com/Autonoma-AI/agent/commit/4d90116067450c9330243b418583b8d306caabf4))
+* **diffs:** capture the prod dependabot rebase cases as impact evals ([#2865](https://github.com/Autonoma-AI/agent/issues/2865)) ([b2a8018](https://github.com/Autonoma-AI/agent/commit/b2a801895a01861cdf1afa0b2b4fb55c452639f9))
+* **diffs:** restrain impact-analysis fan-out on dependency bumps ([#2916](https://github.com/Autonoma-AI/agent/issues/2916)) ([b38f3c1](https://github.com/Autonoma-AI/agent/commit/b38f3c1ac23dd32db46c6e5941fde87ba53adafa))
+* redesign the analysis issue page to the finding-page standard ([#2910](https://github.com/Autonoma-AI/agent/issues/2910)) ([1fce3dc](https://github.com/Autonoma-AI/agent/commit/1fce3dc81eda22ec1474a37c1adaeca81a00dd75))
+* reliable auto topup ([#2842](https://github.com/Autonoma-AI/agent/issues/2842)) ([efda706](https://github.com/Autonoma-AI/agent/commit/efda706c400d530cb4cbc262c0698dfd882f8ef8))
+* **scenario:** Scenario v2 core - wire contract, provisioning, deploy-signal sync ([#2800](https://github.com/Autonoma-AI/agent/issues/2800)) ([c28855e](https://github.com/Autonoma-AI/agent/commit/c28855e203cff434bab6c398af7b027a7a0032bb))
+* vercel credit purchases ([#2721](https://github.com/Autonoma-AI/agent/issues/2721)) ([c3d4322](https://github.com/Autonoma-AI/agent/commit/c3d4322e3f28e85f486062a2c7d22584cb6a176e))
+
+
+### Bug Fixes
+
+* **agent-core:** cap the model-call retry backoff so it fits the caller's budget ([#2915](https://github.com/Autonoma-AI/agent/issues/2915)) ([647701f](https://github.com/Autonoma-AI/agent/commit/647701fe0e4f928bdeb2674541818fbfc4dad665))
+* **analysis:** route the SDK's missing-factory rejection to scenario_issue ([#2929](https://github.com/Autonoma-AI/agent/issues/2929)) ([396349d](https://github.com/Autonoma-AI/agent/commit/396349d51d7b96dbdd63c5b2650a911e30f84119))
+* cap issue page seen-in-tests panel height so it scrolls internally ([#2926](https://github.com/Autonoma-AI/agent/issues/2926)) ([0fa5168](https://github.com/Autonoma-AI/agent/commit/0fa516845fb234e0fd1c51aa67e1771e702ead5b))
+* **cli:** stop logging the expected missing completion marker every poll ([#2878](https://github.com/Autonoma-AI/agent/issues/2878)) ([1c64738](https://github.com/Autonoma-AI/agent/commit/1c64738a035f02b8cfb141b2d8f261ca38331516))
+* make analysis issues client-owned and unify the owner badge ([#2905](https://github.com/Autonoma-AI/agent/issues/2905)) ([7bcc9d1](https://github.com/Autonoma-AI/agent/commit/7bcc9d11fc6673baaf7a433f18b5c372c97186bb))
+* make run_script backend-unreachable failures honest and recorded ([#2917](https://github.com/Autonoma-AI/agent/issues/2917)) ([b04fa7b](https://github.com/Autonoma-AI/agent/commit/b04fa7b3fc709afa7430845a3d2c32395a4b5d4a))
+* **scenario:** describe a non-JSON SDK error body by what it said, not by the parser ([#2930](https://github.com/Autonoma-AI/agent/issues/2930)) ([db02fae](https://github.com/Autonoma-AI/agent/commit/db02faed86fced79f349b98b8be6d54452a7bf3e))
+
 ## [1.260831.1](https://github.com/Autonoma-AI/agent/compare/v1.260828.1...v1.260831.1) (2026-08-31)
 
 
