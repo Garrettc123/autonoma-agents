@@ -11,7 +11,7 @@ import {
 } from "@autonoma/diffs/analysis";
 import { type Logger, logger as rootLogger } from "@autonoma/logger";
 import { S3Storage } from "@autonoma/storage";
-import { SELF_HEAL_RERUN_REASON } from "@autonoma/types";
+import { type AnalysisRunTarget, previewEnvironmentNumber, SELF_HEAL_RERUN_REASON } from "@autonoma/types";
 import { buildRunFacts, describeProvision, loadGenerationRow } from "../../src/activities/classify-run";
 import { resolveRunTarget } from "../../src/codebase/run-target";
 import { loadSnapshotMeta, resolveGitHubAccess } from "../../src/codebase/snapshot-context";
@@ -88,13 +88,6 @@ export async function captureClassifier(params: CaptureClassifierParams): Promis
         loadGenerationRow(classification.generationId),
     ]);
 
-    if (target.kind !== "pull_request") {
-        throw new Error(
-            `Cannot capture snapshot ${snapshotId}: the classifier corpus freezes a PR number, and this run analyzed ` +
-                `main branch "${target.branchName}". Capturing one needs a frozen branch name in the case schema.`,
-        );
-    }
-
     // The one key production would classify from, resolved exactly as `buildRunArtifacts` resolves it: the
     // dead-time-stripped mp4 when the optimizer produced one, the original webm otherwise.
     const videoKey = generation.optimizedVideoUrl ?? generation.videoUrl;
@@ -109,7 +102,7 @@ export async function captureClassifier(params: CaptureClassifierParams): Promis
             currentSnapshotId: snapshotId,
             before: classification.createdAt,
         }),
-        freezePreviewFacts(github.repoFullName, target.prNumber, meta.applicationId, classification.createdAt, logger),
+        freezePreviewFacts(github.repoFullName, target, meta.applicationId, classification.createdAt, logger),
     ]);
     const baseline = formatPriorRunsBaseline(history);
     // Waits on the namespace the lookup above resolved, so it cannot join that batch.
@@ -131,15 +124,13 @@ export async function captureClassifier(params: CaptureClassifierParams): Promis
     const frozenInput = serializeClassifierInput({
         coords,
         appSlug: meta.appSlug,
-        prNumber: target.prNumber,
+        target,
         test: {
             slug,
             plan: generation.testPlan.prompt,
             affectedReason: resolveAffectedReason(classification),
         },
         provision: describeProvision(generation),
-        prTitle: target.prTitle,
-        prBody: target.prBody,
         priorPass: await loadPriorPass(classification),
         run,
         recording:
@@ -260,12 +251,12 @@ async function loadPriorPass(classification: LoadedClassification): Promise<Clas
     };
 }
 
-/** What a case records about the PR's preview: which live tools production had, and what a replay can serve. */
+/** What a case records about the run's preview: which live tools production had, and what a replay can serve. */
 interface FrozenPreviewFacts {
     capabilities: ProductionCapabilities;
     /** The pod's full env-var name list, or undefined when it could not be frozen in full. */
     previewEnvNames?: string[];
-    /** The Loki stream selector for the app-log window; absent when the PR has no previewkit environment. */
+    /** The Loki stream selector for the app-log window; absent when the run has no previewkit environment. */
     namespace?: string;
 }
 
@@ -273,22 +264,25 @@ interface FrozenPreviewFacts {
  * The preview facts a case carries: which live-infra tools production had, approximated at capture time, the
  * env-var names a replay serves `get_preview_env` from, and the namespace its log window is read out of.
  *
- * Production gated all three live-infra tools on the one fact read here - whether previewkit deployed this PR -
- * so the case records that single fact. The log tool additionally needs a Loki endpoint, but on the WORKER that
- * classifies, which has one; THIS machine's `LOKI_URL` says only whether capture can freeze the window, never
- * whether production had the tool, so it is deliberately not read. The fact is an approximation only because the
- * row is read NOW rather than at classification time; it is recorded so a case says plainly what its replay
- * cannot serve, not to reconstruct the toolset.
+ * Production gated all three live-infra tools on the one fact read here - whether previewkit deployed this run's
+ * preview - so the case records that single fact. The preview keys on the run's environment number
+ * ({@link previewEnvironmentNumber}), which is the PR number for a PR run and the fixed main-branch environment
+ * for a main-branch run, exactly as production's `resolvePreviewEnvironment` resolves it. The log tool
+ * additionally needs a Loki endpoint, but on the WORKER that classifies, which has one; THIS machine's
+ * `LOKI_URL` says only whether capture can freeze the window, never whether production had the tool, so it is
+ * deliberately not read. The fact is an approximation only because the row is read NOW rather than at
+ * classification time; it is recorded so a case says plainly what its replay cannot serve, not to reconstruct
+ * the toolset.
  */
 async function freezePreviewFacts(
     repoFullName: string,
-    prNumber: number,
+    target: AnalysisRunTarget,
     applicationId: string,
     classifiedAt: Date,
     logger: Logger,
 ): Promise<FrozenPreviewFacts> {
     const previewEnvironment = await db.previewkitEnvironment.findUnique({
-        where: { repoFullName_prNumber: { repoFullName, prNumber } },
+        where: { repoFullName_prNumber: { repoFullName, prNumber: previewEnvironmentNumber(target) } },
         select: { namespace: true, resolvedConfig: true },
     });
 
@@ -315,7 +309,7 @@ interface FreezeEnvVarNames {
  * Every env-var name the preview pod ran with, read through the SAME {@link PreviewEnvironment} production
  * reads and bounded to the classification. Undefined rather than a partial list - whether the gap is an
  * unreadable config or a bound that erased the bundle; a case without one keeps `get_preview_env` off,
- * exactly as a non-integrated PR does.
+ * exactly as a non-integrated run does.
  */
 async function freezeEnvVarNames({
     resolvedConfig,

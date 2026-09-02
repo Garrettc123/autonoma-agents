@@ -1,13 +1,13 @@
 import { ApplicationArchitecture } from "@autonoma/db";
 import type { ClassifierInput, RunFacts } from "@autonoma/diffs/analysis";
-import { investigationEvidenceSchema, overlayPointSchema } from "@autonoma/types";
+import { analysisRunTargetSchema, investigationEvidenceSchema, overlayPointSchema } from "@autonoma/types";
 import { z } from "zod";
 import { type CodebaseCoords, codebaseCoordsSchema } from "../framework/codebase-cache";
 import { appLogArtifactLocation } from "./app-log-artifact-location";
 import { frozenPreviewEnv } from "./frozen-preview-env";
 
 /**
- * The one fact production's live-infra tools all hung on: whether previewkit deployed this PR.
+ * The one fact production's live-infra tools all hung on: whether previewkit deployed this run's preview.
  *
  * A case frozen from a preview-integrated run may be graded against a classifier that could see more than this
  * replay can - `run_script` has no frozen form, and a case may carry neither the env-var list nor the log window.
@@ -134,11 +134,15 @@ const frozenRunSchema = z.object({
 export const classifierCaseInputSchema = z.object({
     codebase: codebaseCoordsSchema,
     appSlug: z.string().min(1),
-    prNumber: z.number().int().nonnegative(),
+    /**
+     * What this run analyzed, carried as the same discriminated union production classifies against: a PR (with
+     * its number and the author's stated intent) or the application's main branch (a branch name, with no author
+     * to quote). A main-branch case therefore replays the main-branch intent section rather than a synthesized PR
+     * target.
+     */
+    target: analysisRunTargetSchema,
     test: z.object({ slug: z.string().min(1), plan: z.string(), affectedReason: z.string() }),
     provision: z.object({ status: z.string(), detail: z.string(), seeded: z.string().optional() }),
-    prTitle: z.string().optional(),
-    prBody: z.string().optional(),
     /** Mirrors `ClassifierInput["priorPass"]`: a self-heal re-run is judged against the whole first pass. */
     priorPass: z
         .object({
@@ -154,7 +158,7 @@ export const classifierCaseInputSchema = z.object({
     /** The prior-runs prose, frozen as of the classification so no later run can leak into it. */
     baseline: z.string(),
     /**
-     * Every env-var name the PR's preview pod ran with, so a replay can still answer `get_preview_env`.
+     * Every env-var name the run's preview pod ran with, so a replay can still answer `get_preview_env`.
      *
      * An EMPTY array is a real answer - a preview that configures nothing - and is NOT the same as the field
      * being absent, which says the list could not be frozen honestly. Never a partial list.
@@ -200,14 +204,7 @@ export interface RehydratedClassifierInput {
 export function rehydrateClassifierInput(parsed: ClassifierCaseInput): RehydratedClassifierInput {
     const input: FrozenClassifierInput = {
         appSlug: parsed.appSlug,
-        // The on-disk case stays PR-shaped - capture refuses a main-branch run, which carries no PR number to
-        // freeze - so every replayed case rebuilds a pull-request target.
-        target: {
-            kind: "pull_request",
-            prNumber: parsed.prNumber,
-            prTitle: parsed.prTitle,
-            prBody: parsed.prBody,
-        },
+        target: parsed.target,
         test: parsed.test,
         provision: parsed.provision,
         priorPass: parsed.priorPass,
@@ -234,11 +231,9 @@ export function rehydrateClassifierInput(parsed: ClassifierCaseInput): Rehydrate
 export interface ClassifierCaseSource {
     coords: CodebaseCoords;
     appSlug: string;
-    prNumber: number;
+    target: ClassifierInput["target"];
     test: ClassifierInput["test"];
     provision: ClassifierInput["provision"];
-    prTitle?: string;
-    prBody?: string;
     priorPass?: ClassifierInput["priorPass"];
     run: RunFacts;
     recording?: { key: string; isOptimizedMp4: boolean };
@@ -259,11 +254,9 @@ export function serializeClassifierInput(source: ClassifierCaseSource): Classifi
     return classifierCaseInputSchema.parse({
         codebase: source.coords,
         appSlug: source.appSlug,
-        prNumber: source.prNumber,
+        target: source.target,
         test: source.test,
         provision: source.provision,
-        prTitle: source.prTitle,
-        prBody: source.prBody,
         priorPass: source.priorPass,
         run: { ...source.run, recording: source.recording, finalScreenshotKey: source.finalScreenshotKey },
         baseline: source.baseline,

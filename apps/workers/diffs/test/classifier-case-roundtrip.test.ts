@@ -42,11 +42,14 @@ const RUN: RunFacts = {
 const SOURCE: ClassifierCaseSource = {
     coords: { owner: "acme", repo: "storefront", installationId: 42, baseSha: "b".repeat(40), headSha: "h".repeat(40) },
     appSlug: "storefront",
-    prNumber: 1234,
+    target: {
+        kind: "pull_request",
+        prNumber: 1234,
+        prTitle: "Speed up checkout",
+        prBody: "Debounces the submit handler.",
+    },
     test: { slug: "checkout-happy-path", plan: "1. Log in\n2. Check out", affectedReason: "The diff touches checkout" },
     provision: { status: "up", detail: "Valid auth credentials WERE returned", seeded: "User=1, Order=3" },
-    prTitle: "Speed up checkout",
-    prBody: "Debounces the submit handler.",
     priorPass: {
         category: "plan_mismatch",
         headline: "The test asserted an old toast",
@@ -92,12 +95,29 @@ describe("classifier eval case round-trip", () => {
 
         expect(coords).toEqual(SOURCE.coords);
         expect(baseline).toBe(SOURCE.baseline);
+        expect(input.target).toEqual(SOURCE.target);
         expect(input.test).toEqual(SOURCE.test);
         expect(input.provision).toEqual(SOURCE.provision);
         expect(input.priorPass).toEqual(SOURCE.priorPass);
         expect(input.run.steps).toEqual(RUN.steps);
         expect(input.run.inspectableSteps).toEqual(RUN.inspectableSteps);
         expect(input.run.architecture).toBe("WEB");
+    });
+
+    /**
+     * The gap #2933 closed: a main-branch run carries a branch name and no PR, so it could not be frozen at all.
+     * It now survives the round-trip as `kind: "main_branch"`, so the replay renders the main-branch intent
+     * section rather than a synthesized PR target.
+     */
+    it("carries a main-branch target through the freeze, so a run with no PR is now capturable", () => {
+        const mainBranchSource: ClassifierCaseSource = {
+            ...SOURCE,
+            target: { kind: "main_branch", branchName: "main" },
+        };
+
+        const { input } = rehydrateClassifierInput(throughDisk(mainBranchSource));
+
+        expect(input.target).toEqual({ kind: "main_branch", branchName: "main" });
     });
 
     it("reads the SHAs the classifier renders from the coords, so they cannot disagree with the clone", () => {

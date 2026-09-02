@@ -347,7 +347,7 @@ eval runs never touch it.
 Capture writes the case to `evals/cases/<step>/<name>/`, alongside the ones already
 committed.
 
-`capture:classifier` additionally needs `LOKI_URL` for a previewkit-managed PR, whose app-log window it freezes
+`capture:classifier` additionally needs `LOKI_URL` for a previewkit-managed run, whose app-log window it freezes
 (see [The frozen app-log window](#the-frozen-app-log-window)); Loki is reachable over Tailscale. It also needs
 `s3:PutObject` on `autonoma-dev/classifier-app-logs/*`; eval replay needs `s3:GetObject` on the same prefix. A run
 whose logs have aged out, or a machine that cannot reach Loki, needs `--skip-app-logs` to capture at all - the
@@ -378,7 +378,7 @@ refusing a case with a dead SHA or rotated-away media.
 
 **Classifier - what capture recomputes.** Everything the classifier reasons from is
 reassembled through the **same helpers the production activity uses** (the generation
-select, `buildRunFacts`, `describeProvision`, the PR metadata), so a
+select, `buildRunFacts`, `describeProvision`, the run target - a PR or the main branch), so a
 frozen case cannot quietly diverge from what production classified. Two things are
 recomputed rather than read back, and **both are bounded to the classification's own
 `createdAt`**, because the source behind each is mutable and a capture typically runs
