@@ -16,6 +16,7 @@ export * from "./issue-report";
 export * from "./evidence-tokens";
 export * from "./generation";
 export * from "./api-key";
+export * from "./chat";
 export * from "./organization";
 export * from "./secrets";
 export * from "./previewkit-builtins";

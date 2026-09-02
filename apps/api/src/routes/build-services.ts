@@ -52,6 +52,7 @@ import { SuiteHealthFixPlanService } from "./applications/suite-health-fix-plan.
 import { SuiteHealthService } from "./applications/suite-health.service";
 import { AuthService } from "./auth/auth.service";
 import { BranchesService } from "./branches/branches.service";
+import { ChatService } from "./chat/chat.service";
 import { DeploymentsService } from "./deployments/deployments.service";
 import { PreviewkitEnvFactoryService } from "./deployments/previewkit-env-factory.service";
 import { FoldersService } from "./folders/folders.service";
@@ -76,6 +77,7 @@ export interface Services {
     suiteHealth: SuiteHealthService;
     suiteHealthFixPlan: SuiteHealthFixPlanService;
     branches: BranchesService;
+    chat: ChatService;
     deployments: DeploymentsService;
     previewkitEnvFactory: PreviewkitEnvFactoryService;
     testGenerations: TestGenerationsService;
@@ -247,6 +249,7 @@ export function buildServices({
         auth: new AuthService(conn, new ParkedSessionStore(redisClient), new DemoEntrySourceStore(redisClient)),
         apiKeys: apiKeysService,
         branches: branchesService,
+        chat: new ChatService(),
         deployments: new DeploymentsService(conn, previewkitTrigger),
         previewkitEnvFactory: new PreviewkitEnvFactoryService(conn, encryptionHelper),
         applications: applicationsService,

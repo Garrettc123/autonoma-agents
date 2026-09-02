@@ -7,7 +7,9 @@ import { GitPullRequestIcon } from "@phosphor-icons/react/GitPullRequest";
 import { LightningIcon } from "@phosphor-icons/react/Lightning";
 import { RobotIcon } from "@phosphor-icons/react/Robot";
 import { useLocation } from "@tanstack/react-router";
+import { PrChatDrawer } from "components/chat/pr-chat-drawer";
 import { PrStatusPill } from "components/pr-status/pr-status-pill";
+import { useAuth } from "lib/auth";
 import { useActiveOrg } from "lib/query/auth.queries";
 import { useAnalysisIssues, useBranchByPr, usePrPipelineStatus } from "lib/query/branches.queries";
 import { useApplicationRepositoryFromGitHub, usePullRequestFromGitHub, useRunAnalysis } from "lib/query/github.queries";
@@ -105,6 +107,8 @@ function PRTopBar({
         <FixIssuesButton branchId={branchId} prNumber={prNumber} />
       </Suspense>
 
+      <AdminChatDrawer applicationId={applicationId} prNumber={prNumber} />
+
       {prUrl != null && (
         <a href={prUrl} target="_blank" rel="noopener noreferrer">
           <Button variant="outline" size="sm">
@@ -137,6 +141,14 @@ function FixIssuesButton({ branchId, prNumber }: { branchId: string; prNumber: n
       Fix issues
     </Button>
   );
+}
+
+// Autonoma admins only while the chat runs on a stubbed backend; ungate once the real agent lands.
+function AdminChatDrawer({ applicationId, prNumber }: { applicationId: string; prNumber: number }) {
+  const { isAdmin } = useAuth();
+  if (!isAdmin) return null;
+
+  return <PrChatDrawer applicationId={applicationId} prNumber={prNumber} />;
 }
 
 // The "Autonoma UI" analysis trigger from the trigger-config page: start a run for this PR from the dashboard,

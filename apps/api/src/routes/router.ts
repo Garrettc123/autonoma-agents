@@ -7,6 +7,7 @@ import { applicationsRouter } from "./applications/applications.router";
 import { authRouter } from "./auth/auth.router";
 import { billingRouter } from "./billing/billing.router";
 import { branchesRouter } from "./branches/branches.router";
+import { chatRouter } from "./chat/chat.router";
 import { deploymentsRouter } from "./deployments/deployments.router";
 import { foldersRouter } from "./folders/folders.router";
 import { onboardingRouter } from "./onboarding/onboarding.router";
@@ -26,6 +27,7 @@ const appRouterImpl = router({
     billing: billingRouter,
     applications: applicationsRouter,
     branches: branchesRouter,
+    chat: chatRouter,
     deployments: deploymentsRouter,
     folders: foldersRouter,
     generations: generationsRouter,
