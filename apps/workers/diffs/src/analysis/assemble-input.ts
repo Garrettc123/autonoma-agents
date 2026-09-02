@@ -1,18 +1,13 @@
+import { AnalysisEventResolver, AnalysisEventStore } from "@autonoma/analysis";
 import { db } from "@autonoma/db";
-import { type DiffsAgentInput, resolveScenarioRecipesForSnapshot } from "@autonoma/diffs";
 import { logger } from "@autonoma/logger";
 import { type Suite, TestSuiteStore } from "@autonoma/test-suite";
-import { getGitHubApp } from "../github-app";
-import { type BranchData, loadBranchData, loadDiffsContext } from "./load-context";
-
-/** The DiffsAgent input minus the on-disk clone, which the caller owns. */
-export type DiffsAgentInputWithoutCodebase = Omit<DiffsAgentInput, "codebase">;
+import { type ImpactAnalysisInputs, loadImpactInputs } from "./load-impact-inputs";
+import { EMPTY_MERGE_FLOW_RESULT } from "./merge-flow";
 
 export interface AssembledDiffsAgentInput {
     /** Everything the {@link DiffsAgent} needs except the codebase clone. */
-    agentInput: DiffsAgentInputWithoutCodebase;
-    /** Branch/application/org context, needed downstream for persistence and replay preparation. */
-    branchData: BranchData;
+    agentInput: ImpactAnalysisInputs;
 }
 
 export interface AssembleDiffsAgentInputParams {
@@ -20,17 +15,8 @@ export interface AssembleDiffsAgentInputParams {
 }
 
 /**
- * Loads and assembles the full {@link DiffsAgentInput} (minus the codebase) for
- * a snapshot: branch data plus suite/flow context.
- *
- * This is the DB-backed side-input loader behind the eval-capture utility, which
- * freezes the assembled input to disk.
- *
- * It reads the snapshot directly and never opens an `OpenSnapshot`: the suite
- * store only hands out handles on *open* snapshots, but capture targets finalized
- * (active) ones, and analysis here only reads the snapshot, never mutates it.
- * The merge flow is therefore not run here - it writes to the suite, and its home
- * is the Impact Analysis stage (`selectImpactTargets`).
+ * Assemble {@link ImpactAnalysisInputs} for the eval-capture utility, via the same {@link loadImpactInputs} the
+ * production stage uses but against the baseline suite and recipes, with no merge flow (an empty merge).
  */
 export async function assembleDiffsAgentInput({
     snapshotId,
@@ -39,44 +25,22 @@ export async function assembleDiffsAgentInput({
 
     const snapshot = await db.branchSnapshot.findUniqueOrThrow({
         where: { id: snapshotId },
-        select: { branchId: true, headSha: true, baseSha: true, prevSnapshotId: true },
+        select: { prevSnapshotId: true },
     });
-    const { branchId, headSha, baseSha, prevSnapshotId } = snapshot;
 
-    if (headSha == null || baseSha == null) {
-        throw new Error(
-            `Snapshot ${snapshotId} (branch ${branchId}) is missing required SHAs (headSha: ${headSha ?? "null"}, baseSha: ${baseSha ?? "null"})`,
-        );
-    }
+    const suite = await loadBaselineSuiteInfo(snapshotId, snapshot.prevSnapshotId);
+    const events = await new AnalysisEventResolver(new AnalysisEventStore(db)).resolveForSnapshot(snapshotId);
 
-    const branchData = await loadBranchData(branchId, getGitHubApp());
-    logger.info("Loaded branch data", { extra: { fullName: branchData.fullName } });
-
-    const suiteInfo = await loadBaselineSuiteInfo(snapshotId, prevSnapshotId);
-    const { metadata } = await loadDiffsContext({
-        applicationId: branchData.applicationId,
-        suiteInfo,
-        headSha,
-        baseSha,
-        branchId,
+    const agentInput = await loadImpactInputs({
         snapshotId,
+        suite,
+        merge: EMPTY_MERGE_FLOW_RESULT,
+        events,
+        recipeSnapshotId: resolveBaselineSnapshotId(snapshotId, snapshot.prevSnapshotId),
     });
-    logger.info("Loaded diffs context", { extra: { existingTests: metadata.existingTests.length } });
+    logger.info("Assembled diffs agent input", { extra: { existingTests: agentInput.existingTests.length } });
 
-    // Recipe templates for the scenarios the in-scope tests reference, sourced
-    // from each scenario's point-in-time recipe version for the *same* snapshot
-    // the suite came from. This is template data (what each scenario is designed
-    // to seed), not per-run instance data - analysis runs before any replay.
-    const baselineSnapshotId = resolveBaselineSnapshotId(snapshotId, prevSnapshotId);
-    const scenarioRecipes = await resolveScenarioRecipesForSnapshot(
-        db,
-        baselineSnapshotId,
-        collectInScopeScenarioIds(suiteInfo, metadata.existingTests),
-    );
-
-    const agentInput: DiffsAgentInputWithoutCodebase = { ...metadata, scenarioRecipes };
-
-    return { agentInput, branchData };
+    return { agentInput };
 }
 
 /**
@@ -105,21 +69,4 @@ async function loadBaselineSuiteInfo(snapshotId: string, prevSnapshotId: string 
  */
 function resolveBaselineSnapshotId(snapshotId: string, prevSnapshotId: string | null): string {
     return prevSnapshotId ?? snapshotId;
-}
-
-/**
- * Distinct scenario ids referenced by the tests actually in the agent's scope.
- * Reads the slug -> scenario mapping off the raw suite (which carries the plan's
- * `scenarioId`, dropped by `mapTestSuiteToContext`), restricted to the in-scope
- * slugs.
- */
-function collectInScopeScenarioIds(suiteInfo: Suite, inScopeTests: ReadonlyArray<{ slug: string }>): string[] {
-    const inScopeSlugs = new Set(inScopeTests.map((test) => test.slug));
-    const scenarioIds = new Set<string>();
-    for (const testCase of suiteInfo.testCases) {
-        if (!inScopeSlugs.has(testCase.slug)) continue;
-        const scenarioId = testCase.plan?.scenarioId;
-        if (scenarioId != null) scenarioIds.add(scenarioId);
-    }
-    return [...scenarioIds];
 }

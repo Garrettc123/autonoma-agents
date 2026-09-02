@@ -1,16 +1,11 @@
+import type { ResolvedAnalysisEvent } from "@autonoma/analysis";
 import { db } from "@autonoma/db";
-import {
-    type Codebase,
-    computeRunSubject,
-    resolveScenarioRecipesForSnapshot,
-    skipSelectionForEmptySubject,
-} from "@autonoma/diffs";
-import type { GitHubApp } from "@autonoma/github";
+import { computeRunSubject, skipSelectionForEmptySubject } from "@autonoma/diffs";
 import { logger as rootLogger } from "@autonoma/logger";
-import { type OpenSnapshot, type Suite, TestSuiteStore } from "@autonoma/test-suite";
+import { type OpenSnapshot, TestSuiteStore } from "@autonoma/test-suite";
 import type { AnalysisInvestigationTarget } from "@autonoma/workflow/activities";
-import { getGitHubApp } from "../github-app";
-import { type BranchData, loadBranchData, loadDiffsContext } from "./load-context";
+import type { SnapshotContext } from "../codebase/snapshot-context";
+import { loadImpactInputs } from "./load-impact-inputs";
 import { type AgentSelection, materializeSelection } from "./materialize-selection";
 import { EMPTY_MERGE_FLOW_RESULT, type MergeFlowResult, runMergeFlow } from "./merge-flow";
 import { reverifyOpenIssues } from "./reverify-issues";
@@ -21,10 +16,12 @@ const logger = rootLogger.child({ name: "selectImpactTargets" });
 export interface SelectImpactTargetsParams {
     /** The run's own snapshot the pipeline operates on. */
     snapshotId: string;
-    /** The on-disk clone at base + head SHAs, owned by the activity. */
-    codebase: Codebase;
-    /** The PR's target-branch tip (fetched into the clone), when the activity resolved one. Scopes the subject. */
-    targetSha?: string | undefined;
+    /**
+     * The clone plus the resolved branch/GitHub metadata for the run, owned by the activity. Carries the PR's
+     * target-branch tip (`context.targetSha`, fetched into the clone) that scopes the run subject.
+     */
+    context: SnapshotContext;
+    events: ResolvedAnalysisEvent[];
 }
 
 /**
@@ -45,27 +42,17 @@ export interface SelectImpactTargetsParams {
  */
 export async function selectImpactTargets({
     snapshotId,
-    codebase,
-    targetSha,
+    context,
+    events,
 }: SelectImpactTargetsParams): Promise<ImpactSelection> {
     logger.info("Impact Analysis selection started");
 
-    const githubApp = getGitHubApp();
     const store = new TestSuiteStore(db);
     const snapshot = await store.reopen(snapshotId);
-    const coordinates = requireCoordinates(snapshot);
-    const branchData = await loadBranchData(snapshot.branchId, githubApp);
 
-    const merge = await absorbMergedBranchWork({
-        store,
-        snapshot,
-        branchData,
-        githubApp,
-        coordinates,
-        codebase,
-    });
+    const merge = await absorbMergedBranchWork({ store, snapshot, context });
 
-    const agentResult = await runSelection({ snapshot, branchData, coordinates, codebase, merge, targetSha });
+    const agentResult = await runSelection({ snapshot, context, merge, events });
 
     const selected = await materializeSelection({ snapshot, agentResult });
     const reverified = await reverifyOpenIssues({ db, snapshot });
@@ -100,12 +87,6 @@ export interface ImpactSelection {
     reasoning: string;
 }
 
-/** The run's git coordinates: what the diff is taken between. */
-interface SnapshotCoordinates {
-    headSha: string;
-    baseSha: string;
-}
-
 /**
  * Two Investigators on one test would race for its single `(snapshot, testCase)` finding row, so the target list
  * holds one entry per test. First entry wins; a duplicate is logged and skipped.
@@ -126,15 +107,6 @@ function dedupeTargets(targets: AnalysisInvestigationTarget[]): AnalysisInvestig
     return deduped;
 }
 
-function requireCoordinates(snapshot: OpenSnapshot): SnapshotCoordinates {
-    if (snapshot.headSha == null || snapshot.baseSha == null) {
-        throw new Error(
-            `Snapshot ${snapshot.snapshotId} is missing SHAs (head: ${snapshot.headSha}, base: ${snapshot.baseSha})`,
-        );
-    }
-    return { headSha: snapshot.headSha, baseSha: snapshot.baseSha };
-}
-
 /**
  * Run the merge flow when this run is the application's main branch, where merges land. Phase 1 only handles the
  * `feat/x -> main` direction, so a PR-branch run has no merged work to absorb.
@@ -142,45 +114,38 @@ function requireCoordinates(snapshot: OpenSnapshot): SnapshotCoordinates {
 async function absorbMergedBranchWork({
     store,
     snapshot,
-    branchData,
-    githubApp,
-    coordinates,
-    codebase,
+    context,
 }: {
     store: TestSuiteStore;
     snapshot: OpenSnapshot;
-    branchData: BranchData;
-    githubApp: GitHubApp;
-    coordinates: SnapshotCoordinates;
-    codebase: Codebase;
+    context: SnapshotContext;
 }): Promise<MergeFlowResult> {
-    if (!branchData.isMainBranch) {
+    if (!context.isMainBranch) {
         logger.info("Not a main-branch run; skipping the merge flow");
         return EMPTY_MERGE_FLOW_RESULT;
     }
 
-    const [owner, repo] = branchData.fullName.split("/");
+    const [owner, repo] = context.repoFullName.split("/");
     if (owner == null || repo == null) {
         logger.warn("Unexpected repository fullName; skipping the merge flow", {
-            extra: { fullName: branchData.fullName },
+            extra: { fullName: context.repoFullName },
         });
         return EMPTY_MERGE_FLOW_RESULT;
     }
 
-    const githubClient = await githubApp.getInstallationClient(Number(branchData.installationId));
     const result = await runMergeFlow({
         db,
         store,
         snapshot,
-        githubClient,
+        githubClient: context.githubClient,
         owner,
         repo,
-        targetBranchRef: branchData.defaultBranch,
-        baseSha: coordinates.baseSha,
-        headSha: coordinates.headSha,
+        targetBranchRef: context.defaultBranch,
+        baseSha: context.baseSha,
+        headSha: context.headSha,
         // primaryDir, not root: in a multi-repo workspace `root` is the parent that holds the repos, not a repo -
         // the merge flow runs git against the primary repo's own clone.
-        repoDir: codebase.primaryDir,
+        repoDir: context.codebase.primaryDir,
     });
 
     logger.info("Merge flow absorbed", {
@@ -195,46 +160,34 @@ async function absorbMergedBranchWork({
 }
 
 /**
- * Build the DiffsAgent input from the snapshot's suite - read AFTER the merge flow applied, so it already carries
- * the imported plans and no longer carries the propagated deletions - and run the agent.
+ * Assemble the DiffsAgent input from the snapshot's suite - read AFTER the merge flow applied, so it already
+ * carries the imported plans and no longer carries the propagated deletions (see {@link loadImpactInputs}) - and
+ * run the agent over the activity's clone.
  */
 async function runSelection({
     snapshot,
-    branchData,
-    coordinates,
-    codebase,
+    context,
     merge,
-    targetSha,
+    events,
 }: {
     snapshot: OpenSnapshot;
-    branchData: BranchData;
-    coordinates: SnapshotCoordinates;
-    codebase: Codebase;
+    context: SnapshotContext;
     merge: MergeFlowResult;
-    targetSha?: string | undefined;
+    events: ResolvedAnalysisEvent[];
 }): Promise<AgentSelection> {
     // Main is its own target: merging a PR is main's own act, so its diff is not scoped down.
-    const subject = branchData.isMainBranch
+    const subject = context.isMainBranch
         ? undefined
         : await computeRunSubject({
-              root: codebase.primaryDir,
-              headSha: coordinates.headSha,
-              frontierSha: coordinates.baseSha,
-              targetSha,
+              root: context.codebase.primaryDir,
+              headSha: context.headSha,
+              frontierSha: context.baseSha,
+              targetSha: context.targetSha,
           });
 
-    const suite = await snapshot.read();
-    const { metadata } = await loadDiffsContext({
-        applicationId: branchData.applicationId,
-        suiteInfo: suite,
-        headSha: coordinates.headSha,
-        baseSha: coordinates.baseSha,
-        branchId: snapshot.branchId,
-        snapshotId: snapshot.snapshotId,
-    });
     // Nothing owned to analyze and no directives to serve: answer deterministically instead of asking an agent
     // to do nothing - each run that talks itself into "interference" costs real test executions.
-    const skipped = skipSelectionForEmptySubject(subject, metadata.events ?? []);
+    const skipped = skipSelectionForEmptySubject(subject, events);
     if (skipped != null) {
         return {
             reasoning: skipped.reasoning,
@@ -245,25 +198,13 @@ async function runSelection({
         };
     }
 
-    const scenarioRecipes = await resolveScenarioRecipesForSnapshot(db, snapshot.snapshotId, collectScenarioIds(suite));
-
-    // An imported test is already in the run set with its plan settled, so it is withheld from the agent's list -
-    // marking it affected would only target the same test twice. Conflicts stay listed: the agent reads their
-    // current plans to explain how the legs diverge.
-    const importedSlugs = new Set(merge.imports.map((imported) => imported.slug));
-    const existingTests = metadata.existingTests.filter((test) => !importedSlugs.has(test.slug));
+    const suite = await snapshot.read();
+    const inputs = await loadImpactInputs({ snapshotId: snapshot.snapshotId, suite, merge, events });
 
     const { result } = await runDiffsAgent({
         snapshotId: snapshot.snapshotId,
-        input: {
-            ...metadata,
-            existingTests,
-            merges: merge.merges,
-            preClassifiedConflicts: merge.preClassifiedConflicts,
-            scenarioRecipes,
-            subject,
-        },
-        codebase,
+        input: { ...inputs, subject },
+        codebase: context.codebase,
     });
     logger.info("DiffsAgent selection complete", {
         extra: { affectedTests: result.affectedTests.length, createdTests: result.createdTests.length },
@@ -283,17 +224,7 @@ async function runSelection({
             folderName: test.folderName,
             scenarioId: test.scenarioId,
         })),
-        flowFolderId: (folderName) => metadata.flowIndex.getFlow(folderName)?.id,
+        flowFolderId: (folderName) => inputs.flowIndex.getFlow(folderName)?.id,
         testCaseIdBySlug: new Map(suite.testCases.map((testCase) => [testCase.slug, testCase.id])),
     };
-}
-
-/** The distinct scenario ids the suite's plans reference (for point-in-time recipe resolution). */
-function collectScenarioIds(suite: Suite): string[] {
-    const ids = new Set<string>();
-    for (const testCase of suite.testCases) {
-        const scenarioId = testCase.plan?.scenarioId;
-        if (scenarioId != null) ids.add(scenarioId);
-    }
-    return [...ids];
 }

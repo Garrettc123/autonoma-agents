@@ -1,4 +1,4 @@
-import { AnalysisEventResolver, recordedEventShas } from "@autonoma/analysis";
+import { AnalysisEventResolver, recordedEventShas, type ResolvedAnalysisEvent } from "@autonoma/analysis";
 import { db } from "@autonoma/db";
 import { assertSnapshotPending } from "@autonoma/diffs/analysis";
 import { logger as rootLogger } from "@autonoma/logger";
@@ -31,11 +31,13 @@ export async function runImpactAnalysis(input: RunImpactAnalysisInput): Promise<
     // snapshot immune to a redeploy landing mid-run.
     await new SnapshotDependencyManifestPinner(db).ensurePinned(snapshotId);
 
+    const events = await new AnalysisEventResolver(getAnalysisEventStore()).resolveForSnapshot(snapshotId);
+
     const selection = await withSnapshotContext(
         snapshotId,
         `impact-${snapshotId}`,
-        (context) => selectImpactTargets({ snapshotId, codebase: context.codebase, targetSha: context.targetSha }),
-        { extraShas: await claimedEventShas(snapshotId), fetchTargetTip: true },
+        (context) => selectImpactTargets({ snapshotId, context, events }),
+        { extraShas: await claimedEventShas(snapshotId, events), fetchTargetTip: true },
     );
 
     const analysis = getAnalysisStore().forAnalysis(snapshotId);
@@ -56,13 +58,10 @@ export async function runImpactAnalysis(input: RunImpactAnalysisInput): Promise<
 }
 
 /** Fetched into the clone so the agent can diff the recorded movement (a rebase, a force push), not just base..head. */
-async function claimedEventShas(snapshotId: string): Promise<string[]> {
-    const [events, snapshot] = await Promise.all([
-        new AnalysisEventResolver(getAnalysisEventStore()).resolveForSnapshot(snapshotId),
-        db.branchSnapshot.findUniqueOrThrow({
-            where: { id: snapshotId },
-            select: { headSha: true, baseSha: true },
-        }),
-    ]);
+async function claimedEventShas(snapshotId: string, events: ResolvedAnalysisEvent[]): Promise<string[]> {
+    const snapshot = await db.branchSnapshot.findUniqueOrThrow({
+        where: { id: snapshotId },
+        select: { headSha: true, baseSha: true },
+    });
     return recordedEventShas(events, [snapshot.headSha, snapshot.baseSha]);
 }

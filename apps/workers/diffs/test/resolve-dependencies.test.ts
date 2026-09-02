@@ -55,7 +55,10 @@ diffJobContextSuite({
                 prevSnapshotId: prev,
             });
 
-            const result = await resolveDependencyCheckouts(harness.db, current);
+            const result = await resolveDependencyCheckouts(harness.db, current, {
+                prevSnapshotId: prev,
+                pinnedDependencyShas: { "acme/api": "api-new", "acme/worker": "worker-new" },
+            });
 
             expect(result.unavailable).toEqual([]);
             expect(result.dependencies).toEqual(
@@ -70,7 +73,9 @@ diffJobContextSuite({
             const branchId = await seedBranch(harness.db, seedResult.organizationId);
             const current = await seedSnapshot(harness.db, branchId, { pinned: { "acme/api": "api-first" } });
 
-            const result = await resolveDependencyCheckouts(harness.db, current);
+            const result = await resolveDependencyCheckouts(harness.db, current, {
+                pinnedDependencyShas: { "acme/api": "api-first" },
+            });
 
             expect(result.dependencies).toEqual([{ name: "acme/api", commitSha: "api-first", baseSha: undefined }]);
         });
@@ -87,7 +92,10 @@ diffJobContextSuite({
                 prevSnapshotId: middle,
             });
 
-            const result = await resolveDependencyCheckouts(harness.db, current);
+            const result = await resolveDependencyCheckouts(harness.db, current, {
+                prevSnapshotId: middle,
+                pinnedDependencyShas: { "acme/api": "api-current" },
+            });
 
             expect(result.dependencies).toEqual([
                 { name: "acme/api", commitSha: "api-current", baseSha: "api-oldest" },
@@ -103,7 +111,9 @@ diffJobContextSuite({
                 pinned: { be: "alias-sha", "acme/api": "api-sha" },
             });
 
-            const result = await resolveDependencyCheckouts(harness.db, current);
+            const result = await resolveDependencyCheckouts(harness.db, current, {
+                pinnedDependencyShas: { be: "alias-sha", "acme/api": "api-sha" },
+            });
 
             expect(result.dependencies).toEqual([{ name: "acme/api", commitSha: "api-sha", baseSha: undefined }]);
         });
@@ -112,7 +122,7 @@ diffJobContextSuite({
             const branchId = await seedBranch(harness.db, seedResult.organizationId);
             const current = await seedSnapshot(harness.db, branchId, { pinned: {} });
 
-            const result = await resolveDependencyCheckouts(harness.db, current);
+            const result = await resolveDependencyCheckouts(harness.db, current, { pinnedDependencyShas: {} });
 
             expect(result).toEqual({ dependencies: [], unavailable: [] });
         });

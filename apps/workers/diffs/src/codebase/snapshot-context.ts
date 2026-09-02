@@ -5,7 +5,11 @@ import { db, type OnboardingStep, type PrismaClient } from "@autonoma/db";
 import { Codebase } from "@autonoma/diffs";
 import { type GitHubInstallationClient, UnreachableBaseShaError } from "@autonoma/github";
 import { logger as rootLogger } from "@autonoma/logger";
-import { APPLICATION_UNLINKED_FAILURE_TYPE } from "@autonoma/types";
+import {
+    APPLICATION_UNLINKED_FAILURE_TYPE,
+    parseSnapshotDependencyShaMap,
+    type SnapshotDependencyShaMap,
+} from "@autonoma/types";
 import { ApplicationFailure } from "@temporalio/activity";
 import { getGitHubApp } from "../github-app";
 import { resolveDependencyCheckouts } from "./resolve-dependencies";
@@ -23,13 +27,23 @@ export interface SnapshotMeta {
     clientName: string;
     branchId: string;
     githubRepositoryId: number;
+    /** True when the snapshot belongs to the application's main branch. Gates the feat/x -> main merge flow. */
+    isMainBranch: boolean;
     /** The application's onboarding step - gates whether we may post PR comments (only once `completed`). */
     onboardingStep: OnboardingStep | undefined;
+}
+
+/** Clone-resolution inputs kept off `SnapshotMeta`: a clone-setup detail, not metadata the analysis activities consume. */
+interface SnapshotCloneInputs {
+    prevSnapshotId?: string;
+    pinnedDependencyShas: SnapshotDependencyShaMap;
 }
 
 /** The authenticated repository access resolved for a snapshot's application. */
 export interface GitHubAccess {
     repoFullName: string;
+    /** Repository's default branch (e.g. "main"), from GitHub. The merge flow's target ref. */
+    defaultBranch: string;
     githubClient: GitHubInstallationClient;
 }
 
@@ -42,13 +56,18 @@ export interface SnapshotContext extends SnapshotMeta, GitHubAccess {
 
 /** Load only the persisted metadata a snapshot's analysis activities need. `client` defaults to the shared
  * connection; an injected one lets tests seed and read through the same transaction. */
-export async function loadSnapshotMeta(snapshotId: string, client: PrismaClient = db): Promise<SnapshotMeta> {
+export async function loadSnapshotMeta(
+    snapshotId: string,
+    client: PrismaClient = db,
+): Promise<SnapshotMeta & SnapshotCloneInputs> {
     const snapshot = await client.branchSnapshot.findUniqueOrThrow({
         where: { id: snapshotId },
         select: {
             headSha: true,
             baseSha: true,
             createdAt: true,
+            prevSnapshotId: true,
+            pinnedDependencyShas: true,
             branch: {
                 select: {
                     id: true,
@@ -59,6 +78,7 @@ export async function loadSnapshotMeta(snapshotId: string, client: PrismaClient 
                             name: true,
                             organizationId: true,
                             githubRepositoryId: true,
+                            mainBranchId: true,
                             onboardingState: { select: { step: true } },
                         },
                     },
@@ -91,7 +111,10 @@ export async function loadSnapshotMeta(snapshotId: string, client: PrismaClient 
         clientName: application.name,
         branchId: snapshot.branch.id,
         githubRepositoryId: application.githubRepositoryId,
+        isMainBranch: application.mainBranchId === snapshot.branch.id,
         onboardingStep: application.onboardingState?.step,
+        prevSnapshotId: snapshot.prevSnapshotId ?? undefined,
+        pinnedDependencyShas: parseSnapshotDependencyShaMap(snapshot.pinnedDependencyShas),
     };
 }
 
@@ -105,7 +128,7 @@ async function resolveGitHubAccessFor(organizationId: string, githubRepositoryId
     const installation = await db.gitHubInstallation.findUniqueOrThrow({ where: { organizationId } });
     const githubClient = await getGitHubApp().getInstallationClient(installation.installationId);
     const repo = await githubClient.getRepository(githubRepositoryId);
-    return { repoFullName: repo.fullName, githubClient };
+    return { repoFullName: repo.fullName, defaultBranch: repo.defaultBranch, githubClient };
 }
 
 interface CloneCoords {
@@ -183,7 +206,10 @@ export async function withSnapshotContext<T>(
 ): Promise<T> {
     const meta = await loadSnapshotMeta(snapshotId);
     const github = await resolveGitHubAccess(meta);
-    const dependencies = await resolveDependencyCheckouts(db, snapshotId);
+    const dependencies = await resolveDependencyCheckouts(db, snapshotId, {
+        prevSnapshotId: meta.prevSnapshotId,
+        pinnedDependencyShas: meta.pinnedDependencyShas,
+    });
     const targetSha = options?.fetchTargetTip === true ? await resolveTargetTipSha(meta, github) : undefined;
     return cloneWithBaseRecovery(meta, github, dependencies, targetDirSeed, body, options, targetSha);
 }
@@ -307,8 +333,10 @@ function buildSnapshotContext(
         clientName: meta.clientName,
         branchId: meta.branchId,
         githubRepositoryId: meta.githubRepositoryId,
+        isMainBranch: meta.isMainBranch,
         onboardingStep: meta.onboardingStep,
         repoFullName: github.repoFullName,
+        defaultBranch: github.defaultBranch,
         githubClient: github.githubClient,
         codebase,
         targetSha,

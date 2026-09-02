@@ -131,6 +131,7 @@ class CrossSurfaceHarness implements IntegrationHarness {
                 clientName: org.name,
                 branchId: branch.id,
                 githubRepositoryId: 1,
+                isMainBranch: false,
                 onboardingStep: undefined,
             },
         };

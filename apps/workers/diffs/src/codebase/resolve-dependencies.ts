@@ -1,7 +1,7 @@
 import type { PrismaClient } from "@autonoma/db";
 import type { RepoCloneSpec, UnavailableRepo } from "@autonoma/diffs";
 import { logger as rootLogger } from "@autonoma/logger";
-import { parseSnapshotDependencyShaMap } from "@autonoma/types";
+import { parseSnapshotDependencyShaMap, type SnapshotDependencyShaMap } from "@autonoma/types";
 
 /**
  * The dependency repos to check out beside a snapshot's primary repo: the ones
@@ -23,6 +23,12 @@ function isResolvableRepo(name: string): boolean {
     return name.includes("/");
 }
 
+/** The current snapshot's pinned dependency state, read once by the caller (see {@link loadSnapshotMeta}). */
+export interface SnapshotDependencyPin {
+    prevSnapshotId?: string;
+    pinnedDependencyShas: SnapshotDependencyShaMap;
+}
+
 /**
  * Resolves the multi-repo checkout for a snapshot's grounding agents from its
  * pinned dependency map (`pinnedDependencyShas`, keyed by lowercased
@@ -39,16 +45,11 @@ function isResolvableRepo(name: string): boolean {
 export async function resolveDependencyCheckouts(
     db: PrismaClient,
     snapshotId: string,
+    pin: SnapshotDependencyPin,
 ): Promise<ResolvedDependencyCheckouts> {
     const logger = rootLogger.child({ name: "resolveDependencyCheckouts", extra: { snapshotId } });
     try {
-        const snapshot = await db.branchSnapshot.findUniqueOrThrow({
-            where: { id: snapshotId },
-            select: { prevSnapshotId: true, pinnedDependencyShas: true },
-        });
-
-        const currentShas = parseSnapshotDependencyShaMap(snapshot.pinnedDependencyShas);
-        const resolvable = Object.entries(currentShas).filter(([name]) => isResolvableRepo(name));
+        const resolvable = Object.entries(pin.pinnedDependencyShas).filter(([name]) => isResolvableRepo(name));
         if (resolvable.length === 0) {
             logger.info("Snapshot pinned no resolvable dependencies, single-repo checkout");
             return EMPTY;
@@ -56,7 +57,7 @@ export async function resolveDependencyCheckouts(
 
         const baseShas = await resolveBaseShas(
             db,
-            snapshot.prevSnapshotId,
+            pin.prevSnapshotId ?? null,
             resolvable.map(([name]) => name),
             logger,
         );
