@@ -241,10 +241,14 @@ describe("SdkClient (DB-free)", () => {
     });
 
     it("preserves the raw body and content type when the response is not JSON", async () => {
-        const htmlErrorPage = "<!DOCTYPE html><html><body><h1>500 Internal Server Error</h1></body></html>";
+        const htmlErrorPage =
+            "<!DOCTYPE html><html><head><title>Error</title><style>h1{color:red}</style></head>" +
+            "<body><h1>500 Internal Server Error</h1><script>track()</script></body></html>";
         server.onRequest(() => ({ status: 500, raw: htmlErrorPage, contentType: "text/html; charset=utf-8" }));
 
-        await expect(client.discover({ timeoutMs: 5_000 })).rejects.toThrow("SDK returned HTTP 500");
+        await expect(client.discover({ timeoutMs: 5_000 })).rejects.toThrow(
+            "SDK returned HTTP 500: non-JSON response (text/html): Error 500 Internal Server Error",
+        );
 
         expect(recorder.events).toHaveLength(1);
         const recorded = recorder.events[0]?.responseBody;
@@ -253,6 +257,29 @@ describe("SdkClient (DB-free)", () => {
             contentType: "text/html; charset=utf-8",
             rawBody: htmlErrorPage,
         });
+    });
+
+    it("quotes a plain-text error body verbatim, capped, and carries no SDK code", async () => {
+        const authWall = "This preview requires authentication. ".repeat(6).trim();
+        server.onRequest(() => ({ status: 401, raw: authWall, contentType: "text/plain" }));
+
+        const error = await client.discover({ timeoutMs: 5_000 }).catch((err: unknown) => err);
+
+        expect(error).toBeInstanceOf(SdkHttpError);
+        if (!(error instanceof SdkHttpError)) throw new Error("unreachable");
+        expect(error.status).toBe(401);
+        expect(error.code).toBeUndefined();
+        expect(error.message).toBe(
+            `SDK returned HTTP 401: non-JSON response (text/plain): ${authWall.slice(0, 120)}...`,
+        );
+    });
+
+    it("names an empty error body instead of quoting the JSON parser", async () => {
+        server.onRequest(() => ({ status: 503, raw: "", contentType: "text/html" }));
+
+        await expect(client.discover({ timeoutMs: 5_000 })).rejects.toThrow(
+            "SDK returned HTTP 503: empty response body",
+        );
     });
 
     it("does not defend against a recorder that rejects (recorder owns its own error handling)", async () => {

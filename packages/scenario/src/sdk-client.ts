@@ -19,6 +19,12 @@ export interface SdkCallOptions {
  */
 const MAX_RAW_BODY_CHARS = 4_000;
 
+const NON_JSON_EXCERPT_CHARS = 120;
+
+const HTML_BLOCK_PATTERN = /<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi;
+const HTML_TAG_PATTERN = /<[^>]+>/g;
+const WHITESPACE_RUN_PATTERN = /\s+/g;
+
 export interface SdkClientOptions {
     applicationId: string;
     sdkUrl: string;
@@ -52,6 +58,10 @@ interface CallParams<T> {
     responseSchema: z.ZodType<T>;
     timeoutMs: number;
 }
+
+type ParsedBody =
+    | { kind: "json"; body: unknown }
+    | { kind: "text"; rawText: string; contentType?: string; parseError: string };
 
 /**
  * HMAC-signed HTTP client for the customer-deployed Autonoma SDK endpoint.
@@ -123,7 +133,7 @@ export class SdkClient {
         const { instanceId, action, body, responseSchema, timeoutMs } = params;
 
         const startTime = Date.now();
-        let response: { status: number; responseBody: unknown };
+        let response: { status: number; body: ParsedBody };
         try {
             response = await this.executeRequest(body, timeoutMs);
         } catch (err) {
@@ -152,7 +162,8 @@ export class SdkClient {
             throw new SdkCallError(message, failure);
         }
 
-        const { status, responseBody } = response;
+        const { status, body: parsedBody } = response;
+        const responseBody = recordedBody(parsedBody);
         await this.recorder.record({
             applicationId: this.applicationId,
             instanceId,
@@ -164,8 +175,9 @@ export class SdkClient {
         });
 
         if (status < 200 || status >= 300) {
-            const detail = extractResponseDetail(responseBody);
-            const code = extractResponseCode(responseBody);
+            const detail =
+                parsedBody.kind === "json" ? extractResponseDetail(parsedBody.body) : describeNonJsonBody(parsedBody);
+            const code = parsedBody.kind === "json" ? extractResponseCode(parsedBody.body) : undefined;
             const message = detail != null ? `SDK returned HTTP ${status}: ${detail}` : `SDK returned HTTP ${status}`;
             this.logger.warn(`SDK ${action} returned ${status}`, { status, responseBody });
             throw new SdkHttpError(status, message, code, detail);
@@ -180,7 +192,7 @@ export class SdkClient {
         return parsed.data;
     }
 
-    private async executeRequest(body: unknown, timeoutMs: number): Promise<{ status: number; responseBody: unknown }> {
+    private async executeRequest(body: unknown, timeoutMs: number): Promise<{ status: number; body: ParsedBody }> {
         const bodyString = JSON.stringify(body);
         const signature = sign(bodyString, this.signingSecret);
 
@@ -196,7 +208,7 @@ export class SdkClient {
         });
 
         const rawText = await response.text();
-        return { status: response.status, responseBody: parseResponseBody(rawText, response.headers) };
+        return { status: response.status, body: parseResponseBody(rawText, response.headers) };
     }
 }
 
@@ -204,23 +216,47 @@ function sign(body: string, signingSecret: string): string {
     return createHmac("sha256", signingSecret).update(body).digest("hex");
 }
 
-/**
- * Parse a response body as JSON, preserving the raw payload when it is not valid
- * JSON. A non-JSON body (e.g. an HTML error page) is the single most useful
- * artifact for debugging a failed customer endpoint, so on parse failure we keep
- * the raw text (truncated) and the declared content type instead of discarding
- * them - both land in the recorded `WebhookCall.responseBody`.
- */
-function parseResponseBody(rawText: string, headers: Headers): unknown {
+function parseResponseBody(rawText: string, headers: Headers): ParsedBody {
     try {
-        return JSON.parse(rawText);
+        return { kind: "json", body: JSON.parse(rawText) };
     } catch (error) {
         return {
-            error: `Error parsing response: ${error instanceof Error ? error.message : String(error)}`,
+            kind: "text",
+            rawText,
             contentType: headers.get("content-type") ?? undefined,
-            rawBody: rawText.slice(0, MAX_RAW_BODY_CHARS),
+            parseError: error instanceof Error ? error.message : String(error),
         };
     }
+}
+
+/**
+ * The body as persisted on `WebhookCall.responseBody`. A non-JSON body (e.g. an HTML error page) is the single most
+ * useful artifact for debugging a failed customer endpoint, so instead of discarding it we record the raw text
+ * (truncated), the declared content type, and why it did not parse.
+ */
+function recordedBody(parsed: ParsedBody): unknown {
+    if (parsed.kind === "json") return parsed.body;
+    return {
+        error: `Error parsing response: ${parsed.parseError}`,
+        contentType: parsed.contentType,
+        rawBody: parsed.rawText.slice(0, MAX_RAW_BODY_CHARS),
+    };
+}
+
+function describeNonJsonBody(parsed: { rawText: string; contentType?: string }): string {
+    if (parsed.rawText.trim().length === 0) return "empty response body";
+
+    const mediaType = parsed.contentType?.split(";")[0]?.trim();
+    const label = mediaType != null && mediaType.length > 0 ? `non-JSON response (${mediaType})` : "non-JSON response";
+    const text = parsed.rawText
+        .replace(HTML_BLOCK_PATTERN, " ")
+        .replace(HTML_TAG_PATTERN, " ")
+        .replace(WHITESPACE_RUN_PATTERN, " ")
+        .trim();
+    if (text.length === 0) return `${label} with no readable text`;
+
+    const excerpt = text.length > NON_JSON_EXCERPT_CHARS ? `${text.slice(0, NON_JSON_EXCERPT_CHARS)}...` : text;
+    return `${label}: ${excerpt}`;
 }
 
 function extractResponseDetail(responseBody: unknown): string | undefined {
