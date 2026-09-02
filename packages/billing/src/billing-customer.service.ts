@@ -210,6 +210,9 @@ export class BillingCustomerService extends Service {
                     autoTopUpEnabled: true,
                     autoTopUpThreshold: true,
                     autoTopUpPackageId: true,
+                    // Only to ask Stripe about saved cards below - selected here so that lookup does
+                    // not re-read this same row for one column.
+                    stripeCustomerId: true,
                     autoTopUpLastFailureReason: true,
                     autoTopUpLastFailureAt: true,
                     transactions: {
@@ -249,8 +252,12 @@ export class BillingCustomerService extends Service {
 
         const cliCreditsSpent = Math.abs(llmProxyAggregate._sum.amount ?? 0);
         // Deliberately after the early return above: an organization with no customer row has no
-        // Stripe customer either, so there is nothing to ask Stripe about.
-        const hasSavedPaymentMethod = await this.hasSavedPaymentMethod(organizationId);
+        // Stripe customer either, so there is nothing to ask Stripe about. Takes the id from the read
+        // already done rather than going back for the row.
+        const hasSavedPaymentMethod = await this.stripeHoldsPaymentMethod(
+            customer.stripeCustomerId ?? undefined,
+            organizationId,
+        );
 
         return {
             creditBalance: customer.creditBalance,
@@ -273,26 +280,29 @@ export class BillingCustomerService extends Service {
     }
 
     /**
-     * Whether Stripe holds a reusable payment method for this organization - what `AutoTopUpService`
-     * needs to charge off-session, and therefore what auto top-up is worthless without.
+     * Whether Stripe holds a reusable payment method for this `stripeCustomerId` - what
+     * `AutoTopUpService` needs to charge off-session, and therefore what auto top-up is worthless
+     * without.
      *
      * A card only ends up saved as a side effect of completing Checkout (`setup_future_usage:
-     * "off_session"`), so a organization that has never bought a package has none, and enabling
+     * "off_session"`), so an organization that has never bought a package has none, and enabling
      * auto top-up would configure a recharge that can never fire.
+     *
+     * Takes the id rather than looking it up, so a caller that has already read the customer does
+     * not pay for the same row twice. Both callers here have.
      *
      * Answers `false` rather than throwing when Stripe is unreachable or unconfigured: the callers
      * are a status read and a settings write, and neither should fail because the card lookup did.
      * The cost of being wrong is a refused toggle, not a broken charge.
      */
-    async hasSavedPaymentMethod(organizationId: string): Promise<boolean> {
-        const customer = await this.db.billingCustomer.findUnique({
-            where: { organizationId },
-            select: { stripeCustomerId: true },
-        });
-        if (customer?.stripeCustomerId == null) return false;
+    private async stripeHoldsPaymentMethod(
+        stripeCustomerId: string | undefined,
+        organizationId: string,
+    ): Promise<boolean> {
+        if (stripeCustomerId == null) return false;
 
         try {
-            const methods = await getStripe().customers.listPaymentMethods(customer.stripeCustomerId, { limit: 1 });
+            const methods = await getStripe().customers.listPaymentMethods(stripeCustomerId, { limit: 1 });
             return methods.data.length > 0;
         } catch (err) {
             this.logger.warn("Could not read saved payment methods, treating as none", { organizationId, err });
@@ -336,9 +346,10 @@ export class BillingCustomerService extends Service {
     }
 
     async updateAutoTopUp(organizationId: string, enabled: boolean, threshold: number, packageId?: string) {
+        // Existence check only - the settings write below no longer needs the name for provisioning.
         const org = await this.db.organization.findUnique({
             where: { id: organizationId },
-            select: { name: true },
+            select: { id: true },
         });
         if (org == null) throw new NotFoundError("Organization not found");
 
@@ -346,13 +357,21 @@ export class BillingCustomerService extends Service {
             throw new BadRequestError("A top-up package must be selected to enable auto top-up");
         }
 
-        // Without a saved card `AutoTopUpService` logs "no saved payment method found" and returns, so
-        // accepting this would store a recharge that silently never fires - the worst version of this
-        // setting, since the balance still runs out and nothing says why.
-        if (enabled && !(await this.hasSavedPaymentMethod(organizationId))) {
-            throw new BadRequestError(
-                "Add a payment method before enabling auto top-up - buying a package once saves the card it charges.",
-            );
+        // Only read when enabling, since that is the only branch whose validity depends on it.
+        if (enabled) {
+            const customer = await this.db.billingCustomer.findUnique({
+                where: { organizationId },
+                select: { stripeCustomerId: true },
+            });
+
+            // Without a saved card `AutoTopUpService` logs "no saved payment method found" and
+            // returns, so accepting this would store a recharge that silently never fires - the worst
+            // version of this setting, since the balance still runs out and nothing says why.
+            if (!(await this.stripeHoldsPaymentMethod(customer?.stripeCustomerId ?? undefined, organizationId))) {
+                throw new BadRequestError(
+                    "Add a payment method before enabling auto top-up - buying a package once saves the card it charges.",
+                );
+            }
         }
 
         if (packageId != null) {
@@ -362,11 +381,20 @@ export class BillingCustomerService extends Service {
             }
         }
 
-        await this.getOrCreateCustomer(organizationId, org.name ?? organizationId);
-
-        await this.db.billingCustomer.update({
+        // Upsert rather than `getOrCreateCustomer` then `update`, which read this row a second time
+        // to provision what it no longer has to. Enabling now requires a saved card, which requires
+        // a Stripe customer to already exist, so there is nothing for that path to create; disabling
+        // never needed one. The `create` branch only covers an organization writing settings before
+        // it has any billing row.
+        await this.db.billingCustomer.upsert({
             where: { organizationId },
-            data: { autoTopUpEnabled: enabled, autoTopUpThreshold: threshold, autoTopUpPackageId: packageId },
+            create: {
+                organizationId,
+                autoTopUpEnabled: enabled,
+                autoTopUpThreshold: threshold,
+                autoTopUpPackageId: packageId,
+            },
+            update: { autoTopUpEnabled: enabled, autoTopUpThreshold: threshold, autoTopUpPackageId: packageId },
         });
 
         this.logger.info("Updated auto top-up settings", { organizationId, enabled, threshold, packageId });

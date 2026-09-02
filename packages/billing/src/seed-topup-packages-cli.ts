@@ -113,8 +113,8 @@ async function resolveProductId(stripe: ReturnType<typeof getStripe>, logger: Re
 }
 
 main()
-    .then(() => db.$disconnect())
     .catch((err: unknown) => {
         console.error("Failed to seed top-up packages:", err);
-        process.exit(1);
-    });
+        process.exitCode = 1;
+    })
+    .finally(() => db.$disconnect());
