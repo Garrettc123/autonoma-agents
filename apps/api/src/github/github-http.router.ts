@@ -5,7 +5,7 @@ import type { GitHubApp } from "@autonoma/github";
 import { logger } from "@autonoma/logger";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { diffsTriggerService } from "../diffs/diffs-service";
+import { analysisTrigger } from "../analysis/trigger/trigger-instance";
 import { env } from "../env";
 import { previewkitTriggerService } from "../previewkit/previewkit-service";
 import type { PreviewDeployAction } from "../previewkit/previewkit-trigger.service";
@@ -38,7 +38,7 @@ const mergeGateService = new MergeGateService(
     env.MERGE_GATE_ENABLED,
     analytics,
     falsePositiveCandidatesService,
-    diffsTriggerService,
+    analysisTrigger,
     new MergeGateSlackNotifier(env.SLACK_BOT_TOKEN, env.MERGE_GATE_SLACK_CHANNEL),
 );
 const branchContributorService = new BranchContributorService(db, githubService);

@@ -6,8 +6,9 @@ import { logger as rootLogger } from "@autonoma/logger";
 import { buildSdkUrl } from "@autonoma/types";
 import { Hono } from "hono";
 import { z } from "zod";
+import type { DeliveryReceipt } from "../analysis/trigger/receipt";
+import { analysisTrigger } from "../analysis/trigger/trigger-instance";
 import { getVercelEncryptionHelper } from "../context";
-import { diffsTriggerService } from "../diffs/diffs-service";
 import { env } from "../env";
 import { buildGitHubApp } from "../github/github-app";
 import { GitHubInstallationService } from "../github/github-installation.service";
@@ -398,9 +399,9 @@ async function handleCheckRunStart(payload: CheckRunStartPayload): Promise<void>
     let rawRef = deploymentMeta.githubCommitRef ?? deployment.meta?.githubCommitRef;
     // Vercel doesn't always populate `meta.githubCommitRef` on this event, even
     // for PR deployments - defaulting straight to "main" in that case would
-    // misroute a real PR deployment into the main-branch diffs path (since
-    // `DiffsTriggerService.triggerDiffs` decides main-vs-PR purely by comparing
-    // this ref against the app's main branch ref). When we know it's a PR
+    // misroute a real PR deployment into the main-branch diffs path (since the
+    // `ref` locator's main-vs-PR routing decides purely by comparing this ref
+    // against the app's main branch ref). When we know it's a PR
     // (`githubPrId` is set), resolve the real branch from GitHub instead of
     // guessing.
     if (rawRef == null && deploymentMeta.githubPrId != null) {
@@ -422,7 +423,7 @@ async function handleCheckRunStart(payload: CheckRunStartPayload): Promise<void>
     // A deployment Vercel gave no ref for and that is not a PR is the app's trunk, so
     // fall back to the trunk we already have rather than to the literal "main" - a
     // repo whose default is `master` or `trunk` was otherwise recorded under a branch
-    // it does not have, and then failed `triggerDiffs`' main-vs-PR comparison.
+    // it does not have, and then failed the `ref` locator's main-vs-PR comparison.
     const trunkRef = application.mainBranchInfo?.githubRef ?? application.mainBranch?.name;
     const branchName = rawRef?.replace(/^refs\/heads\//, "") ?? trunkRef;
     if (branchName == null) {
@@ -459,7 +460,7 @@ async function handleCheckRunStart(payload: CheckRunStartPayload): Promise<void>
 
     // Only ever correct the main branch's ref from a production deployment -
     // doing this for a PR/preview deployment would overwrite the real main ref
-    // with the PR's own branch name, which then makes `DiffsTriggerService`'s
+    // with the PR's own branch name, which then makes the `ref` locator's
     // main-vs-PR routing (a straight ref comparison) misidentify every future
     // PR deployment as the main branch.
     if (application.mainBranch != null && target === "production") {
@@ -496,17 +497,19 @@ async function handleCheckRunStart(payload: CheckRunStartPayload): Promise<void>
 
     await updateVercelCheckRun(accessToken, deployment.id, checkRun.id, "running", { externalUrl });
 
-    let result: Awaited<ReturnType<typeof diffsTriggerService.triggerDiffs>>;
+    let receipt: DeliveryReceipt;
     try {
-        result = await diffsTriggerService.triggerDiffs({
+        receipt = await analysisTrigger.deliver({
             organizationId,
-            repoId,
-            githubRef: branchName,
-            prNumber: deploymentMeta.githubPrId,
-            url: deploymentUrl,
-            webhookUrl: buildSdkUrl(deploymentUrl),
-            webhookHeaders,
+            locator: { kind: "ref", repoId, githubRef: branchName, prNumber: deploymentMeta.githubPrId },
+            kind: "push",
             source: "vercel",
+            requested: false,
+            deployment: {
+                url: deploymentUrl,
+                webhookUrl: buildSdkUrl(deploymentUrl),
+                webhookHeaders,
+            },
         });
     } catch (error) {
         logger.error("Failed to trigger diffs for Vercel deployment", { deploymentId: deployment.id, error });
@@ -517,8 +520,17 @@ async function handleCheckRunStart(payload: CheckRunStartPayload): Promise<void>
         return;
     }
 
-    if (result.skipped === true) {
-        logger.info("Diffs trigger was a no-op for Vercel deployment", { deploymentId: deployment.id, ...result });
+    const outcome = vercelDiffsOutcome(receipt);
+    if (outcome === "failed") {
+        logger.warn("Diffs trigger refused the Vercel deployment", { deploymentId: deployment.id, ...receipt });
+        await updateVercelCheckRun(accessToken, deployment.id, checkRun.id, "completed", {
+            conclusion: "failed",
+            conclusionText: "Failed to trigger diffs analysis.",
+        });
+        return;
+    }
+    if (outcome === "skipped") {
+        logger.info("Diffs trigger was a no-op for Vercel deployment", { deploymentId: deployment.id, ...receipt });
         await updateVercelCheckRun(accessToken, deployment.id, checkRun.id, "completed", {
             conclusion: "skipped",
             conclusionText: "No new commits to analyze.",
@@ -556,7 +568,28 @@ async function handleCheckRunStart(payload: CheckRunStartPayload): Promise<void>
         externalUrl,
     });
 
-    logger.info("Diffs job triggered for Vercel deployment", { deploymentId: deployment.id, ...result });
+    logger.info("Diffs job triggered for Vercel deployment", { deploymentId: deployment.id, ...receipt });
+}
+
+/**
+ * Collapse a delivery receipt onto the three outcomes the Vercel check surfaces: `proceed` (a run started or
+ * attached) records the deployment and marks the check succeeded; `skipped` is a deliberate no-op; `failed` is a
+ * refusal (unlinked repo, out of credits, unsupported ref) that historically threw and marked the check failed.
+ */
+function vercelDiffsOutcome(receipt: DeliveryReceipt): "proceed" | "skipped" | "failed" {
+    switch (receipt.status) {
+        case "started":
+        case "attached":
+            return "proceed";
+        case "skipped":
+            return "skipped";
+        case "deferred":
+            return receipt.reason === "activation_gated" ? "skipped" : "failed";
+        case "refused":
+            return receipt.reason === "base_not_trunk" ? "skipped" : "failed";
+        default:
+            throw new Error(`Unhandled delivery receipt: ${String(receipt satisfies never)}`);
+    }
 }
 
 // ─── Handler: marketplace.invoice.paid ───────────────────────────────────────

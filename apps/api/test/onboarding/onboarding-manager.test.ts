@@ -1656,10 +1656,7 @@ integrationTestSuite({
                 create: { applicationId: appId, step: "completed", previewEnvironmentMode: "existing_deploys" },
                 update: { step: "completed", previewEnvironmentMode: "existing_deploys" },
             });
-            const diffsTrigger = {
-                triggerMainDiffs: vi.fn(async () => ({ snapshotId: "main-snap" })),
-                triggerPrDiffs: vi.fn(async () => ({ snapshotId: "pr-snap" })),
-            };
+            const diffsTrigger = { deliver: vi.fn(async () => ({ status: "started" as const, branchId: "b" })) };
             const manager = new OnboardingManager(harness.db, fakeScenarioManager, fakeEncryption, { diffsTrigger });
             const bodyText = JSON.stringify({
                 applicationId: appId,
@@ -1674,15 +1671,17 @@ integrationTestSuite({
             });
 
             expect(result.ignored).toBe(false);
-            expect(diffsTrigger.triggerPrDiffs).toHaveBeenCalledWith({
+            expect(diffsTrigger.deliver).toHaveBeenCalledWith({
                 organizationId: expect.any(String),
-                repoId: 91_131,
-                prNumber: 42,
-                url: "https://pr-42.example.com",
-                webhookUrl: "https://pr-42.example.com/api/autonoma",
+                locator: { kind: "pr", repoId: 91_131, prNumber: 42 },
+                kind: "push",
                 source: "onboarding",
+                requested: false,
+                deployment: {
+                    url: "https://pr-42.example.com",
+                    webhookUrl: "https://pr-42.example.com/api/autonoma",
+                },
             });
-            expect(diffsTrigger.triggerMainDiffs).not.toHaveBeenCalled();
             const state = await manager.getState(appId);
             expect(state.diffTriggerConfirmedAt).not.toBeNull();
             // The PR preview URL must not clobber the tracked main preview URL.
@@ -1700,10 +1699,7 @@ integrationTestSuite({
                 create: { applicationId: appId, step: "completed", previewEnvironmentMode: "existing_deploys" },
                 update: { step: "completed", previewEnvironmentMode: "existing_deploys" },
             });
-            const diffsTrigger = {
-                triggerMainDiffs: vi.fn(async () => ({ snapshotId: "main-snap" })),
-                triggerPrDiffs: vi.fn(async () => ({ snapshotId: "pr-snap" })),
-            };
+            const diffsTrigger = { deliver: vi.fn(async () => ({ status: "started" as const, branchId: "b" })) };
             const manager = new OnboardingManager(harness.db, fakeScenarioManager, fakeEncryption, { diffsTrigger });
             const bodyText = deploymentSignalBody(appId, "https://main-preview.example.com");
 
@@ -1712,14 +1708,17 @@ integrationTestSuite({
                 signature: deploymentSignalSignature(bodyText, "shared-secret"),
             });
 
-            expect(diffsTrigger.triggerMainDiffs).toHaveBeenCalledWith({
+            expect(diffsTrigger.deliver).toHaveBeenCalledWith({
                 organizationId: expect.any(String),
-                repoId: 91_132,
-                url: "https://main-preview.example.com",
-                webhookUrl: "https://main-preview.example.com/api/autonoma",
+                locator: { kind: "main", repoId: 91_132 },
+                kind: "push",
                 source: "onboarding",
+                requested: false,
+                deployment: {
+                    url: "https://main-preview.example.com",
+                    webhookUrl: "https://main-preview.example.com/api/autonoma",
+                },
             });
-            expect(diffsTrigger.triggerPrDiffs).not.toHaveBeenCalled();
             const state = await manager.getState(appId);
             expect(state.previewUrl).toBe("https://main-preview.example.com");
         });
@@ -1739,10 +1738,7 @@ integrationTestSuite({
                 },
                 update: { step: "existing_deploys_waiting", previewEnvironmentMode: "existing_deploys" },
             });
-            const diffsTrigger = {
-                triggerMainDiffs: vi.fn(async () => ({ snapshotId: "main-snap" })),
-                triggerPrDiffs: vi.fn(async () => ({ snapshotId: "pr-snap" })),
-            };
+            const diffsTrigger = { deliver: vi.fn(async () => ({ status: "started" as const, branchId: "b" })) };
             const manager = new OnboardingManager(harness.db, fakeScenarioManager, fakeEncryption, { diffsTrigger });
             const bodyText = deploymentSignalBody(appId, "https://onboarding-preview.example.com");
 
@@ -1751,7 +1747,7 @@ integrationTestSuite({
                 signature: deploymentSignalSignature(bodyText, "shared-secret"),
             });
 
-            expect(diffsTrigger.triggerMainDiffs).not.toHaveBeenCalled();
+            expect(diffsTrigger.deliver).not.toHaveBeenCalled();
             const state = await manager.getState(appId);
             expect(state.step).toBe("preview_verified");
             expect(state.previewUrl).toBe("https://onboarding-preview.example.com");

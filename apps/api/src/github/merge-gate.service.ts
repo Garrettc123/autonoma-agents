@@ -27,7 +27,7 @@ import { payloadBuilder, renderMarkdown } from "@autonoma/github/comment";
 import { type Logger, logger } from "@autonoma/logger";
 import { type AnalysisEventSource, ANALYSIS_VERDICT, hasGoneLive } from "@autonoma/types";
 import { z } from "zod";
-import type { DiffsTriggerService } from "../diffs/diffs-trigger.service";
+import type { AnalysisTrigger } from "../analysis/trigger/analysis-trigger";
 import { readActivationTriggerConfig } from "./activation-trigger-config";
 import type { FalsePositiveCandidateService } from "./false-positive-candidate.service";
 import type { MergeGateSlackNotifier } from "./merge-gate-slack-notifier";
@@ -136,8 +136,8 @@ const issueCommentWebhookSchema = z.object({
     repository: z.object({ id: z.number(), full_name: z.string() }),
 });
 
-/** The {@link DiffsTriggerService} surface the merge gate needs - only the PR trigger. */
-type PrDiffsTrigger = Pick<DiffsTriggerService, "triggerPrDiffs">;
+/** The {@link AnalysisTrigger} surface the merge gate needs - just `deliver`. */
+type AnalysisDeliverer = Pick<AnalysisTrigger, "deliver">;
 
 /**
  * `already_analyzed` (nothing new to run) and `base_not_trunk` (the PR does not target the app's main branch) are the
@@ -218,7 +218,7 @@ export class MergeGateService {
         private readonly analytics: PostHogAnalytics,
         private readonly falsePositiveCandidates: FalsePositiveCandidateService,
         /** Starts the run an explicit request asked for - required, so no caller can build a gate that cannot run. */
-        private readonly prDiffsTrigger: PrDiffsTrigger,
+        private readonly analysisTrigger: AnalysisDeliverer,
         private readonly slackNotifier?: MergeGateSlackNotifier,
     ) {
         this.logger = logger.child({ name: this.constructor.name });
@@ -511,17 +511,29 @@ export class MergeGateService {
     /** A trigger failure becomes an outcome rather than propagating, so the caller can roll the check back. */
     private async fireRequestedRun(params: RequestAnalysisRunParams): Promise<RequestedRunOutcome> {
         try {
-            const result = await this.prDiffsTrigger.triggerPrDiffs({
+            const receipt = await this.analysisTrigger.deliver({
                 organizationId: params.organizationId,
-                repoId: params.githubRepositoryId,
-                prNumber: params.prNumber,
-                requested: true,
+                locator: { kind: "pr", repoId: params.githubRepositoryId, prNumber: params.prNumber },
+                kind: "explicit_request",
                 source: analysisEventSourceForRunSource(params.source),
+                requested: true,
             });
-            // `requested: true` bypasses the activation gate, so a skip here is either an already-analyzed head or a
-            // PR that does not target the trunk (the base gate is absolute - it refuses explicit requests too).
-            if (result.skipped !== true) return "started";
-            return result.reason === "base_not_trunk" ? "base_not_trunk" : "already_analyzed";
+            // A skip is a benign decline (nothing to run): every skip reason maps to the same not-started reply,
+            // never a failure. The off-trunk refusal is the one decline named apart; everything else - out of
+            // credits, an unlinked repo, a thrown error - is a failure the caller rolls the check back on.
+            switch (receipt.status) {
+                case "started":
+                case "attached":
+                    return "started";
+                case "skipped":
+                    return "already_analyzed";
+                case "refused":
+                    return receipt.reason === "base_not_trunk" ? "base_not_trunk" : "failed";
+                case "deferred":
+                    return "failed";
+                default:
+                    throw new Error(`Unhandled delivery receipt: ${String(receipt satisfies never)}`);
+            }
         } catch (err) {
             this.logger.error("Merge gate: run trigger threw; treating as not started", {
                 organizationId: params.organizationId,

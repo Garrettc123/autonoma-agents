@@ -1,5 +1,6 @@
 import type { EncryptionHelper } from "@autonoma/scenario";
-import type { AnalysisEventSource, SecretItem, SecretSummary } from "@autonoma/types";
+import type { SecretItem, SecretSummary } from "@autonoma/types";
+import type { AnalysisTrigger } from "../../analysis/trigger/analysis-trigger";
 
 export interface PreviewkitSecretsUpsertResult {
     created: boolean;
@@ -83,25 +84,10 @@ export interface OnboardingApplicationsService {
 /**
  * The diff-trigger fan-out for the BYO path: a single `deployment_status` signal
  * both records the preview URL and triggers diff analysis from the URL it
- * carries (no second call). Structurally satisfied by `DiffsTriggerService`.
+ * carries (no second call). Structurally satisfied by `AnalysisTrigger`; the
+ * signal handler builds the occurrence and ignores the receipt (best-effort).
  */
-export interface OnboardingDiffsTrigger {
-    triggerMainDiffs(params: {
-        organizationId: string;
-        repoId: number;
-        url: string;
-        webhookUrl?: string;
-        source: AnalysisEventSource;
-    }): Promise<{ snapshotId?: string; skipped?: boolean }>;
-    triggerPrDiffs(params: {
-        organizationId: string;
-        repoId: number;
-        prNumber: number;
-        url: string;
-        webhookUrl?: string;
-        source: AnalysisEventSource;
-    }): Promise<{ snapshotId?: string; skipped?: boolean }>;
-}
+export type OnboardingDiffsTrigger = Pick<AnalysisTrigger, "deliver">;
 
 export interface OnboardingManagerOptions {
     previewkitClient?: OnboardingPreviewkitClient;

@@ -29,7 +29,7 @@ export type StartAnalysisRun = (input: AnalysisRunWorkflowInput) => Promise<stri
  * The one front door for starting an analysis run. Producers translate whatever they observed into an
  * {@link AnalysisOccurrence} and call {@link deliver}; the module owns every gate and returns a {@link DeliveryReceipt}
  * describing what it decided. It encodes facts and decisions only - never deploy/analysis sequencing, never build
- * ownership (the earlier unification layer that did was deleted in #1937 because that sequencing later inverted).
+ * ownership.
  */
 export class AnalysisTrigger extends Service {
     constructor(
@@ -250,7 +250,15 @@ export class AnalysisTrigger extends Service {
         // Main has no pull request to fall back on, so its baseline snapshot is the only possible base.
         const gate = await new AnalysisRunGate(this.db).shouldSkipAlreadyAnalyzed({ branchId, headSha });
         const baseSha = gate.resolved.baseSha;
-        if (baseSha == null) return { status: "refused", reason: "no_analysis_base", branchId };
+        if (baseSha == null) {
+            // A live main branch whose active snapshot has no headSha is a data inconsistency; logged fatal so it
+            // reaches Sentry, since the refused receipt itself is silent.
+            this.logger.fatal("Main branch has no active snapshot with a headSha", undefined, {
+                branchId,
+                extra: { organizationId, repoId },
+            });
+            return { status: "refused", reason: "no_analysis_base", branchId };
+        }
 
         this.logger.info("Resolved main branch and shas", { branchId, extra: { headSha, baseSha } });
 

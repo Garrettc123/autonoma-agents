@@ -2,11 +2,11 @@ import { randomBytes } from "node:crypto";
 import { PostHogAnalytics } from "@autonoma/analytics";
 import { ApplicationArchitecture } from "@autonoma/db";
 import { expect } from "vitest";
-import type { TriggerDiffsResult, TriggerPrDiffsParams } from "../../src/diffs/diffs-trigger.service";
 import { DEFAULT_ANALYSIS_TRIGGER_LABEL } from "../../src/github/activation-trigger-config";
 import { ActivationTriggerConfigService } from "../../src/github/activation-trigger-config.service";
 import { MergeGateService } from "../../src/github/merge-gate.service";
 import { apiTestSuite } from "../api-test";
+import { RecordingAnalysisTrigger } from "../fake-analysis-trigger";
 import type { APITestHarness } from "../harness";
 
 interface CapturedEvent {
@@ -25,17 +25,6 @@ class RecordingAnalytics extends PostHogAnalytics {
         _groups?: Record<string, string>,
     ): void {
         this.captures.push({ event, properties });
-    }
-}
-
-/** Records the runs requested through the trigger so we can assert exactly one run was fired (and with what). */
-class RecordingPrDiffsTrigger {
-    public calls: TriggerPrDiffsParams[] = [];
-    constructor(private readonly result: TriggerDiffsResult = { branchId: "branch-1" }) {}
-
-    async triggerPrDiffs(params: TriggerPrDiffsParams): Promise<TriggerDiffsResult> {
-        this.calls.push(params);
-        return this.result;
     }
 }
 
@@ -131,7 +120,7 @@ apiTestSuite({
             harness,
         }) => {
             const analytics = new RecordingAnalytics();
-            const trigger = new RecordingPrDiffsTrigger();
+            const trigger = new RecordingAnalysisTrigger();
             const fixture = await createRepoApp(harness);
             await setActivationGate(harness);
 
@@ -157,8 +146,7 @@ apiTestSuite({
             expect(trigger.calls).toHaveLength(1);
             expect(trigger.calls[0]).toMatchObject({
                 organizationId: harness.organizationId,
-                repoId: fixture.repoId,
-                prNumber: PR_NUMBER,
+                locator: { repoId: fixture.repoId, prNumber: PR_NUMBER },
                 requested: true,
             });
 
@@ -183,7 +171,7 @@ apiTestSuite({
             harness,
         }) => {
             const analytics = new RecordingAnalytics();
-            const trigger = new RecordingPrDiffsTrigger();
+            const trigger = new RecordingAnalysisTrigger();
             const fixture = await createRepoApp(harness);
             // Gate enabled but activation off: an un-migrated org still runs automatically, so a request is a no-op.
             await setActivationGate(harness, { activationEnabled: false });

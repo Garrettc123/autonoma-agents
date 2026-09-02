@@ -15,11 +15,11 @@ import type {
 } from "@autonoma/workflow";
 import type Redis from "ioredis";
 import { DeliverUserPromptService } from "../analysis/deliver-user-prompt.service";
+import { AnalysisTrigger } from "../analysis/trigger/analysis-trigger";
 import { ApplicationSetupService } from "../application-setup/application-setup.service";
 import type { Auth } from "../auth";
 import { DemoEntrySourceStore } from "../demo/demo-entry-source.store";
 import { ParkedSessionStore } from "../demo/parked-session.store";
-import { DiffsTriggerService } from "../diffs/diffs-trigger.service";
 import { buildBillingAlertNotifier } from "../email/billing-alert-notifier";
 import { type EmailSender, buildEmailSender } from "../email/email-sender";
 import { env } from "../env";
@@ -99,7 +99,7 @@ export interface Services {
     snapshotEdit: SnapshotEditService;
     billing: BillingService;
     applicationSetups: ApplicationSetupsService;
-    diffsTrigger: DiffsTriggerService;
+    analysisTrigger: AnalysisTrigger;
     deliverUserPrompt: DeliverUserPromptService;
     previewkitTrigger: PreviewkitTriggerService;
     previewkitWrite: PreviewkitWriteService;
@@ -184,13 +184,7 @@ export function buildServices({
         triggerPreviewRedeployApp,
         analysisEvents,
     );
-    const diffsTriggerService = new DiffsTriggerService(
-        conn,
-        githubService,
-        billingService,
-        startAnalysisRun,
-        analysisEvents,
-    );
+    const analysisTrigger = new AnalysisTrigger(conn, githubService, billingService, startAnalysisRun, analysisEvents);
     const deliverUserPromptService = new DeliverUserPromptService(
         conn,
         githubService,
@@ -222,7 +216,7 @@ export function buildServices({
         repoIntrospection: repoIntrospectionService,
         github: githubService,
         applications: applicationsService,
-        diffsTrigger: diffsTriggerService,
+        diffsTrigger: analysisTrigger,
         getVercelEncryptionHelper,
     };
     const onboardingManager = new OnboardingManager(conn, scenarioManager, encryptionHelper, onboardingOptions);
@@ -275,7 +269,7 @@ export function buildServices({
             env.MERGE_GATE_ENABLED,
             analytics,
             falsePositiveCandidatesService,
-            diffsTriggerService,
+            analysisTrigger,
             new MergeGateSlackNotifier(env.SLACK_BOT_TOKEN, env.MERGE_GATE_SLACK_CHANNEL),
         ),
         activationTriggerConfig: new ActivationTriggerConfigService(conn, githubService),
@@ -299,7 +293,7 @@ export function buildServices({
         snapshotEdit: new SnapshotEditService(conn, startGenerationBatch, billingService),
         billing: billingService,
         applicationSetups: new ApplicationSetupsService(conn, applicationSetupService, apiKeysService),
-        diffsTrigger: diffsTriggerService,
+        analysisTrigger,
         deliverUserPrompt: deliverUserPromptService,
         previewkitTrigger,
         previewkitWrite,

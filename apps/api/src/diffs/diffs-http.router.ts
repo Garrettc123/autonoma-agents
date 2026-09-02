@@ -1,12 +1,14 @@
 import { requireApiKey, type UserAuthVariables } from "@autonoma/auth";
 import { db } from "@autonoma/db";
-import { BadRequestError, InsufficientAnalysisCreditsError, NotFoundError } from "@autonoma/errors";
+import { InsufficientAnalysisCreditsError } from "@autonoma/errors";
 import { logger as rootLogger } from "@autonoma/logger";
+import type { Context } from "hono";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
+import type { DeliveryReceipt } from "../analysis/trigger/receipt";
+import { analysisTrigger } from "../analysis/trigger/trigger-instance";
 import { env } from "../env";
-import { diffsTriggerService as service } from "./diffs-service";
 
 const triggerDiffsBodySchema = z.object({
     repo_id: z.number(),
@@ -68,34 +70,26 @@ export const diffsHttpRouter = new Hono<{ Variables: UserAuthVariables }>()
         }
 
         try {
-            const result = await service.triggerDiffs({
+            const receipt = await analysisTrigger.deliver({
                 organizationId,
-                repoId: body.repo_id,
-                prNumber: body.pr_number,
-                githubRef: body.github_ref,
-                url: body.url,
-                webhookUrl: body.webhook_url,
-                webhookHeaders: body.webhook_headers,
-                environment: body.environment,
+                locator: {
+                    kind: "ref",
+                    repoId: body.repo_id,
+                    githubRef: body.github_ref,
+                    prNumber: body.pr_number,
+                },
+                kind: "push",
                 source: "ci",
+                requested: false,
+                deployment: {
+                    url: body.url,
+                    webhookUrl: body.webhook_url,
+                    webhookHeaders: body.webhook_headers,
+                },
             });
 
-            return ctx.json({ ok: true, ...result });
+            return receiptResponse(ctx, receipt, body);
         } catch (error) {
-            if (error instanceof BadRequestError) {
-                return ctx.json({ error: error.message }, 400);
-            }
-            if (error instanceof NotFoundError) {
-                return ctx.json({ error: error.message }, 404);
-            }
-            // 402, matching the previewkit lifecycle routes' handling of the sibling
-            // InsufficientPreviewCreditsError. Deliberately answered before the `fatal` below: an
-            // out-of-credits org is an expected business outcome for this endpoint, not an incident
-            // to page on.
-            if (error instanceof InsufficientAnalysisCreditsError) {
-                return ctx.json({ error: error.message }, 402);
-            }
-
             logger.fatal("Failed to trigger diffs analysis", error, {
                 repoId: body.repo_id,
                 prNumber: body.pr_number,
@@ -104,3 +98,48 @@ export const diffsHttpRouter = new Hono<{ Variables: UserAuthVariables }>()
             return ctx.json({ error: "Failed to trigger diffs analysis" }, 500);
         }
     });
+
+/**
+ * Map a delivery receipt onto the HTTP contract this endpoint has always returned: a run/skip is a 200 carrying
+ * the historical `{ branchId?, skipped?, reason? }` body, an out-of-credits refusal is a 402, an unlinked repo is a
+ * 404, an unsupported ref is a 400. Exhaustive so a new receipt variant fails compilation here.
+ */
+function receiptResponse(
+    ctx: Context,
+    receipt: DeliveryReceipt,
+    body: z.infer<typeof triggerDiffsBodySchema>,
+): Response {
+    switch (receipt.status) {
+        case "started":
+        case "attached":
+            return ctx.json({ ok: true, branchId: receipt.branchId });
+        case "skipped":
+            if (receipt.reason === "already_analyzed") {
+                return ctx.json({ ok: true, branchId: receipt.branchId, skipped: true, reason: "already_analyzed" });
+            }
+            return ctx.json({ ok: true, skipped: true });
+        case "deferred":
+            if (receipt.reason === "activation_gated") {
+                return ctx.json({ ok: true, branchId: receipt.branchId, skipped: true });
+            }
+            // 402, matching the previewkit lifecycle routes' handling of the sibling InsufficientPreviewCreditsError.
+            return ctx.json({ error: new InsufficientAnalysisCreditsError().message }, 402);
+        case "refused":
+            switch (receipt.reason) {
+                case "base_not_trunk":
+                    return ctx.json({ ok: true, skipped: true, reason: "base_not_trunk" });
+                case "no_application_linked":
+                    return ctx.json({ error: `No application linked to repository ${body.repo_id}` }, 404);
+                case "no_main_branch":
+                    return ctx.json({ error: `Application ${receipt.applicationId} has no main branch` }, 404);
+                case "unsupported_ref":
+                    return ctx.json({ error: `Unsupported GitHub reference: ${body.github_ref}` }, 400);
+                case "no_analysis_base":
+                case "branch_unresolvable":
+                    return ctx.json({ error: "Failed to trigger diffs analysis" }, 500);
+            }
+        // falls through to the exhaustiveness guard - a new status fails to compile here.
+        default:
+            throw new Error(`Unhandled delivery receipt: ${String(receipt satisfies never)}`);
+    }
+}

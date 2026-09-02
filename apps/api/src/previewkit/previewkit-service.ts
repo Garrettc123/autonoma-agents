@@ -12,7 +12,7 @@ import { resolvePreviewkitTriggers } from "./previewkit-triggers";
  * Kubernetes Job per operation (apps/previewkit/src/runner), behind the trigger
  * seam. Used by the public `/v1/previewkit/*` router and the GitHub webhook
  * handler. Mirrors the diffs
- * wiring in `../diffs/diffs-service.ts`.
+ * wiring in `../analysis/trigger/trigger-instance.ts`.
  */
 const triggers = resolvePreviewkitTriggers();
 

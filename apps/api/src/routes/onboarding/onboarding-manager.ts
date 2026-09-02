@@ -1103,25 +1103,20 @@ export class OnboardingManager {
         // URL (split UI/API host) supplies an explicit sdkUrl; otherwise the webhook
         // is the single-origin convention `<previewUrl>/api/autonoma`.
         const webhookUrl = params.sdkUrl ?? buildSdkUrl(params.previewUrl);
+        const deployment = { url: params.previewUrl, webhookUrl };
         try {
-            if (params.prNumber != null) {
-                await diffsTrigger.triggerPrDiffs({
-                    organizationId,
-                    repoId: params.repoId,
-                    prNumber: params.prNumber,
-                    url: params.previewUrl,
-                    webhookUrl,
-                    source: "onboarding",
-                });
-            } else {
-                await diffsTrigger.triggerMainDiffs({
-                    organizationId,
-                    repoId: params.repoId,
-                    url: params.previewUrl,
-                    webhookUrl,
-                    source: "onboarding",
-                });
-            }
+            const locator =
+                params.prNumber != null
+                    ? ({ kind: "pr", repoId: params.repoId, prNumber: params.prNumber } as const)
+                    : ({ kind: "main", repoId: params.repoId } as const);
+            await diffsTrigger.deliver({
+                organizationId,
+                locator,
+                kind: "push",
+                source: "onboarding",
+                requested: false,
+                deployment,
+            });
             this.logger.info("Triggered diff analysis from deployment signal", {
                 applicationId,
                 prNumber: params.prNumber,

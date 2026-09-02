@@ -2,8 +2,8 @@ import type { AnalysisEventSource } from "@autonoma/types";
 
 /**
  * A single thing that happened and might warrant an analysis run - a push, an explicit request, a deploy signal,
- * or (once the messages effort lands) a user prompt. It names WHAT the event points at (the {@link AnalysisLocator})
- * and describes the event without deciding anything: every gate and every consequence is {@link AnalysisTrigger}'s.
+ * or a user prompt. It names WHAT the event points at (the {@link AnalysisLocator}) and describes the event without
+ * deciding anything: every gate and every consequence is {@link AnalysisTrigger}'s.
  */
 export interface AnalysisOccurrence {
     organizationId: string;

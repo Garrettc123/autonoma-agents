@@ -1,13 +1,19 @@
 import type { AnalysisEventStore } from "@autonoma/analysis";
 import type { BillingService } from "@autonoma/billing";
 import type { PrismaClient } from "@autonoma/db";
+import { NotFoundError } from "@autonoma/errors";
 import { type AnalysisEventSource, hasGoneLive } from "@autonoma/types";
 import type { AnalysisRunWorkflowInput } from "@autonoma/workflow";
-import { NoApplicationLinkedError } from "../diffs/diffs-trigger.service";
 import type { GitHubInstallationService } from "../github/github-installation.service";
 import { upsertPrBranch } from "../routes/branches/upsert-pr-branch";
 import { Service } from "../routes/service";
 import { type AnalysisPokeDeferralReason, analysisPokeGate } from "./analysis-poke-gate";
+
+export class NoApplicationLinkedError extends NotFoundError {
+    constructor(public readonly repoId: number) {
+        super(`No application linked to repository ${repoId}`);
+    }
+}
 
 export interface DeliverUserPromptInput {
     organizationId: string;

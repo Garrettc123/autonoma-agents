@@ -2,9 +2,9 @@ import { PostHogAnalytics } from "@autonoma/analytics";
 import { ApplicationArchitecture } from "@autonoma/db";
 import { LIVE_STEP } from "@autonoma/types";
 import { expect } from "vitest";
-import type { TriggerDiffsResult, TriggerPrDiffsParams } from "../../src/diffs/diffs-trigger.service";
 import { MergeGateService } from "../../src/github/merge-gate.service";
 import { apiTestSuite } from "../api-test";
+import { RecordingAnalysisTrigger, ThrowingAnalysisTrigger } from "../fake-analysis-trigger";
 import type { APITestHarness } from "../harness";
 import { nextRepoId } from "../next-repo-id";
 import { seedAnalysisFindings } from "../seed-analysis-findings";
@@ -25,27 +25,6 @@ class RecordingAnalytics extends PostHogAnalytics {
         _groups?: Record<string, string>,
     ): void {
         this.captures.push({ event, properties });
-    }
-}
-
-/** Records the runs requested through the trigger so we can assert exactly one run was fired (and with what). */
-class RecordingPrDiffsTrigger {
-    public calls: TriggerPrDiffsParams[] = [];
-    constructor(private readonly result: TriggerDiffsResult = { branchId: "branch-1" }) {}
-
-    async triggerPrDiffs(params: TriggerPrDiffsParams): Promise<TriggerDiffsResult> {
-        this.calls.push(params);
-        return this.result;
-    }
-}
-
-/** A trigger that fails outright, as opposed to one that declines - the two owe the requester different replies. */
-class ThrowingPrDiffsTrigger {
-    public calls: TriggerPrDiffsParams[] = [];
-
-    async triggerPrDiffs(params: TriggerPrDiffsParams): Promise<TriggerDiffsResult> {
-        this.calls.push(params);
-        return Promise.reject(new Error("github is down"));
     }
 }
 
@@ -135,7 +114,7 @@ apiTestSuite({
             harness,
         }) => {
             const analytics = new RecordingAnalytics();
-            const trigger = new RecordingPrDiffsTrigger();
+            const trigger = new RecordingAnalysisTrigger();
             await setGate(harness, true, true);
             const service = new MergeGateService(
                 harness.db,
@@ -170,7 +149,7 @@ apiTestSuite({
             harness,
         }) => {
             const analytics = new RecordingAnalytics();
-            const trigger = new RecordingPrDiffsTrigger();
+            const trigger = new RecordingAnalysisTrigger();
             await setGate(harness, true, true);
             const service = new MergeGateService(
                 harness.db,
@@ -200,8 +179,7 @@ apiTestSuite({
             expect(trigger.calls).toHaveLength(1);
             expect(trigger.calls[0]).toMatchObject({
                 organizationId: harness.organizationId,
-                repoId: fixture.repoId,
-                prNumber: 42,
+                locator: { repoId: fixture.repoId, prNumber: 42 },
                 // What makes it a REQUEST: it bypasses the activation gate this org sits behind.
                 requested: true,
             });
@@ -237,7 +215,7 @@ apiTestSuite({
             harness,
         }) => {
             const analytics = new RecordingAnalytics();
-            const trigger = new RecordingPrDiffsTrigger();
+            const trigger = new RecordingAnalysisTrigger();
             await setGate(harness, true, true);
             const service = new MergeGateService(
                 harness.db,
@@ -278,7 +256,7 @@ apiTestSuite({
             harness,
         }) => {
             const analytics = new RecordingAnalytics();
-            const trigger = new RecordingPrDiffsTrigger();
+            const trigger = new RecordingAnalysisTrigger();
             // Gate enabled but NOT migrated to activation - the automatic run still fires on preview-ready.
             await setGate(harness, true, false);
             const service = new MergeGateService(
@@ -321,7 +299,11 @@ apiTestSuite({
         }) => {
             const analytics = new RecordingAnalytics();
             // The trigger reports it could not start a run (this head has already been analyzed).
-            const trigger = new RecordingPrDiffsTrigger({ branchId: "branch-1", skipped: true });
+            const trigger = new RecordingAnalysisTrigger({
+                status: "skipped",
+                reason: "already_analyzed",
+                branchId: "branch-1",
+            });
             await setGate(harness, true, true);
             const service = new MergeGateService(
                 harness.db,
@@ -370,7 +352,7 @@ apiTestSuite({
             harness,
         }) => {
             const analytics = new RecordingAnalytics();
-            const trigger = new RecordingPrDiffsTrigger({ skipped: true, reason: "base_not_trunk" });
+            const trigger = new RecordingAnalysisTrigger({ status: "refused", reason: "base_not_trunk" });
             await setGate(harness, true, true);
             const service = new MergeGateService(
                 harness.db,
@@ -414,7 +396,7 @@ apiTestSuite({
             harness,
         }) => {
             const analytics = new RecordingAnalytics();
-            const trigger = new ThrowingPrDiffsTrigger();
+            const trigger = new ThrowingAnalysisTrigger();
             await setGate(harness, true, true);
             const service = new MergeGateService(
                 harness.db,
@@ -451,7 +433,7 @@ apiTestSuite({
 
         test("adding the configured label fires one label run; a different label does nothing", async ({ harness }) => {
             const analytics = new RecordingAnalytics();
-            const trigger = new RecordingPrDiffsTrigger();
+            const trigger = new RecordingAnalysisTrigger();
             await setGate(harness, true, true);
             const service = new MergeGateService(
                 harness.db,
@@ -475,7 +457,10 @@ apiTestSuite({
             );
 
             expect(trigger.calls).toHaveLength(1);
-            expect(trigger.calls[0]).toMatchObject({ repoId: fixture.repoId, prNumber: 42, requested: true });
+            expect(trigger.calls[0]).toMatchObject({
+                locator: { repoId: fixture.repoId, prNumber: 42 },
+                requested: true,
+            });
             const row = await harness.db.gitHubCheckRun.findUnique({
                 where: { repoFullName_headSha: { repoFullName: fixture.repoFullName, headSha: "head-1" } },
             });
@@ -487,7 +472,7 @@ apiTestSuite({
         });
 
         test("labeling a draft PR fires no run and replies with guidance to mark it ready", async ({ harness }) => {
-            const trigger = new RecordingPrDiffsTrigger();
+            const trigger = new RecordingAnalysisTrigger();
             await setGate(harness, true, true);
             const service = new MergeGateService(
                 harness.db,
@@ -515,7 +500,7 @@ apiTestSuite({
         });
 
         test("the default trigger label works when the repo has no explicit config", async ({ harness }) => {
-            const trigger = new RecordingPrDiffsTrigger();
+            const trigger = new RecordingAnalysisTrigger();
             await setGate(harness, true, true);
             const service = new MergeGateService(
                 harness.db,
@@ -544,7 +529,7 @@ apiTestSuite({
                 true,
                 new RecordingAnalytics(),
                 harness.services.falsePositiveCandidates,
-                new RecordingPrDiffsTrigger(),
+                new RecordingAnalysisTrigger(),
             );
             const fixture = await createRepoApp(harness, "label-autocreate");
             await setTriggerConfig(harness, fixture.appId, { analysisTriggerLabel: "autonoma:analyze" });
@@ -556,7 +541,7 @@ apiTestSuite({
 
         test("two triggers on the same head result in exactly one run (dedupe)", async ({ harness }) => {
             const analytics = new RecordingAnalytics();
-            const trigger = new RecordingPrDiffsTrigger();
+            const trigger = new RecordingAnalysisTrigger();
             await setGate(harness, true, true);
             const service = new MergeGateService(
                 harness.db,
@@ -598,7 +583,7 @@ apiTestSuite({
         });
 
         test("the label trigger no-ops for a non-migrated org", async ({ harness }) => {
-            const trigger = new RecordingPrDiffsTrigger();
+            const trigger = new RecordingAnalysisTrigger();
             // Gate enabled but NOT migrated to activation.
             await setGate(harness, true, false);
             const service = new MergeGateService(
