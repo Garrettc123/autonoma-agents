@@ -1533,6 +1533,26 @@ model GitHubRequestEtag {
   @@map("github_request_etag")
 }
 
+// One row per GitHub repository Autonoma has ever stored something about: the identity that the
+// tables carrying a `repo_full_name` are migrating onto, so a rename becomes one update here
+// instead of a fan-out across all of them (see RepoRenameService).
+//
+// `fullName` is the key because it is the only identifier the existing rows carry - seven of the
+// eight denormalized tables store the name and no numeric id - so it is what they can be joined
+// on. It is still a cached copy of a GitHub-side fact and the rename webhook is what keeps it
+// true; `githubId` is the genuinely stable identity, nullable until a webhook or API read supplies
+// one for a repo we only ever learned about by name.
+model GitHubRepository {
+  id       String @id @default(cuid())
+  fullName String @unique @map("full_name")
+  githubId Int?   @unique @map("github_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("github_repository")
+}
+
 // ─── Billing ─────────────────────────────────────────────────────
 
 enum SubscriptionStatus {

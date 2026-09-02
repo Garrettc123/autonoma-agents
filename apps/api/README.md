@@ -245,6 +245,31 @@ default and bounded by the global `MERGE_GATE_ENABLED` kill switch; enabled per 
   attribution and skip records restart from empty. `repo-rename-tables.test.ts` derives the model list from
   `schema.prisma` and fails when a new table gains a `repoFullName` without being added. Not yet handled:
   `repository.transferred`, which changes the owner half of the name the same way.
+
+  The same handler also maintains the `GitHubRepository` row those eight tables are migrating onto (see
+  below). That row is RENAMED in place, never replaced: once the foreign keys exist, swapping the row would
+  orphan every reference and reintroduce this exact bug against a different column. It is resolved by
+  `githubId` first (the one identifier a rename cannot change) and by the old name second, which is what makes
+  a webhook redelivery a no-op instead of a second row.
+- **Repository identity** (`GitHubRepository`, migration `20260901120000_github_repository`): one row per repo
+  we have stored anything about, keyed on `fullName` because that is the only identifier the existing rows
+  carry - seven of the eight tables above hold no numeric id at all. `githubId` is the stable identity and is
+  nullable, backfilled from `PreviewkitEnvironment` (the only table holding both) and otherwise filled in by
+  the first rename webhook or API read. Nothing reads this table yet; it exists so those eight `repo_full_name`
+  columns can become foreign keys to it, at which point a rename is one update and `REPO_NAME_BACKFILLS`
+  disappears.
+
+  **Historical rename damage is measurable, once.** The seed keys on the name, so a repo renamed *before* that
+  migration seeds as two rows - one per name it has worn. That is a readout of how much the un-invalidated
+  rename bug already cost, and it is only readable until the duplicates get cleaned up:
+
+  ```sql
+  SELECT github_repository_id, count(DISTINCT repo_full_name) AS names
+  FROM previewkit_environment
+  WHERE github_repository_id IS NOT NULL
+  GROUP BY github_repository_id
+  HAVING count(DISTINCT repo_full_name) > 1;
+  ```
 - **Per-developer attribution** (`BranchContributorService`, `src/github/branch-contributor.service.ts`):
   stickiness is an individual habit, so a branch's outcome must attribute to ALL its authors, not just the
   opener. On `pull_request.opened/synchronize/reopened/ready_for_review/closed` it resolves the PR's full

@@ -108,18 +108,64 @@ export class RepoRenameService {
         // One transaction so a unique-constraint collision (a name that some older repo's rows still
         // occupy) leaves every table untouched rather than half-migrated. Sequential inside it: these
         // share one connection, so a Promise.all would buy no real concurrency.
-        const moved = await this.db.$transaction(async (tx) => {
+        const { moved, canonical } = await this.db.$transaction(async (tx) => {
             const counts: Record<string, number> = {};
             for (const [model, backfill] of Object.entries(REPO_NAME_BACKFILLS)) {
                 const { count } = await backfill(tx, from, to);
                 if (count > 0) counts[model] = count;
             }
-            return counts;
+            const outcome = await renameCanonicalRow(tx, from, to, repository.id);
+            return { moved: counts, canonical: outcome };
         });
 
         this.logger.info("Backfilled denormalized repo names after rename", {
             organizationId,
-            extra: { from, to, githubRepositoryId: repository.id, moved },
+            extra: { from, to, githubRepositoryId: repository.id, moved, canonical },
         });
     }
+}
+
+/** What happened to the canonical `GitHubRepository` row, for the log line. */
+type CanonicalOutcome = "renamed" | "created" | "unchanged";
+
+/**
+ * Point the canonical `GitHubRepository` row at the new name.
+ *
+ * Renamed IN PLACE, never deleted and recreated: the tables carrying `repoFullName` are migrating onto
+ * this row's `id`, so replacing the row would orphan every reference the moment those foreign keys
+ * exist - reintroducing, against a different column, the exact bug this service was written to fix.
+ *
+ * Resolved by numeric id first, since that is the one identifier a rename cannot change, falling back
+ * to the old name for a row seeded before any id was known (seven of the eight tables store no id, so
+ * most seeded rows start with `githubId` null).
+ */
+async function renameCanonicalRow(
+    tx: Prisma.TransactionClient,
+    from: string,
+    to: string,
+    githubId: number,
+): Promise<CanonicalOutcome> {
+    const existing =
+        (await tx.gitHubRepository.findUnique({ where: { githubId } })) ??
+        (await tx.gitHubRepository.findUnique({ where: { fullName: from } }));
+
+    if (existing == null) {
+        // No row under either identifier: a repo we have stored nothing about yet, or one whose
+        // rename we are seeing before anything else touched it.
+        await tx.gitHubRepository.upsert({
+            where: { fullName: to },
+            create: { fullName: to, githubId },
+            update: { githubId },
+        });
+        return "created";
+    }
+
+    if (existing.fullName === to && existing.githubId === githubId) return "unchanged";
+
+    // A distinct row already holding `to` makes this throw, rolling the whole transaction back. That
+    // needs the new name to be one we have seen before - a rename onto a previously-used name - and is
+    // deliberately left loud rather than resolved by deleting somebody's row, matching how a collision
+    // on the eight tables above behaves.
+    await tx.gitHubRepository.update({ where: { id: existing.id }, data: { fullName: to, githubId } });
+    return "renamed";
 }
