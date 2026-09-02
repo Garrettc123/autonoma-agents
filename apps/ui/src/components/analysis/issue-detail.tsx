@@ -145,15 +145,17 @@ function SuspectedCause({ cause }: { cause: NonNullable<AnalysisIssueDetail["sus
 
 /**
  * The pinned proof rail: the hero screenshot in a fixed 16:9 frame so a tall capture never renders giant, then the
- * distinct tests this issue was seen in. The rail sticks beside the claim column on wide screens and its test list
- * scrolls within the viewport-capped frame instead of growing the page.
+ * distinct tests this issue was seen in. On wide screens the shared rail frame caps the whole aside at the viewport
+ * and the list scrolls in its leftover height; below `lg` that frame drops away, so the list carries its own `60dvh`
+ * cap - `dvh` to match the frame's dynamic-viewport math - to keep scrolling within its own frame rather than
+ * growing the page.
  */
 function IssueRail({ issue }: { issue: AnalysisIssueDetail }) {
   const tests = issue.coveredTests;
   return (
     <aside className={cn("flex flex-col gap-3", RAIL_FRAME_CLASS)}>
       {issue.primaryScreenshot != null && <CappedImage screenshot={issue.primaryScreenshot} />}
-      <RailPanel className="p-2">
+      <RailPanel className="max-h-[60dvh] p-2 lg:max-h-none">
         <p className="px-1 pb-2 font-mono text-2xs font-semibold uppercase tracking-widest text-text-secondary">
           Seen in {tests.length} test{tests.length === 1 ? "" : "s"}
         </p>

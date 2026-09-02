@@ -725,41 +725,44 @@ const analysisSnapshotIssueChanges: NonNullable<TrpcFixtures["branches"]> = {
   analysisSnapshotIssueChanges: { opened: [PLACE_ORDER_ISSUE_SUMMARY], carriedForward: [], resolved: [] },
 };
 
+/** The issue-detail read as the detail page's tRPC output types it - what the fixtures below are checked against. */
+type IssueDetailFixture = NonNullable<NonNullable<TrpcFixtures["branches"]>["analysisIssueDetail"]>;
+
 // The full issue detail, reached from the PR list or a finding's up-link. Exercises the narrative's inline
 // `finding:` link + `evidence:` image, the suspected cause, and the cross-snapshot finding instances.
-const analysisIssueDetail: NonNullable<TrpcFixtures["branches"]> = {
-  analysisIssueDetail: {
-    id: "issue_place_order",
-    title: "Place order button never enables on checkout",
-    kind: "bug",
-    severity: "critical",
-    status: "open",
-    expectedBehavior:
-      "With a valid saved card and a complete shipping address, the Place order button should enable so the " +
-      "customer can submit the order.",
-    actualBehavior:
-      "Every field validated but the Place order button stayed disabled, so the order could never submit.",
-    narrativeMarkdown: [
-      "The checkout form validates correctly, but the submit button never enables - see " +
-        "[checkout-place-order](finding:checkout-place-order).",
-      "",
-      "![The disabled Place order button](evidence:asset_issue_1)",
-    ].join("\n"),
-    evidence: [{ assetId: "asset_issue_1", url: MOCK_SCREENSHOT, kind: "screenshot" }],
-    suspectedCause: {
-      explanation:
-        "The submit handler reads a `formValid` flag computed once on mount and never recomputed after the " +
-        "async address-validation promise resolves.",
-      codeReferences: [{ file: "src/checkout/PlaceOrder.tsx", lines: "42-58", snippet: PLACE_ORDER_SNIPPET }],
-    },
-    primaryScreenshot: { url: MOCK_SCREENSHOT, points: [] },
-    coveredTests: [
-      { slug: "checkout-place-order", findingId: "checkout-place-order" },
-      { slug: "checkout-guest-place-order", findingId: "checkout-guest-place-order" },
-      { slug: "checkout-saved-card-place-order", findingId: "checkout-saved-card-place-order" },
-      { slug: "checkout-express-place-order", findingId: "checkout-express-place-order" },
-    ],
+const PLACE_ORDER_ISSUE_DETAIL: IssueDetailFixture = {
+  id: "issue_place_order",
+  title: "Place order button never enables on checkout",
+  kind: "bug",
+  severity: "critical",
+  status: "open",
+  expectedBehavior:
+    "With a valid saved card and a complete shipping address, the Place order button should enable so the " +
+    "customer can submit the order.",
+  actualBehavior: "Every field validated but the Place order button stayed disabled, so the order could never submit.",
+  narrativeMarkdown: [
+    "The checkout form validates correctly, but the submit button never enables - see " +
+      "[checkout-place-order](finding:checkout-place-order).",
+    "",
+    "![The disabled Place order button](evidence:asset_issue_1)",
+  ].join("\n"),
+  evidence: [{ assetId: "asset_issue_1", url: MOCK_SCREENSHOT, kind: "screenshot" }],
+  suspectedCause: {
+    explanation:
+      "The submit handler reads a `formValid` flag computed once on mount and never recomputed after the " +
+      "async address-validation promise resolves.",
+    codeReferences: [{ file: "src/checkout/PlaceOrder.tsx", lines: "42-58", snippet: PLACE_ORDER_SNIPPET }],
   },
+  primaryScreenshot: { url: MOCK_SCREENSHOT, points: [] },
+  coveredTests: [
+    { slug: "checkout-place-order", findingId: "checkout-place-order" },
+    { slug: "checkout-guest-place-order", findingId: "checkout-guest-place-order" },
+    { slug: "checkout-saved-card-place-order", findingId: "checkout-saved-card-place-order" },
+    { slug: "checkout-express-place-order", findingId: "checkout-express-place-order" },
+  ],
+};
+const analysisIssueDetail: NonNullable<TrpcFixtures["branches"]> = {
+  analysisIssueDetail: PLACE_ORDER_ISSUE_DETAIL,
 };
 
 // A coverage-plane (environment) issue: the redesign drops Expected/Actual for scenario/environment kinds and shows
@@ -816,6 +819,34 @@ const analysisIssueDetailEnvironment: NonNullable<TrpcFixtures["branches"]> = {
     },
     primaryScreenshot: { url: MOCK_SCREENSHOT, points: [] },
     coveredTests: ENV_ISSUE_SLUGS.map((slug) => ({ slug, findingId: slug })),
+  },
+};
+
+// A critical checkout defect surfaces in every flow that reaches the submit step, so this issue is attributed to a
+// long list of tests - the case where the detail page's "Seen in N tests" rail must cap and scroll instead of
+// stretching the page. Same issue as `analysisIssueDetail`, only the covered-test set is broadened.
+const MANY_COVERED_TEST_SLUGS = [
+  "checkout-place-order",
+  "checkout-guest-place-order",
+  "checkout-saved-card-place-order",
+  "checkout-express-place-order",
+  "checkout-apply-coupon-then-order",
+  "checkout-gift-card-balance-order",
+  "cart-update-quantity-then-checkout",
+  "cart-remove-item-then-checkout",
+  "wishlist-move-to-cart-checkout",
+  "reorder-past-order-checkout",
+  "subscription-first-order-checkout",
+  "mobile-web-checkout-place-order",
+  "tax-exempt-checkout-place-order",
+  "multi-address-split-checkout",
+  "store-credit-checkout-place-order",
+  "promo-auto-apply-checkout",
+];
+const analysisIssueDetailManyTests: NonNullable<TrpcFixtures["branches"]> = {
+  analysisIssueDetail: {
+    ...PLACE_ORDER_ISSUE_DETAIL,
+    coveredTests: MANY_COVERED_TEST_SLUGS.map((slug) => ({ slug, findingId: slug })),
   },
 };
 
@@ -1191,6 +1222,33 @@ export const IssueEnvironment: Story = {
   },
   args: {
     path: `/app/${baseApplication.slug}/pull-requests/${PR_NUMBER}/issues/issue_preview_seeding_404`,
+  },
+};
+
+/**
+ * The issue detail for an issue attributed to many tests, at a narrow (below-`lg`) width where the proof rail stacks
+ * under the claim column. The "Seen in N tests" panel is height-capped and scrolls within its own frame rather than
+ * stretching the page. The play scrolls that panel into view so a short-viewport capture frames it directly.
+ */
+export const IssueManyTests: Story = {
+  parameters: {
+    pageStory: true,
+    msw: {
+      handlers: appShellHandlers({
+        ...pageFixtures,
+        branches: { ...pageFixtures.branches, ...analysisIssueDetailManyTests },
+      }),
+    },
+  },
+  args: {
+    path: `/app/${baseApplication.slug}/pull-requests/${PR_NUMBER}/issues/issue_place_order`,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const heading = await canvas.findByText(/Seen in \d+ tests/i);
+    // Pin the capped panel's bottom to the viewport bottom so a short-viewport capture frames the whole 60dvh box -
+    // its header, its internal scrollbar, and the truncated list - as one bounded, scrolling frame.
+    (heading.closest("div") ?? heading).scrollIntoView({ block: "end" });
   },
 };
 

@@ -1,9 +1,11 @@
 import { cn } from "@autonoma/blacklight";
 import type { ReactNode } from "react";
 
-/** A rail is pinned beside the main column on wide screens and capped at the viewport, so the main column scrolls
- * past it while each panel scrolls within the rail instead of growing the page. 6.5rem clears the top bar plus the
- * rail's sticky offset and a bottom breath. Shared by the finding test-result page and the analysis issue page. */
+/** On wide screens (`lg` and up) the rail is pinned beside the main column and capped at the viewport, so the main
+ * column scrolls past it while each panel scrolls within the rail instead of growing the page. 6.5rem clears the top
+ * bar plus the rail's sticky offset and a bottom breath. Below `lg` the rail stacks under the main column with no
+ * cap, so a panel that must stay bounded there (e.g. a long list) sets its own max-height. Shared by the finding
+ * test-result page and the analysis issue page. */
 export const RAIL_FRAME_CLASS = "lg:sticky lg:top-6 lg:self-start lg:max-h-[calc(100dvh-6.5rem)]";
 
 /** An always-visible, higher-contrast scrollbar so a panel that overflows plainly reads as scrollable. The default
@@ -16,9 +18,10 @@ const RAIL_SCROLLBAR_CLASS =
   "[&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/40 [&::-webkit-scrollbar-thumb]:hover:bg-white/60";
 
 /**
- * A rail panel: a framed box that fills the rail's leftover height and scrolls internally, showing an always-visible
- * scrollbar (see {@link RAIL_SCROLLBAR_CLASS}) so an overflowing panel plainly reads as scrollable rather than
- * looking like it simply ends. `className` styles the inner scroll region (e.g. padding).
+ * A rail panel: a framed box that scrolls internally once its height is bounded - by the sticky rail frame's leftover
+ * height on wide screens, or a caller-set max-height below `lg` - showing an always-visible scrollbar (see
+ * {@link RAIL_SCROLLBAR_CLASS}) so an overflowing panel plainly reads as scrollable rather than looking like it simply
+ * ends. Unbounded, it grows with its content. `className` styles the inner scroll region (e.g. padding).
  */
 export function RailPanel({ className, children }: { className?: string; children: ReactNode }) {
   return (
