@@ -128,6 +128,7 @@ export function NavigableLightbox({ steps, activeIndex, onClose, onNavigate }: N
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close"
             className="absolute top-4 right-4 z-101 rounded-full bg-black/50 p-2 text-white hover:bg-black/70 transition-colors"
           >
             <X className="size-5" />
@@ -156,6 +157,7 @@ export function NavigableLightbox({ steps, activeIndex, onClose, onNavigate }: N
                   onClick={() => {
                     if (hasPrev) onNavigate(activeIndex - 1);
                   }}
+                  aria-label="Previous step"
                   className={cn(
                     "shrink-0 rounded-full bg-black/50 p-2 text-white transition-colors",
                     hasPrev ? "hover:bg-black/70 cursor-pointer" : "opacity-30 cursor-default",
@@ -172,6 +174,7 @@ export function NavigableLightbox({ steps, activeIndex, onClose, onNavigate }: N
                   overlaySize="lg"
                   points={step.points}
                   screenResolution={step.screenResolution}
+                  showLoadingIndicator
                 />
 
                 {/* Next arrow */}
@@ -180,6 +183,7 @@ export function NavigableLightbox({ steps, activeIndex, onClose, onNavigate }: N
                   onClick={() => {
                     if (hasNext) onNavigate(activeIndex + 1);
                   }}
+                  aria-label="Next step"
                   className={cn(
                     "shrink-0 rounded-full bg-black/50 p-2 text-white transition-colors",
                     hasNext ? "hover:bg-black/70 cursor-pointer" : "opacity-30 cursor-default",

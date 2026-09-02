@@ -249,3 +249,9 @@ type Story = StoryObj<typeof meta>;
 export const ClientBug: Story = {
   args: { path: `/app/${baseApplication.slug}/findings/checkout-place-order` },
 };
+
+/** The rail's Steps tab: each frame-backed step is a full-width clickable row with a zoom affordance that opens the
+ * navigable frame gallery. Shot with a row hovered to show the click target. */
+export const StepsTab: Story = {
+  args: { path: `/app/${baseApplication.slug}/findings/checkout-place-order?tab=steps` },
+};

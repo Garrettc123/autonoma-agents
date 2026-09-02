@@ -1,6 +1,6 @@
 import { Badge, cn, stepInstruction } from "@autonoma/blacklight";
 import { CircleNotchIcon } from "@phosphor-icons/react/CircleNotch";
-import { ImageIcon } from "@phosphor-icons/react/Image";
+import { MagnifyingGlassPlusIcon } from "@phosphor-icons/react/MagnifyingGlassPlus";
 import { XCircleIcon } from "@phosphor-icons/react/XCircle";
 import { NavigableLightbox, type NavigableStep } from "components/screenshot-lightbox";
 import { useState } from "react";
@@ -82,33 +82,43 @@ export function FindingStepsList({
 
 function StepRow({ step, onOpenFrame }: { step: FindingDetailStep; onOpenFrame?: () => void }) {
   const failed = step.status === "failed";
+  const rowInner = (
+    <>
+      {failed ? (
+        <XCircleIcon size={15} className="shrink-0 text-status-critical" />
+      ) : (
+        <span className="flex size-4 shrink-0 items-center justify-center rounded-full border border-border-mid font-mono text-4xs text-text-secondary">
+          {step.order}
+        </span>
+      )}
+      <span className={cn("min-w-0 flex-1 truncate text-sm", failed ? "text-status-critical" : "text-text-primary")}>
+        {stepInstruction({ interaction: step.interaction, params: step.params })}
+      </span>
+      <Badge variant="ghost" className="shrink-0 font-mono text-4xs uppercase">
+        {step.interaction}
+      </Badge>
+      {onOpenFrame != null && (
+        <MagnifyingGlassPlusIcon
+          size={15}
+          className="shrink-0 text-text-secondary transition-colors group-hover:text-primary"
+        />
+      )}
+    </>
+  );
   return (
     <li className="flex flex-col">
-      <div className="flex items-center gap-2.5 px-3 py-2.5">
-        {failed ? (
-          <XCircleIcon size={15} className="shrink-0 text-status-critical" />
-        ) : (
-          <span className="flex size-4 shrink-0 items-center justify-center rounded-full border border-border-mid font-mono text-4xs text-text-secondary">
-            {step.order}
-          </span>
-        )}
-        <span className={cn("min-w-0 flex-1 truncate text-sm", failed ? "text-status-critical" : "text-text-primary")}>
-          {stepInstruction({ interaction: step.interaction, params: step.params })}
-        </span>
-        <Badge variant="ghost" className="shrink-0 font-mono text-4xs uppercase">
-          {step.interaction}
-        </Badge>
-        {onOpenFrame != null && (
-          <button
-            type="button"
-            onClick={onOpenFrame}
-            aria-label={`Open frame for step ${step.order}`}
-            className="shrink-0 text-text-secondary transition-colors hover:text-text-primary"
-          >
-            <ImageIcon size={15} />
-          </button>
-        )}
-      </div>
+      {onOpenFrame != null ? (
+        <button
+          type="button"
+          onClick={onOpenFrame}
+          aria-label={`Open frame for step ${step.order}`}
+          className="group flex w-full cursor-pointer items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-surface-raised focus-visible:bg-surface-raised focus-visible:outline-none"
+        >
+          {rowInner}
+        </button>
+      ) : (
+        <div className="flex items-center gap-2.5 px-3 py-2.5">{rowInner}</div>
+      )}
       {failed && step.error != null && (
         <p className="mx-3 mb-2.5 rounded-md border border-status-critical/30 bg-status-critical/5 px-2 py-1 text-xs text-status-critical">
           {step.errorName != null ? `${step.errorName}: ` : ""}

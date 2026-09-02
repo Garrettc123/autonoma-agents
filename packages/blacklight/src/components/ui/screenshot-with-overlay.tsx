@@ -1,3 +1,4 @@
+import { CircleNotchIcon } from "@phosphor-icons/react/CircleNotch";
 import { useEffect, useRef, useState } from "react";
 import { useStableSignedUrl } from "../../lib/use-stable-signed-url";
 import { cn } from "../../lib/utils";
@@ -185,6 +186,10 @@ export interface ScreenshotWithOverlayProps {
   points?: Array<OverlayPoint>;
   screenResolution?: { width: number; height: number };
   onClick?: (e: React.MouseEvent) => void;
+  /** While a freshly-changed `src` decodes, blank the previous frame behind a spinner so a stale frame is never
+   *  shown as if it were the new one. Off by default; the navigable step gallery opts in because it swaps `src`
+   *  in place as you page between steps. */
+  showLoadingIndicator?: boolean;
 }
 
 export function ScreenshotWithOverlay({
@@ -195,16 +200,36 @@ export function ScreenshotWithOverlay({
   points,
   screenResolution,
   onClick,
+  showLoadingIndicator = false,
 }: ScreenshotWithOverlayProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const overlay = useOverlayPositions(containerRef, points ?? NO_POINTS, screenResolution);
   // Pin the signed src so a re-sign does not re-fetch the frame (and drop the computed overlay) on every poll.
   const stableSrc = useStableSignedUrl(src);
+  // Track which src has finished decoding. A caller that swaps `src` in place (the step gallery) can then blank
+  // the still-displayed previous frame until the new one paints, rather than passing it off as the new step.
+  const [loadedSrc, setLoadedSrc] = useState<string>();
+  const isLoading = showLoadingIndicator && stableSrc !== loadedSrc;
+  const markSettled = showLoadingIndicator ? () => setLoadedSrc(stableSrc) : undefined;
 
   return (
     <div ref={containerRef} className="relative" onClick={onClick}>
-      <img src={stableSrc} alt={alt} className={imgClassName} onLoad={overlay.recalculate} />
-      {overlay.hasPoints && (
+      <img
+        src={stableSrc}
+        alt={alt}
+        className={cn(imgClassName, isLoading && "opacity-0")}
+        onLoad={() => {
+          markSettled?.();
+          overlay.recalculate();
+        }}
+        onError={markSettled}
+      />
+      {isLoading && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <CircleNotchIcon size={overlaySize === "lg" ? 40 : 20} className="animate-spin text-white/70" />
+        </div>
+      )}
+      {overlay.hasPoints && !isLoading && (
         <PointMarkers
           points={points ?? NO_POINTS}
           screenResolution={screenResolution}
