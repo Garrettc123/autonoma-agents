@@ -16,7 +16,7 @@ export class SdkHttpError extends SdkCallError {
         public readonly code?: string,
         public readonly detail?: string,
     ) {
-        super(message, { kind: "http", status, code });
+        super(message, { kind: "http", status, code, detail });
         this.name = "SdkHttpError";
     }
 }

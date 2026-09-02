@@ -31,10 +31,39 @@ describe("mapSdkFailureToVerdict", () => {
     it("overrides the two codes whose ownership breaks the has-code rule", () => {
         // We sent a request the SDK could not parse - our bug, not the customer's.
         expect(mapSdkFailureToVerdict({ kind: "http", status: 400, code: "INVALID_BODY" })).toBe("engine_artifact");
+        expect(
+            mapSdkFailureToVerdict({
+                kind: "http",
+                status: 400,
+                code: "INVALID_BODY",
+                detail: "Invalid request body: cycle detected in _alias/_ref graph: Task -> Project",
+            }),
+        ).toBe("engine_artifact");
         // Shared-secret drift - almost always our managed secret, so undecided rather than the customer's.
         expect(mapSdkFailureToVerdict({ kind: "http", status: 401, code: "INVALID_SIGNATURE" })).toBe(
             "environment_failure",
         );
+    });
+
+    it("routes the SDK's missing-factory rejection to scenario_issue despite its INVALID_BODY code", () => {
+        // The request was well-formed; the customer's handler lacks a factory the recipe names. Both SDK languages
+        // file it under INVALID_BODY, so only the detail tells it apart from a body we malformed.
+        expect(
+            mapSdkFailureToVerdict({
+                kind: "http",
+                status: 400,
+                code: "INVALID_BODY",
+                detail: 'Invalid request body: no factory registered for model "issue_subtasks". Register one with `defineFactory(...)` and add it to HandlerConfig.factories.',
+            }),
+        ).toBe("scenario_issue");
+        expect(
+            mapSdkFailureToVerdict({
+                kind: "http",
+                status: 400,
+                code: "INVALID_BODY",
+                detail: 'Invalid body: no factory registered for model "agentRegistration". Register one with `define_factory(...)` and add it to HandlerConfig.factories.',
+            }),
+        ).toBe("scenario_issue");
     });
 });
 

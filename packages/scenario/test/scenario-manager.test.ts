@@ -530,7 +530,7 @@ integrationTestSuite({
             // is a bare status), so the analysis workflow can classify the failure without re-parsing the string.
             expect(instance.lastError).toEqual({
                 message: "SDK returned HTTP 500: internal",
-                failure: { kind: "http", status: 500 },
+                failure: { kind: "http", status: 500, detail: "internal" },
             });
             expect(instance.completedAt).not.toBeNull();
         });

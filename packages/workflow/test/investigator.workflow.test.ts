@@ -707,6 +707,28 @@ describe("investigatorWorkflow verdict state machine", () => {
         expect(harness.webRuns).toEqual([]);
     });
 
+    it("classifies the SDK's missing-factory rejection as scenario_issue - the customer's handler lacks a factory", async () => {
+        // The SDK files a missing factory under INVALID_BODY, the code that otherwise means we malformed the request.
+        // The tag's detail tells the two apart, so the finding lands on the client-owned scenario plane.
+        harness.scenarioUpError = ApplicationFailure.create({
+            message: 'SDK returned HTTP 400: Invalid request body: no factory registered for model "issue_subtasks".',
+            type: SCENARIO_SETUP_FAILURE_TYPE,
+            details: [
+                {
+                    kind: "http",
+                    status: 400,
+                    code: "INVALID_BODY",
+                    detail: 'Invalid request body: no factory registered for model "issue_subtasks".',
+                },
+            ],
+        });
+
+        const finding = await runInvestigator("pre_existing", "scenario-1");
+
+        expect(finding.category).toBe("scenario_issue");
+        expect(harness.webRuns).toEqual([]);
+    });
+
     it("classifies a tagged unreachable provisioning failure as environment_failure", async () => {
         harness.scenarioUpError = ApplicationFailure.create({
             message: "fetch failed",

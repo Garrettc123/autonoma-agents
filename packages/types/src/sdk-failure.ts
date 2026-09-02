@@ -8,13 +8,30 @@ import { isColdStartStatus } from "./sdk-error-signals";
  * cross-language contract fixed by the SDK repo's `protocol/suites/errors.test.json`, which this monorepo does not
  * import. Exported so every reader shares one definition - a rename then lands in one place - and the conformance
  * suite keeps this copy in sync.
- * - `INVALID_BODY`: WE sent a request the SDK could not parse - our client/recipe bug, not the customer's.
+ * - `INVALID_BODY`: the SDK rejected our request body. Usually our client/recipe bug - except the missing-factory
+ *   rejection, which the SDK files under the same code but is the customer's handler lacking a factory the stored
+ *   recipe names (see {@link isMissingFactoryDetail}).
  * - `INVALID_SIGNATURE`: HMAC drift, almost always our managed shared secret - genuinely either side, so undecided.
  */
 export const SDK_ERROR_CODE = {
     INVALID_BODY: "INVALID_BODY",
     INVALID_SIGNATURE: "INVALID_SIGNATURE",
 } as const;
+
+/**
+ * The SDK's missing-factory rejection, matched on the wording every SDK language shares (JS: `no factory registered
+ * for model "X". Register one with defineFactory(...)`; Python: `... define_factory(...)`). It rides under
+ * `INVALID_BODY`, so the code alone cannot tell it apart from a request we malformed - the detail can.
+ */
+const MISSING_FACTORY_DETAIL_PATTERN = /no factory registered for model/i;
+
+/**
+ * Whether a non-2xx `detail` is the SDK's missing-factory rejection: the customer's handler received a well-formed
+ * `create` graph but has no factory for one of the models it names. Their code (or their recipe) is what changes.
+ */
+export function isMissingFactoryDetail(detail: string | undefined): boolean {
+    return detail != null && MISSING_FACTORY_DETAIL_PATTERN.test(detail);
+}
 
 /**
  * The structured signal for a failed call to a customer's Autonoma SDK endpoint, computed at the transport
@@ -32,8 +49,16 @@ export const sdkFailureSchema = z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("unreachable") }),
     /** The request exceeded its deadline (`AbortSignal.timeout`) - the endpoint hung or was too slow. */
     z.object({ kind: z.literal("timed_out") }),
-    /** The endpoint answered with a non-2xx. `code` is the SDK's contractual error code, present when the body carried one. */
-    z.object({ kind: z.literal("http"), status: z.number().int(), code: z.string().optional() }),
+    /**
+     * The endpoint answered with a non-2xx. `code` is the SDK's contractual error code and `detail` its human
+     * message (`message` / `error` / `detail` in the body), each present when the body carried it.
+     */
+    z.object({
+        kind: z.literal("http"),
+        status: z.number().int(),
+        code: z.string().optional(),
+        detail: z.string().optional(),
+    }),
     /** A 2xx whose body failed the up/down response schema - the SDK claimed success but its answer is malformed. */
     z.object({ kind: z.literal("bad_response") }),
 ]);
@@ -62,7 +87,7 @@ export function mapSdkFailureToVerdict(failure: SdkFailure): AnalysisVerdict {
         case "bad_response":
             return "scenario_issue";
         case "http":
-            return mapHttpFailure(failure.status, failure.code);
+            return mapHttpFailure(failure.status, failure.code, failure.detail);
     }
 }
 
@@ -79,8 +104,9 @@ export function isColdStartFailure(failure: SdkFailure): boolean {
     return false;
 }
 
-function mapHttpFailure(status: number, code: string | undefined): AnalysisVerdict {
-    if (code === SDK_ERROR_CODE.INVALID_BODY) return "engine_artifact";
+function mapHttpFailure(status: number, code: string | undefined, detail: string | undefined): AnalysisVerdict {
+    if (code === SDK_ERROR_CODE.INVALID_BODY)
+        return isMissingFactoryDetail(detail) ? "scenario_issue" : "engine_artifact";
     if (code === SDK_ERROR_CODE.INVALID_SIGNATURE) return "environment_failure";
     // A gateway/ingress status or a missing endpoint is the environment, not the app - the handler never answered.
     if (isColdStartStatus(status) || status === 404) return "environment_failure";
