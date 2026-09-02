@@ -23,6 +23,7 @@
         "zod": "catalog:"
     },
     "devDependencies": {
+        "@autonoma/storage": "workspace:*",
         "typescript": "catalog:",
         "vitest": "catalog:"
     }

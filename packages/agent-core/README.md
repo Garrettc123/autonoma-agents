@@ -15,6 +15,7 @@ Two consumers share this package:
 src/
 ├── agent/          # Agent, AgentLoop, AgentTool, ReportResultTool/FinishTool, tool-errors, log-step
 ├── compaction/     # MessageCompactor contract + RedactOldToolResults strategy
+├── message-storage/# MessageStorage: ModelMessage[] <-> StoredMessages with image parts as S3 refs
 ├── logger.ts       # Minimal Logger interface + noopLogger + setDefaultLogger/getDefaultLogger seam
 ├── model.ts        # LanguageModel type alias (single source of truth; the registry re-exports it)
 ├── retry.ts        # buildRetry: capped exponential backoff honoring Retry-After, retryable-only
@@ -61,6 +62,15 @@ The transcript survives a rejected model call because the loop captures the SDK'
 `buildTranscript(userPrompt, modelMessages)` shapes what a caller persists - use it to ADD context the agent could not otherwise recover, such as a prompt built from non-deterministic pre-loop work. The loop applies it on the success path _and_ on every failure path, so an override cannot accidentally cover only the happy one. That is the trap it replaces: a subclass wrapping `runLoop` can only shape the value it returns, so its prompt context silently vanished from exactly the runs worth debugging.
 
 **A transcript never carries inline media.** `stripMedia` runs on every transcript the loop hands out, after `buildTranscript`, replacing image and file bytes with a short placeholder - so no override can reintroduce them. This is not optional because transcripts get JSON-serialized into storage, and a single screenshot is a multi-megabyte base64 string; a run that inspects a dozen frames would write a record orders of magnitude larger than the reasoning anyone wants to read out of it. Note that images arrive through tool **results** (a frame-viewing tool returns inline media via `toModelOutput`), not just prompts, so both paths are stripped. Media worth keeping is addressed by a storage key on the record that references it.
+
+## Message storage seam
+
+`stripMedia` throws media away; `MessageStorage` keeps it. When a host must persist a live conversation (the PR-chat session history), it needs the screenshots the agent saw to survive a round trip - but inlining base64 in the DB is the same multi-megabyte problem `stripMedia` exists to avoid. `MessageStorage` resolves that with two methods:
+
+- `toStored(messages)` walks a `ModelMessage[]` and lifts every inline image - a user image part, an assistant part, or a frame nested in a tool result - into blob storage, leaving an `{ type: "image-ref", key, mediaType }` in its place. Text, tool calls, and tool results stay JSON-inline; any other inline binary (a non-image file's bytes) is normalized to base64 so the stored form is JSON-faithful, and a URL/data-URL image reference passes through untouched. The result is validated against `storedMessagesSchema` before it returns.
+- `fromStored(stored)` reverses it, rehydrating each ref into a file part backed by a **presigned URL** (a `URL` instance, the shape the SDK's runtime schema wants). The provider downloads it at request time, so resolving a conversation never re-fetches bytes this seam would only hand back. Output is validated against the SDK's own `modelMessageSchema`, so no cast is needed to produce `ModelMessage[]`. Because those URLs are short-lived, `fromStored`'s output is **request-scoped**: resolve immediately before sending to the model, never persist or long-hold it.
+
+Keys are content-addressed (`sha256` of the bytes), so the same screenshot stored twice collapses to one object. The blob store is injected as a two-method `ImageStore` port - `@autonoma/storage`'s `S3Storage` satisfies it structurally, keeping the AWS SDK out of this package and letting tests inject a fake. The DB model, the session host, and the clone strategy live in the host; this is only the translation.
 
 **Nor do the logs.** `AgentTool` runs every value it logs through `redactForLog`, which replaces any string over 4 KB with a note of its length - the Sentry SDK does not truncate log attributes, so an un-elided frame ships whole. It is a size rule rather than a media rule so the next tool returning something enormous is covered without opting in; the transcript still holds every result in full.
 

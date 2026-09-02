@@ -38,4 +38,12 @@ export {
 
 export { type CompactionResult, type MessageCompactor, RedactOldToolResults } from "./compaction";
 
+export {
+    MessageStorage,
+    type MessageStorageConfig,
+    type ImageStore,
+    storedMessagesSchema,
+    type StoredMessages,
+} from "./message-storage";
+
 export { type RetryConfig, DEFAULT_RETRY_CONFIG, buildRetry } from "./retry";
