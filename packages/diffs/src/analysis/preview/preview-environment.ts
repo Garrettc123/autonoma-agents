@@ -86,8 +86,13 @@ export class PreviewEnvironment implements PreviewEnvAccess, PreviewScriptAccess
             // Inject the PREVIEW's env (so the script hits the same backend the test did); keep only PATH/HOME
             // from the worker so node resolves - do NOT leak the worker's own credentials into the script.
             const scriptEnv = { PATH: process.env.PATH, HOME: process.env.HOME, ...previewEnv };
-            const output = await this.runProcess("node", ["index.mjs"], workDir, scriptEnv);
-            return this.noteConnectionGaps(previewEnv) + output;
+            const caveat = this.noteConnectionGaps(previewEnv);
+            try {
+                const output = await this.runProcess("node", ["index.mjs"], workDir, scriptEnv);
+                return caveat + output;
+            } catch (error) {
+                throw this.explainScriptFailure(error, caveat);
+            }
         } finally {
             await rm(workDir, { recursive: true, force: true }).catch((error) =>
                 this.logger.warn("Failed to clean up script dir", { extra: { workDir }, err: error }),
@@ -122,6 +127,19 @@ export class PreviewEnvironment implements PreviewEnvAccess, PreviewScriptAccess
         }
         lines.push("]");
         return `${lines.join("\n")}\n\n`;
+    }
+
+    /**
+     * A failed backend query is most often the per-PR connection vars being absent here rather than the
+     * backend being down: with no DATABASE_URL in scope a client defaults to localhost and the connection is
+     * refused. Left bare, that "ECONNREFUSED" reads as "the record is missing" when it means "this script
+     * never had a working connection". Prepend the same connection caveat the success path carries so the
+     * failure is weighed honestly - the caveat's own text already predicts exactly this connection failure.
+     */
+    private explainScriptFailure(cause: unknown, caveat: string): Error {
+        const detail = cause instanceof Error ? cause.message : String(cause);
+        if (caveat === "") return cause instanceof Error ? cause : new Error(detail);
+        return new Error(`${caveat}${detail}`);
     }
 
     private runProcess(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv): Promise<string> {
