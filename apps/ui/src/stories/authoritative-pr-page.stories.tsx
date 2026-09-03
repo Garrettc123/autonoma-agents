@@ -661,9 +661,9 @@ export const Clean: Story = {
   },
 };
 
-// The same report, but with flows whose `testSlugs` cite the run's actual findings - so each flow can expand to the
-// checks behind it. The shared `analysisReport` above deliberately cites carried-over slugs with no finding this run
-// (the common real case, where a flow's dropdown stays empty), so this variant exists to exercise the populated one.
+// The same report, but with flows whose `testSlugs` all resolve against the branch's `testRuns` - so each flow expands
+// to the checks behind it. The shared `analysisReport` above cites slugs outside its `testRuns`, keeping the canonical
+// README screenshot dropdown-free, so this variant exists to exercise the populated disclosure.
 const flowsAlignedReport: NonNullable<TrpcFixtures["branches"]> = {
   analysisReport: {
     ...analysisReport.analysisReport!,

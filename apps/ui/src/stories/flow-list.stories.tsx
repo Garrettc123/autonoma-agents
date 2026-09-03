@@ -1,4 +1,4 @@
-import type { AnalysisFlow } from "@autonoma/types";
+import type { AnalysisFlow, AnalysisTestRun } from "@autonoma/types";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { AnalysisFlowList } from "components/analysis/flow-list";
 
@@ -52,6 +52,27 @@ const flows: AnalysisFlow[] = [
   },
 ];
 
+// The branch's last-known verdict per test - the same cumulative map the flow counts derive from. Every flow's slugs
+// resolve here (in production a flow is always a subset of this map), so each flow renders its findings disclosure.
+function testRun(slug: string, category: string): AnalysisTestRun {
+  return { id: slug, testCase: { name: `${slug}.md`, slug }, category };
+}
+
+const testRuns: AnalysisTestRun[] = [
+  testRun("res-location", "environment_failure"),
+  testRun("res-new-customer", "environment_failure"),
+  testRun("res-unlimited", "scenario_issue"),
+  testRun("res-subscription", "scenario_issue"),
+  testRun("res-evfmc", "environment_failure"),
+  testRun("payout-details", "scenario_issue"),
+  testRun("maint-list", "passed"),
+  testRun("maint-block", "passed"),
+  testRun("maint-history", "passed"),
+  testRun("maint-export", "engine_artifact"),
+  testRun("trip-extend", "passed"),
+  testRun("trip-confirm", "passed"),
+];
+
 const meta = {
   title: "Components/AnalysisFlowList",
   component: AnalysisFlowList,
@@ -67,4 +88,4 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-export const LongTitle: Story = { args: { flows, findings: [] } };
+export const LongTitle: Story = { args: { flows, testRuns } };

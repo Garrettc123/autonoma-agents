@@ -1,9 +1,9 @@
 import type { Badge } from "@autonoma/blacklight";
 import { Panel, PanelBody, PanelHeader, PanelTitle } from "@autonoma/blacklight";
 import {
-  type AnalysisFindingView,
   type AnalysisFlow,
   type AnalysisFlowStatus,
+  type AnalysisTestRun,
   analysisFindingSortKey,
   analysisFlowComposition,
 } from "@autonoma/types";
@@ -75,15 +75,16 @@ const FLOW_CONCEPT_HELP =
  * find it where they last saw it. Every judgement rendered here - the status, the owner, the counts - is derived from
  * the tests each flow cites; the Reporter contributes only the name and the sentence.
  *
- * `findings` are only THIS run's findings; a flow can cite tests carried from an earlier checkpoint whose finding does
- * not live at this snapshot. A flow shows its findings dropdown ONLY when this run resolves every test it cites, so the
- * dropdown always accounts for the full set the cumulative status and composition above are computed from - a
- * partially-carried flow shows no dropdown rather than one whose contents the header would contradict.
+ * `testRuns` is the branch's last-known verdict per test - the same cumulative set the flow status and counts were
+ * derived from, recomputed live here (the persisted flow froze only the tallies, not the per-slug verdicts). Cited
+ * slugs are a subset of that map, so a flow shows its dropdown whenever its frozen citations still resolve against the
+ * live map - carried verdicts included, each row linking to the commit where that test last ran. See the `FlowRow`
+ * guard for the case a citation no longer resolves (a finding removed after the report was authored).
  */
-export function AnalysisFlowList({ flows, findings }: { flows: AnalysisFlow[]; findings: AnalysisFindingView[] }) {
+export function AnalysisFlowList({ flows, testRuns }: { flows: AnalysisFlow[]; testRuns: AnalysisTestRun[] }) {
   if (flows.length === 0) return null;
 
-  const findingBySlug = new Map(findings.map((finding) => [finding.testCase.slug, finding]));
+  const testRunBySlug = new Map(testRuns.map((testRun) => [testRun.testCase.slug, testRun]));
 
   return (
     <Panel>
@@ -100,7 +101,7 @@ export function AnalysisFlowList({ flows, findings }: { flows: AnalysisFlow[]; f
       <PanelBody className="p-0">
         <ul className="divide-y divide-border-dim">
           {flows.map((flow) => (
-            <FlowRow key={flow.title} flow={flow} findings={resolveFlowFindings(flow, findingBySlug)} />
+            <FlowRow key={flow.title} flow={flow} testRuns={resolveFlowTestRuns(flow, testRunBySlug)} />
           ))}
         </ul>
       </PanelBody>
@@ -109,30 +110,26 @@ export function AnalysisFlowList({ flows, findings }: { flows: AnalysisFlow[]; f
 }
 
 /**
- * The findings behind one flow, ordered bugs-first via the shared sort key. Only THIS run's findings resolve (see the
- * component doc): a carried-over slug with no finding this run is dropped, so a flow can render fewer rows than its
- * branch-scoped status counts.
+ * The test runs behind one flow, ordered bugs-first via the shared sort key. Resolved against the branch's last-known
+ * verdict per test - the same cumulative map the flow's counts come from - so every cited slug resolves and the row
+ * set matches the "N of M" header.
  */
-function resolveFlowFindings(
-  flow: AnalysisFlow,
-  findingBySlug: Map<string, AnalysisFindingView>,
-): AnalysisFindingView[] {
+function resolveFlowTestRuns(flow: AnalysisFlow, testRunBySlug: Map<string, AnalysisTestRun>): AnalysisTestRun[] {
   return flow.testSlugs
-    .map((slug) => findingBySlug.get(slug))
-    .filter((finding): finding is AnalysisFindingView => finding != null)
+    .map((slug) => testRunBySlug.get(slug))
+    .filter((testRun): testRun is AnalysisTestRun => testRun != null)
     .sort((a, b) => analysisFindingSortKey(a.category) - analysisFindingSortKey(b.category));
 }
 
-function FlowRow({ flow, findings }: { flow: AnalysisFlow; findings: AnalysisFindingView[] }) {
+function FlowRow({ flow, testRuns }: { flow: AnalysisFlow; testRuns: AnalysisTestRun[] }) {
   const status = FLOW_STATUS_META[flow.status];
   const owner = FLOW_OWNER_META[flow.owner];
   // This panel's whole frame is the PR's cumulative state, so the "carried from an earlier commit" note reads as
   // noise here - keep only the "N of M checks passed" half of the composition.
   const composition = analysisFlowComposition(flow, { includeCarriedNote: false });
-  // Every cited test resolved to a finding this run, so the dropdown accounts for the whole set the header counts
-  // from. When some are carried over (their findings live at an earlier snapshot), show none rather than a subset
-  // the cumulative status/composition would contradict.
-  const findingsBackHeader = findings.length > 0 && findings.length === flow.testSlugs.length;
+  // Resolved against the same cumulative map the header counts from, so every cited slug has a run and this holds; the
+  // guard stays as a defensive invariant - never render a subset the status/composition would contradict.
+  const runsBackHeader = testRuns.length > 0 && testRuns.length === flow.testSlugs.length;
 
   return (
     <li className="flex flex-col gap-1 px-4 py-3">
@@ -156,43 +153,45 @@ function FlowRow({ flow, findings }: { flow: AnalysisFlow; findings: AnalysisFin
         {owner != null && <OwnerBadge meta={owner} />}
       </div>
       <p className="text-xs leading-relaxed text-text-secondary">{flow.detail}</p>
-      {findingsBackHeader && <FlowFindings findings={findings} />}
+      {runsBackHeader && <FlowFindings testRuns={testRuns} />}
     </li>
   );
 }
 
 /**
- * The flow's individual checks, collapsed by default. Each row is the terminal verdict of one test the flow cites,
- * linking to its finding page - the evidence, trace and self-heal history behind the one-line judgement above.
+ * The flow's individual checks, collapsed by default. Each `AnalysisTestRun` is a finding-backed row - its `id` IS a
+ * finding id - so "N findings" and the per-row link to the finding page read straight, even though the prop is typed
+ * as the run rather than the fuller `AnalysisFindingView`. Each row is one test's last-known verdict on the branch,
+ * behind which the finding page carries the evidence, trace and self-heal history for the one-line judgement above.
  */
-function FlowFindings({ findings }: { findings: AnalysisFindingView[] }) {
+function FlowFindings({ testRuns }: { testRuns: AnalysisTestRun[] }) {
   return (
     <details className="group mt-1">
       <summary className="flex w-fit cursor-pointer list-none items-center gap-1.5 text-text-secondary transition-colors hover:text-text-primary">
         <CaretRightIcon size={11} className="transition-transform group-open:rotate-90" />
         <span className="font-mono text-3xs font-semibold uppercase tracking-widest">
-          {findings.length === 1 ? "1 finding" : `${findings.length} findings`}
+          {testRuns.length === 1 ? "1 finding" : `${testRuns.length} findings`}
         </span>
       </summary>
       <ul className="mt-1.5 flex flex-col gap-0.5 border-l border-border-dim pl-3">
-        {findings.map((finding) => (
-          <FlowFindingRow key={finding.id} finding={finding} />
+        {testRuns.map((testRun) => (
+          <FlowFindingRow key={testRun.id} testRun={testRun} />
         ))}
       </ul>
     </details>
   );
 }
 
-function FlowFindingRow({ finding }: { finding: AnalysisFindingView }) {
+function FlowFindingRow({ testRun }: { testRun: AnalysisTestRun }) {
   return (
     <li>
       <AppLink
         to="/app/$appSlug/findings/$findingId"
-        params={{ findingId: finding.id }}
+        params={{ findingId: testRun.id }}
         className="group/row flex items-center gap-2 py-1 transition-colors hover:text-text-primary"
       >
-        <VerdictBadge verdict={finding.category} />
-        <span className="min-w-0 flex-1 truncate text-xs text-text-primary">{finding.testCase.name}</span>
+        <VerdictBadge verdict={testRun.category} />
+        <span className="min-w-0 flex-1 truncate text-xs text-text-primary">{testRun.testCase.name}</span>
         <ArrowUpRightIcon
           size={12}
           className="shrink-0 text-text-secondary transition-colors group-hover/row:text-text-primary"

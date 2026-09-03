@@ -1,5 +1,5 @@
 import { Badge, cn, Panel, PanelBody, PanelHeader, PanelTitle, Skeleton, StatusDot } from "@autonoma/blacklight";
-import type { AnalysisFindingView, AnalysisFlow, AnalysisIssueSummary } from "@autonoma/types";
+import type { AnalysisFlow, AnalysisIssueSummary, AnalysisTestRun } from "@autonoma/types";
 import { ArrowRightIcon } from "@phosphor-icons/react/ArrowRight";
 import { CaretRightIcon } from "@phosphor-icons/react/CaretRight";
 import { GitPullRequestIcon } from "@phosphor-icons/react/GitPullRequest";
@@ -263,7 +263,7 @@ function AuthoritativeReportColumn({
           ) : undefined
         }
       />
-      <IssuesAndFlows openIssues={openIssues} flows={report.flows} findings={report.findings} prNumber={prNumber} />
+      <IssuesAndFlows openIssues={openIssues} flows={report.flows} testRuns={report.testRuns} prNumber={prNumber} />
       <LatestSnapshotLink prNumber={prNumber} snapshotId={snapshotId} />
     </>
   );
@@ -276,18 +276,18 @@ function AuthoritativeReportColumn({
 function IssuesAndFlows({
   openIssues,
   flows,
-  findings,
+  testRuns,
   prNumber,
 }: {
   openIssues: AnalysisIssueSummary[];
   flows: AnalysisFlow[];
-  findings: AnalysisFindingView[];
+  testRuns: AnalysisTestRun[];
   prNumber: number;
 }) {
   // AnalysisFlowList self-nulls when it has no flows; the open-issues list would instead render an empty-state panel,
   // so that one is guarded here. Built once so the two return branches can't drift as props change.
   const issuesPanel = openIssues.length > 0 ? <AnalysisOpenIssuesList issues={openIssues} prNumber={prNumber} /> : null;
-  const flowsPanel = <AnalysisFlowList flows={flows} findings={findings} />;
+  const flowsPanel = <AnalysisFlowList flows={flows} testRuns={testRuns} />;
 
   if (issuesPanel != null && flows.length > 0) {
     // `items-start` keeps each panel at its natural height rather than stretching the shorter one to match the
