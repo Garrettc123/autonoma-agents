@@ -5,7 +5,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { NoCreditsPanel } from "components/no-credits-panel";
 import { PlannerCommandBlock } from "components/planner-command-block";
 import { buildOnboardingSearch } from "lib/onboarding/onboarding-search";
-import { useCreditBalance } from "lib/query/billing.queries";
+import { useIsOutOfCredits } from "lib/query/billing.queries";
 import { useEffect, useState } from "react";
 import { AgentConfiguringScreen } from "./agent-configuring-screen";
 
@@ -102,8 +102,7 @@ function McpFirstPairing({ appId, connected, copy }: { appId: string; connected:
   // Undefined while the balance loads, and undefined does NOT gate: a slow read must not withhold the
   // command from somebody who can use it. The server refuses the work anyway, so this only spares the
   // reader a failure they could not have predicted.
-  const creditBalance = useCreditBalance();
-  const noCredits = creditBalance != null && creditBalance <= 0;
+  const noCredits = useIsOutOfCredits() === true;
 
   return (
     <div className="flex flex-col gap-6">

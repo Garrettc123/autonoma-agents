@@ -15,6 +15,7 @@ type DeductCreditsFlooredResultRow = {
     new_subscription_balance: number | null;
     kill_jobs_on_credit_exhaustion: boolean | null;
     credit_floor: number | null;
+    unlimited_credits: boolean | null;
 };
 
 /** Which extra column on `credit_transaction` links this deduction back to the exact row it charges for. */
@@ -44,7 +45,11 @@ export interface DeductCreditsFlooredParams {
 export interface DeductCreditsFlooredResult {
     /** Whether this call was the one that recorded the charge (false on an idempotent retry). */
     deducted: boolean;
-    /** Whole credits actually taken off the balance. Zero when the charge only moved the carry. */
+    /**
+     * Whole credits this charge recorded on the ledger. Zero when the charge only moved the carry.
+     * For a billing-exempt org this is what the usage WOULD have cost - the balance itself is
+     * frozen, so it is not what left the wallet.
+     */
     creditsDeducted?: number;
     newBalance?: number;
     /**
@@ -55,6 +60,11 @@ export interface DeductCreditsFlooredResult {
      * (no *new* crossing to react to).
      */
     crossedIntoExhaustion: boolean;
+    /**
+     * True when the org is billing-exempt (`unlimitedCredits`): the charge was written to the
+     * ledger but neither balance moved. Never true and `crossedIntoExhaustion` true together.
+     */
+    unlimitedCredits: boolean;
 }
 
 /**
@@ -62,6 +72,10 @@ export interface DeductCreditsFlooredResult {
  * rather than requiring sufficiency - an already-running PR's jobs (AI calls, builds, running compute)
  * always get charged in full and never get half-billed mid-flight. Every org defaults to a floor of 0
  * (today's zero-clamp behavior, unchanged), raised only by a deliberate admin action.
+ *
+ * A billing-exempt org (`unlimitedCredits`) is charged on the ledger and nowhere else: the
+ * `credit_transaction` row is written with the real cost, both balances stay put, and the sub-credit
+ * carry still advances so successive charges accrue at true cost rather than drifting.
  *
  * Generalizes the floor-at-zero CTE pattern shared by `deductCreditsForLlmProxy`/
  * `deductCreditsForPreviewUsage`: same `FOR UPDATE` lock on `billing_customer`, same
@@ -98,7 +112,8 @@ export async function deductCreditsFloored(
                         subscription_credit_balance,
                         credit_remainder_micros,
                         credit_floor,
-                        kill_jobs_on_credit_exhaustion
+                        kill_jobs_on_credit_exhaustion,
+                        unlimited_credits
                     FROM billing_customer
                     WHERE organization_id = ${organizationId}
                     FOR UPDATE
@@ -113,16 +128,30 @@ export async function deductCreditsFloored(
                         subscription_credit_balance,
                         credit_floor,
                         kill_jobs_on_credit_exhaustion,
+                        unlimited_credits,
                         ((credit_remainder_micros::bigint + ${costMicros}::bigint) / 1000000)::int
                             AS whole_credits,
                         ((credit_remainder_micros::bigint + ${costMicros}::bigint) % 1000000)::int
                             AS new_remainder_micros
                     FROM customer
                 ),
+                -- Where the two balances land once this charge is applied. A billing-exempt org
+                -- keeps both untouched: the transaction row below still records the full cost, so
+                -- the ledger stays a complete usage record while the wallet never moves.
                 eligible AS (
                     SELECT
                         *,
-                        LEAST(subscription_credit_balance, whole_credits) AS subscription_consumed
+                        CASE
+                            WHEN unlimited_credits THEN credit_balance
+                            ELSE GREATEST(credit_balance - whole_credits, credit_floor)
+                        END AS next_balance,
+                        CASE
+                            WHEN unlimited_credits THEN subscription_credit_balance
+                            ELSE GREATEST(
+                                subscription_credit_balance - LEAST(subscription_credit_balance, whole_credits),
+                                0
+                            )
+                        END AS next_subscription_balance
                     FROM accrued
                 ),
                 -- Written even when whole_credits is 0: the row is what makes this idempotent, so
@@ -141,7 +170,7 @@ export async function deductCreditsFloored(
                         organization_id,
                         ${transactionType}::credit_transaction_type,
                         -whole_credits,
-                        GREATEST(credit_balance - whole_credits, credit_floor),
+                        next_balance,
                         ${fkColumn.value}
                     FROM eligible
                     ON CONFLICT (id) DO NOTHING
@@ -150,9 +179,8 @@ export async function deductCreditsFloored(
                 updated AS (
                     UPDATE billing_customer bc
                     SET
-                        credit_balance = GREATEST(eligible.credit_balance - eligible.whole_credits, eligible.credit_floor),
-                        subscription_credit_balance =
-                            GREATEST(eligible.subscription_credit_balance - eligible.subscription_consumed, 0),
+                        credit_balance = eligible.next_balance,
+                        subscription_credit_balance = eligible.next_subscription_balance,
                         credit_remainder_micros = eligible.new_remainder_micros
                     FROM eligible
                     WHERE bc.organization_id = eligible.organization_id
@@ -166,20 +194,22 @@ export async function deductCreditsFloored(
                     (SELECT credit_balance FROM updated LIMIT 1) AS new_balance,
                     (SELECT subscription_credit_balance FROM updated LIMIT 1) AS new_subscription_balance,
                     (SELECT kill_jobs_on_credit_exhaustion FROM eligible LIMIT 1) AS kill_jobs_on_credit_exhaustion,
-                    (SELECT credit_floor FROM eligible LIMIT 1) AS credit_floor
+                    (SELECT credit_floor FROM eligible LIMIT 1) AS credit_floor,
+                    (SELECT unlimited_credits FROM eligible LIMIT 1) AS unlimited_credits
             `;
 
             if (result == null) {
                 logger.warn("Floored deduction query returned no result row", { organizationId, transactionId });
-                return { deducted: false, crossedIntoExhaustion: false };
+                return { deducted: false, crossedIntoExhaustion: false, unlimitedCredits: false };
             }
 
             if (result.inserted_count === 0n) {
                 logger.info("Floored deduction already recorded, skipping", { organizationId, transactionId });
-                return { deducted: false, crossedIntoExhaustion: false };
+                return { deducted: false, crossedIntoExhaustion: false, unlimitedCredits: false };
             }
 
             const crossedIntoExhaustion =
+                result.unlimited_credits !== true &&
                 result.kill_jobs_on_credit_exhaustion === true &&
                 result.old_balance != null &&
                 result.new_balance != null &&
@@ -191,7 +221,11 @@ export async function deductCreditsFloored(
                 organizationId,
                 transactionId,
                 transactionType,
-                extra: { costMicroCredits, creditsDeducted: result.whole_credits },
+                extra: {
+                    costMicroCredits,
+                    creditsCharged: result.whole_credits,
+                    unlimitedCredits: result.unlimited_credits === true,
+                },
                 newBalance: result.new_balance,
                 crossedIntoExhaustion,
             });
@@ -200,19 +234,21 @@ export async function deductCreditsFloored(
                 creditsDeducted: result.whole_credits ?? undefined,
                 newBalance: result.new_balance ?? undefined,
                 crossedIntoExhaustion,
+                unlimitedCredits: result.unlimited_credits === true,
             };
         })
         .catch((error: unknown) => {
             if (isUniqueConstraintError(error)) {
                 logger.info("Floored deduction already recorded, skipping", { organizationId, transactionId });
-                return { deducted: false, crossedIntoExhaustion: false };
+                return { deducted: false, crossedIntoExhaustion: false, unlimitedCredits: false };
             }
             throw error;
         });
 
     // After the commit, never inside it: the recharge re-reads the balance this deduction just
     // wrote and calls Stripe, and neither may happen while the `billing_customer` row lock is held.
-    if (result.deducted) {
+    // `AutoTopUpService` skips billing-exempt orgs too; this check just avoids the round trip.
+    if (result.deducted && !result.unlimitedCredits) {
         await maybeTriggerAutoTopUp(db, organizationId, logger);
     }
 

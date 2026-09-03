@@ -38,6 +38,8 @@ const organizationListSelect = {
             applications: true,
         },
     },
+    // Absent until the org has been through billing provisioning, which is the same as not exempt.
+    billingCustomer: { select: { unlimitedCredits: true } },
 } satisfies Prisma.OrganizationSelect;
 
 /** One organization that owns an app for a given slug - a candidate the caller can switch into. */
@@ -121,6 +123,7 @@ export class AdminService extends Service {
             createdAt: org.createdAt,
             memberCount: org._count.members,
             applicationCount: org._count.applications,
+            unlimitedCredits: org.billingCustomer?.unlimitedCredits ?? false,
         }));
 
         this.logger.info("Organizations listed", {

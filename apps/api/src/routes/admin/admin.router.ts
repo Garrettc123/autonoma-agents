@@ -294,6 +294,23 @@ export const adminRouter = router({
             .mutation(({ ctx: { services }, input }) =>
                 services.billing.updateCreditFloor(input.organizationId, input.creditFloor),
             ),
+        /**
+         * Marks an org billing-exempt: every credits gate passes regardless of balance and no
+         * consumption moves the balance, while each charge is still priced onto
+         * `credit_transaction` so the usage stays auditable. Deliberate and admin-only, same as
+         * `updateCreditFloor` - unlike a large promo grant, this never drains and is reversible
+         * without having to unwind a balance.
+         */
+        updateUnlimitedCredits: internalProcedure
+            .input(
+                z.object({
+                    organizationId: z.string().min(1),
+                    unlimitedCredits: z.boolean(),
+                }),
+            )
+            .mutation(({ ctx: { services }, input }) =>
+                services.billing.updateUnlimitedCredits(input.organizationId, input.unlimitedCredits),
+            ),
         /** The admin catalog view - every top-up package, active or deactivated. */
         listTopupPackagesAdmin: internalProcedure.query(({ ctx: { services } }) =>
             services.billing.listAllTopupPackages(),

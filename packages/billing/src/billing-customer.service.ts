@@ -215,6 +215,7 @@ export class BillingCustomerService extends Service {
                     stripeCustomerId: true,
                     autoTopUpLastFailureReason: true,
                     autoTopUpLastFailureAt: true,
+                    unlimitedCredits: true,
                     transactions: {
                         orderBy: { createdAt: "desc" },
                         take: 20,
@@ -245,6 +246,7 @@ export class BillingCustomerService extends Service {
                 hasSavedPaymentMethod: false,
                 autoTopUpLastFailureReason: undefined,
                 autoTopUpLastFailureAt: undefined,
+                unlimitedCredits: false,
                 cliCreditsSpent: 0,
                 transactions: [],
             };
@@ -274,6 +276,7 @@ export class BillingCustomerService extends Service {
             hasSavedPaymentMethod,
             autoTopUpLastFailureReason: customer.autoTopUpLastFailureReason ?? undefined,
             autoTopUpLastFailureAt: customer.autoTopUpLastFailureAt ?? undefined,
+            unlimitedCredits: customer.unlimitedCredits,
             cliCreditsSpent,
             transactions: customer.transactions,
         };

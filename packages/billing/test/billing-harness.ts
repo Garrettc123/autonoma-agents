@@ -1,9 +1,11 @@
 import {
     ApplicationArchitecture,
     CreditTransactionType,
+    type GenerationStatus,
     type PrismaClient,
     PreviewkitStatus,
     SubscriptionStatus,
+    TriggerSource,
     VercelBillingPeriodStatus,
     VercelInstallationStatus,
     createClient,
@@ -63,6 +65,7 @@ export class BillingTestHarness implements IntegrationHarness {
     private vercelInstallationSeq = 0;
     private vercelInvoiceSeq = 0;
     private previewkitAppSeq = 0;
+    private generationSeq = 0;
 
     constructor(db: PrismaClient) {
         this.db = db;
@@ -361,7 +364,69 @@ export class BillingTestHarness implements IntegrationHarness {
         return app.id;
     }
 
+    /**
+     * A `TestGeneration` for the generation deduction and refund paths, which write a
+     * `credit_transaction` row FK'd to one - so unlike every other fixture here they cannot be
+     * exercised with a bare organization id. Creates the whole chain the FK needs (application,
+     * folder, test case, plan, branch, snapshot) and returns just the generation id.
+     */
+    async createGeneration(organizationId: string, status: GenerationStatus = "pending"): Promise<string> {
+        const seq = this.generationSeq++;
+        const applicationId = await this.applicationFor(organizationId);
+
+        // Created per call rather than reused: `Folder`'s unique key is (applicationId, parentId,
+        // name), and a root folder's `parentId` is null - which Prisma refuses in a compound unique
+        // `where`, so there is no upsert to do here.
+        const folder = await this.db.folder.create({
+            data: { organizationId, applicationId, name: `Root ${seq}` },
+            select: { id: true },
+        });
+        const testCase = await this.db.testCase.create({
+            data: {
+                organizationId,
+                applicationId,
+                folderId: folder.id,
+                name: `Checkout ${seq}`,
+                slug: `checkout-${seq}`,
+            },
+            select: { id: true },
+        });
+        const testPlan = await this.db.testPlan.create({
+            data: { organizationId, testCaseId: testCase.id, prompt: "Buy one item and check out" },
+            select: { id: true },
+        });
+        const branch = await this.db.branch.create({
+            data: { organizationId, applicationId, name: `feature-${seq}` },
+            select: { id: true },
+        });
+        const snapshot = await this.db.branchSnapshot.create({
+            data: { branchId: branch.id, source: TriggerSource.MANUAL },
+            select: { id: true },
+        });
+
+        const generation = await this.db.testGeneration.create({
+            data: { organizationId, testPlanId: testPlan.id, snapshotId: snapshot.id, status },
+            select: { id: true },
+        });
+
+        return generation.id;
+    }
+
     private async previewkitConfigFor(organizationId: string): Promise<string> {
+        const applicationId = await this.applicationFor(organizationId);
+
+        const config = await this.db.previewkitConfig.upsert({
+            where: { applicationId },
+            create: { applicationId },
+            update: {},
+            select: { id: true },
+        });
+
+        return config.id;
+    }
+
+    /** The one application every fixture in this harness hangs off, created on first use. */
+    private async applicationFor(organizationId: string): Promise<string> {
         const application = await this.db.application.upsert({
             where: { organizationId_githubRepositoryId: { organizationId, githubRepositoryId: REPOSITORY_ID } },
             create: {
@@ -375,14 +440,7 @@ export class BillingTestHarness implements IntegrationHarness {
             select: { id: true },
         });
 
-        const config = await this.db.previewkitConfig.upsert({
-            where: { applicationId: application.id },
-            create: { applicationId: application.id },
-            update: {},
-            select: { id: true },
-        });
-
-        return config.id;
+        return application.id;
     }
 }
 

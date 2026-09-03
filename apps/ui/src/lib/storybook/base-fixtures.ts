@@ -340,6 +340,7 @@ const baseTrpcFixtures: TrpcFixtures = {
         freeStartEligibility: { eligible: true, blockedBy: [] },
         status: {
             creditBalance: 740,
+            unlimitedCredits: false,
             subscriptionCreditBalance: 500,
             topupCreditBalance: 240,
             provider: "stripe",

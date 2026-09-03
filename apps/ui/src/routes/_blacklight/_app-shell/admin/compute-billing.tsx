@@ -251,13 +251,16 @@ function ProjectionResult({ data }: { data: NonNullable<ReturnType<typeof useCom
                     <span className="flex items-center gap-2">
                       {row.organizationName}
                       {row.goesUnderwater && <Badge variant="critical">underwater</Badge>}
+                      {row.unlimitedCredits && <Badge variant="success">unlimited</Badge>}
                     </span>
                   </DataTableCell>
                   <DataTableCell className="font-mono">{row.buildCredits.toLocaleString()}</DataTableCell>
                   <DataTableCell className="font-mono">{row.runningCredits.toLocaleString()}</DataTableCell>
                   <DataTableCell className="font-mono">{row.totalCredits.toLocaleString()}</DataTableCell>
                   <DataTableCell className="font-mono">{row.creditBalance.toLocaleString()}</DataTableCell>
-                  <DataTableCell className="font-mono">{row.balanceAfter.toLocaleString()}</DataTableCell>
+                  <DataTableCell className="font-mono">
+                    {row.unlimitedCredits ? "-" : row.balanceAfter.toLocaleString()}
+                  </DataTableCell>
                 </DataTableRow>
               ))}
             </DataTableBody>

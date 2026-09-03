@@ -49,6 +49,13 @@ export class AutoTopUpService extends Service {
         });
 
         if (customer == null) return;
+        // A billing-exempt org's balance is frozen, so it can sit under the threshold forever
+        // without ever consuming anything. Recharging it would charge a card for credits that
+        // nothing spends.
+        if (customer.unlimitedCredits) {
+            this.logger.info("Auto top-up skipped: organization has unlimited credits", { organizationId });
+            return;
+        }
         if (!customer.autoTopUpEnabled || customer.creditBalance >= customer.autoTopUpThreshold) return;
         if (customer.autoTopUpPackageId == null) {
             this.logger.warn("Auto top-up skipped: no package selected", { organizationId });

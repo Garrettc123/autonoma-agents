@@ -26,6 +26,7 @@ import { DownloadSimpleIcon } from "@phosphor-icons/react/DownloadSimple";
 import { GiftIcon } from "@phosphor-icons/react/Gift";
 import { GithubLogoIcon } from "@phosphor-icons/react/GithubLogo";
 import { GlobeIcon } from "@phosphor-icons/react/Globe";
+import { InfinityIcon } from "@phosphor-icons/react/Infinity";
 import { PlusIcon } from "@phosphor-icons/react/Plus";
 import { UsersIcon } from "@phosphor-icons/react/Users";
 import { WarningCircleIcon } from "@phosphor-icons/react/WarningCircle";
@@ -48,6 +49,7 @@ import {
   useRejectOrg,
   useSetPromoCodeActiveAdmin,
   useSwitchToOrg,
+  useUpdateUnlimitedCreditsAdmin,
 } from "lib/query/admin.queries";
 import { Suspense, useEffect, useState } from "react";
 import { clearLastAppId } from "../-last-app";
@@ -83,13 +85,23 @@ interface OrgRowProps {
     createdAt: Date;
     memberCount: number;
     applicationCount: number;
+    unlimitedCredits: boolean;
   };
   activeOrgId: string | undefined;
   onActivate: (orgId: string) => void;
   isActivating: boolean;
+  onToggleUnlimitedCredits: (orgId: string, unlimitedCredits: boolean) => void;
+  isTogglingUnlimitedCredits: boolean;
 }
 
-function OrgRow({ org, activeOrgId, onActivate, isActivating }: OrgRowProps) {
+function OrgRow({
+  org,
+  activeOrgId,
+  onActivate,
+  isActivating,
+  onToggleUnlimitedCredits,
+  isTogglingUnlimitedCredits,
+}: OrgRowProps) {
   const isActive = activeOrgId === org.id;
 
   return (
@@ -106,6 +118,12 @@ function OrgRow({ org, activeOrgId, onActivate, isActivating }: OrgRowProps) {
           {isActive && (
             <Badge variant="outline" className="text-3xs">
               Active
+            </Badge>
+          )}
+          {org.unlimitedCredits && (
+            <Badge variant="success" className="text-3xs">
+              <InfinityIcon size={11} weight="bold" />
+              Unlimited credits
             </Badge>
           )}
         </div>
@@ -137,6 +155,19 @@ function OrgRow({ org, activeOrgId, onActivate, isActivating }: OrgRowProps) {
           <CalendarBlankIcon size={14} />
           <span>{formatDate(org.createdAt)}</span>
         </div>
+      </div>
+
+      <div
+        className="hidden shrink-0 items-center gap-2 sm:flex"
+        title="Unlimited credits: every gate passes and the balance never moves, but usage is still recorded"
+      >
+        <InfinityIcon size={14} className={org.unlimitedCredits ? "text-status-success" : "text-text-secondary"} />
+        <Switch
+          checked={org.unlimitedCredits}
+          disabled={isTogglingUnlimitedCredits}
+          onCheckedChange={(checked) => onToggleUnlimitedCredits(org.id, checked)}
+          aria-label={`Unlimited credits for ${org.name}`}
+        />
       </div>
 
       <div className="shrink-0 w-20 flex justify-end">
@@ -238,9 +269,19 @@ function OrganizationResults({
   });
   const activeOrgId = activeOrg?.id;
   const [activatingId, setActivatingId] = useState<string | undefined>();
+  const [togglingCreditsId, setTogglingCreditsId] = useState<string | undefined>();
   const router = useRouter();
   const { data } = useAdminOrganizations(input);
   const switchMutation = useSwitchToOrg();
+  const unlimitedCreditsMutation = useUpdateUnlimitedCreditsAdmin();
+
+  function handleToggleUnlimitedCredits(organizationId: string, unlimitedCredits: boolean) {
+    setTogglingCreditsId(organizationId);
+    unlimitedCreditsMutation.mutate(
+      { organizationId, unlimitedCredits },
+      { onSettled: () => setTogglingCreditsId(undefined) },
+    );
+  }
 
   function handleActivate(orgId: string) {
     setActivatingId(orgId);
@@ -267,6 +308,8 @@ function OrganizationResults({
             activeOrgId={activeOrgId}
             onActivate={(id) => handleActivate(id)}
             isActivating={activatingId === org.id}
+            onToggleUnlimitedCredits={handleToggleUnlimitedCredits}
+            isTogglingUnlimitedCredits={togglingCreditsId === org.id}
           />
         ))}
         {data.items.length === 0 && (

@@ -3,7 +3,16 @@ import { measureQueries } from "@autonoma/db";
 import { expect } from "vitest";
 import { apiTestSuite } from "../api-test";
 
-const ADMIN_ORGANIZATIONS_QUERY_BUDGET = 5;
+/**
+ * What one page costs: the pinned active organization, the count, the page itself, and the relations
+ * Prisma loads alongside them (`_count` per parent query, plus the billing row each row's
+ * unlimited-credits badge reads).
+ *
+ * The point of the budget is that it does not scale with `pageSize` - a relation Prisma loads for
+ * the whole batch costs one query whether the page holds two rows or twenty. Raise this only for a
+ * genuinely new fixed query, never to accommodate a count that grows with the page.
+ */
+const ADMIN_ORGANIZATIONS_QUERY_BUDGET = 6;
 
 apiTestSuite({
     name: "admin.listOrganizations",
@@ -110,6 +119,34 @@ apiTestSuite({
             );
 
             expect(queryCount).toBeLessThanOrEqual(ADMIN_ORGANIZATIONS_QUERY_BUDGET);
+        });
+
+        /**
+         * The budget above is only meaningful if it is fixed, and a page of two rows is small enough
+         * that a per-row relation load would still fit under it. Asserted as an equality between two
+         * page sizes rather than against the budget, because the property that matters is that the
+         * count does not move with the number of rows - whatever the count happens to be.
+         */
+        test("costs the same number of queries however many rows the page holds", async ({ harness, seedResult }) => {
+            const small = await measureQueries(() =>
+                harness.request().admin.listOrganizations({
+                    page: 1,
+                    pageSize: 2,
+                    query: seedResult.prefix,
+                    organizationType: "company",
+                }),
+            );
+            const large = await measureQueries(() =>
+                harness.request().admin.listOrganizations({
+                    page: 1,
+                    pageSize: 20,
+                    query: seedResult.prefix,
+                    organizationType: "company",
+                }),
+            );
+
+            expect(large.result.items.length).toBeGreaterThan(small.result.items.length);
+            expect(large.queryCount).toBe(small.queryCount);
         });
     },
 });

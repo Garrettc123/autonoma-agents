@@ -261,6 +261,81 @@ const vercelRailLedger: LedgerRow[] = [
 ];
 
 /**
+ * A billing-exempt organization's ledger. Every row is a real charge at its real cost, and every
+ * `balanceAfter` is the same number - which is the whole shape of the feature: consumption is
+ * priced and recorded, the wallet is not touched. The panel reads `balanceAfter` nowhere, so what a
+ * reader sees is a run of charges against a total that says "Unlimited".
+ */
+const unlimitedCreditsLedger: LedgerRow[] = [
+  ledgerRow({
+    id: "ctr_fixture_exempt_preview",
+    type: "PREVIEW_RUNTIME_CONSUMPTION",
+    amount: -2_310,
+    balanceAfter: 740,
+    createdAt: new Date("2026-07-28T09:15:00.000Z"),
+  }),
+  ledgerRow({
+    id: "ctr_fixture_exempt_ai",
+    type: "AI_COST_CONSUMPTION",
+    amount: -8_940,
+    balanceAfter: 740,
+    createdAt: new Date("2026-07-28T08:52:00.000Z"),
+  }),
+  ledgerRow({
+    id: "ctr_fixture_exempt_build",
+    type: "PREVIEW_BUILD_CONSUMPTION",
+    amount: -1_180,
+    balanceAfter: 740,
+    createdAt: new Date("2026-07-28T08:41:00.000Z"),
+  }),
+  ledgerRow({
+    id: "ctr_fixture_exempt_generation",
+    type: "GENERATION_CONSUMPTION",
+    amount: -600,
+    balanceAfter: 740,
+    createdAt: new Date("2026-07-27T17:20:00.000Z"),
+  }),
+];
+
+/**
+ * Billing for an organization that is not billed. The total says "Unlimited" rather than a number
+ * that no longer moves, and the notice above it says what that means - work is never refused,
+ * nothing is deducted, and the charges are still recorded below. Without the notice the page reads
+ * as a bug: charges accruing against a balance that never falls.
+ */
+export const OrgBillingUnlimitedCredits: Story = {
+  parameters: {
+    msw: {
+      handlers: appShellHandlers({
+        ...generalFixtures,
+        billing: {
+          status: {
+            creditBalance: 740,
+            unlimitedCredits: true,
+            subscriptionCreditBalance: 500,
+            topupCreditBalance: 240,
+            provider: "stripe",
+            subscriptionStatus: "active",
+            currentPeriodEnd: FIXTURE_EPOCH,
+            cancelAtPeriodEnd: false,
+            gracePeriodEndsAt: undefined,
+            autoTopUpEnabled: false,
+            autoTopUpThreshold: 0,
+            autoTopUpPackageId: undefined,
+            hasSavedPaymentMethod: true,
+            autoTopUpLastFailureReason: undefined,
+            autoTopUpLastFailureAt: undefined,
+            cliCreditsSpent: 13_030,
+            transactions: unlimitedCreditsLedger,
+          },
+        },
+      }),
+    },
+  },
+  args: { path: `/app/${baseApplication.slug}/settings/billing` },
+};
+
+/**
  * Billing on the Vercel rail, which is the whole point of the credit-purchase work: the same package
  * catalog a Stripe organization buys from, on an organization that has no Stripe customer at all.
  *
@@ -291,6 +366,7 @@ export const OrgBillingVercelRail: Story = {
             autoTopUpEnabled: false,
             autoTopUpThreshold: 0,
             autoTopUpPackageId: undefined,
+            unlimitedCredits: false,
             // No Stripe customer exists on this rail, so there is never a card on file - and with
             // auto top-up settling by invoice here, nothing has failed a charge either.
             hasSavedPaymentMethod: false,

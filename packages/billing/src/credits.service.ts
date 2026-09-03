@@ -58,7 +58,7 @@ export class CreditsService extends Service {
         const pricing = await this.pricingService.getOrCreatePricing(organizationId);
         const customer = await this.db.billingCustomer.findUnique({
             where: { organizationId },
-            select: { creditBalance: true, gracePeriodEndsAt: true },
+            select: { creditBalance: true, gracePeriodEndsAt: true, unlimitedCredits: true },
         });
 
         const creditBalance = customer?.creditBalance ?? 0;
@@ -75,6 +75,18 @@ export class CreditsService extends Service {
             architecture,
             gracePeriodEndsAt,
         });
+
+        // Ahead of the grace-period check on purpose: a billing-exempt org has no per-usage bill to
+        // fall behind on, so an overdue subscription must not block it either.
+        if (customer?.unlimitedCredits === true) {
+            this.logger.info("Credits gate bypassed - organization has unlimited credits", {
+                organizationId,
+                creditBalance,
+                required,
+                architecture,
+            });
+            return;
+        }
 
         if (gracePeriodEndsAt != null && Date.now() > gracePeriodEndsAt.getTime()) {
             this.logger.warn("Credits gate blocked by expired grace period", {
@@ -152,19 +164,32 @@ export class CreditsService extends Service {
                 const rawTx = this.asRawTx(tx);
                 const [result] = await rawTx.$queryRaw<Array<DeductCreditsResultRow>>`
                     WITH customer AS (
-                        SELECT organization_id, credit_balance, subscription_credit_balance
+                        SELECT
+                            organization_id,
+                            credit_balance,
+                            subscription_credit_balance,
+                            unlimited_credits
                         FROM billing_customer
                         WHERE organization_id = ${organizationId}
                         FOR UPDATE
                     ),
+                    -- A billing-exempt org qualifies at any balance and neither of its balances
+                    -- moves; the transaction row below still records the full cost.
                     eligible AS (
                         SELECT
                             organization_id,
                             credit_balance,
                             subscription_credit_balance,
-                            LEAST(subscription_credit_balance, ${cost}) AS subscription_consumed
+                            CASE
+                                WHEN unlimited_credits THEN credit_balance
+                                ELSE credit_balance - ${cost}
+                            END AS next_balance,
+                            CASE
+                                WHEN unlimited_credits THEN subscription_credit_balance
+                                ELSE subscription_credit_balance - LEAST(subscription_credit_balance, ${cost})
+                            END AS next_subscription_balance
                         FROM customer
-                        WHERE credit_balance >= ${cost}
+                        WHERE credit_balance >= ${cost} OR unlimited_credits
                     ),
                     inserted AS (
                         INSERT INTO credit_transaction (
@@ -180,7 +205,7 @@ export class CreditsService extends Service {
                             organization_id,
                             'GENERATION_CONSUMPTION'::credit_transaction_type,
                             ${-cost},
-                            credit_balance - ${cost},
+                            next_balance,
                             ${generationId}
                         FROM eligible
                         ON CONFLICT (id) DO NOTHING
@@ -189,8 +214,8 @@ export class CreditsService extends Service {
                     updated AS (
                         UPDATE billing_customer bc
                         SET
-                            credit_balance = eligible.credit_balance - ${cost},
-                            subscription_credit_balance = eligible.subscription_credit_balance - eligible.subscription_consumed
+                            credit_balance = eligible.next_balance,
+                            subscription_credit_balance = eligible.next_subscription_balance
                         FROM eligible
                         WHERE bc.organization_id = eligible.organization_id
                           AND EXISTS (SELECT 1 FROM inserted)
@@ -292,10 +317,23 @@ export class CreditsService extends Service {
     async checkLlmProxyGate(organizationId: string, freeCliCreditCap: number): Promise<LlmProxyGateResult> {
         const customer = await this.db.billingCustomer.findUnique({
             where: { organizationId },
-            select: { creditBalance: true, gracePeriodEndsAt: true, subscriptionStatus: true },
+            select: {
+                creditBalance: true,
+                gracePeriodEndsAt: true,
+                subscriptionStatus: true,
+                unlimitedCredits: true,
+            },
         });
         const balance = customer?.creditBalance ?? 0;
         const gracePeriodEndsAt = customer?.gracePeriodEndsAt ?? undefined;
+
+        if (customer?.unlimitedCredits === true) {
+            this.logger.info("LLM proxy gate allowed - organization has unlimited credits", {
+                organizationId,
+                balance,
+            });
+            return { allowed: true };
+        }
 
         // Mirror the generation/run gate: an expired subscription grace period
         // blocks consumption regardless of balance.
@@ -375,9 +413,20 @@ export class CreditsService extends Service {
     ): Promise<{ allowed: true } | { allowed: false; reason: "out_of_credits" }> {
         const customer = await this.db.billingCustomer.findUnique({
             where: { organizationId },
-            select: { creditBalance: true, creditFloor: true },
+            select: { creditBalance: true, creditFloor: true, unlimitedCredits: true },
         });
         const balance = customer?.creditBalance ?? 0;
+
+        // Ahead of `effectiveFloor`: an exempt org has no floor to resolve, and resolving one would
+        // warn about an overdraft it has not earned on a gate that passes regardless.
+        if (customer?.unlimitedCredits === true) {
+            this.logger.info(`${label} credits gate allowed - organization has unlimited credits`, {
+                organizationId,
+                balance,
+            });
+            return { allowed: true };
+        }
+
         const floor = await this.effectiveFloor(organizationId, customer?.creditFloor ?? 0, label);
 
         if (balance <= floor) {
@@ -441,6 +490,27 @@ export class CreditsService extends Service {
      * floor-clamped like every other org. Deliberate and admin-only, same rollout shape as
      * `updateCreditFloor` - defaults to false for every org.
      */
+    /**
+     * Marks an organization billing-exempt, or takes the exemption away again. Every credits gate
+     * then passes regardless of balance and no consumption moves the balance, while each charge is
+     * still priced and written to `credit_transaction` - so the ledger answers "what did this org
+     * cost us" for the whole period the exemption was on.
+     *
+     * Deliberate and admin-only, same as `updateCreditFloor`: there is no automatic "this org is an
+     * enterprise account" detection. Turning it off resumes deducting from whatever the balance
+     * reads at that moment - no usage came off it while the exemption was on, but grants still
+     * landed on it, and a subscription the org holds kept being charged. The exemption covers
+     * consumption, not the plan.
+     */
+    async updateUnlimitedCredits(organizationId: string, unlimitedCredits: boolean): Promise<void> {
+        this.logger.info("Updating unlimited credits", { organizationId, extra: { unlimitedCredits } });
+        await this.db.billingCustomer.upsert({
+            where: { organizationId },
+            create: { organizationId, unlimitedCredits },
+            update: { unlimitedCredits },
+        });
+    }
+
     async updateKillJobsOnCreditExhaustion(organizationId: string, killJobsOnCreditExhaustion: boolean): Promise<void> {
         this.logger.info("Updating kill-jobs-on-credit-exhaustion", { organizationId, killJobsOnCreditExhaustion });
         await this.db.billingCustomer.upsert({
@@ -496,17 +566,33 @@ export class CreditsService extends Service {
                 const rawTx = this.asRawTx(tx);
                 const [result] = await rawTx.$queryRaw<Array<DeductCreditsResultRow>>`
                     WITH customer AS (
-                        SELECT organization_id, credit_balance, subscription_credit_balance
+                        SELECT
+                            organization_id,
+                            credit_balance,
+                            subscription_credit_balance,
+                            unlimited_credits
                         FROM billing_customer
                         WHERE organization_id = ${organizationId}
                         FOR UPDATE
                     ),
+                    -- Zero-clamped for a paying org; frozen entirely for a billing-exempt one,
+                    -- whose consumption is recorded on the ledger and nowhere else.
                     eligible AS (
                         SELECT
                             organization_id,
                             credit_balance,
                             subscription_credit_balance,
-                            LEAST(subscription_credit_balance, ${cost}) AS subscription_consumed
+                            CASE
+                                WHEN unlimited_credits THEN credit_balance
+                                ELSE GREATEST(credit_balance - ${cost}, 0)
+                            END AS next_balance,
+                            CASE
+                                WHEN unlimited_credits THEN subscription_credit_balance
+                                ELSE GREATEST(
+                                    subscription_credit_balance - LEAST(subscription_credit_balance, ${cost}),
+                                    0
+                                )
+                            END AS next_subscription_balance
                         FROM customer
                     ),
                     inserted AS (
@@ -522,7 +608,7 @@ export class CreditsService extends Service {
                             organization_id,
                             'LLM_PROXY_CONSUMPTION'::credit_transaction_type,
                             ${-cost},
-                            GREATEST(credit_balance - ${cost}, 0)
+                            next_balance
                         FROM eligible
                         ON CONFLICT (id) DO NOTHING
                         RETURNING id
@@ -530,9 +616,8 @@ export class CreditsService extends Service {
                     updated AS (
                         UPDATE billing_customer bc
                         SET
-                            credit_balance = GREATEST(eligible.credit_balance - ${cost}, 0),
-                            subscription_credit_balance =
-                                GREATEST(eligible.subscription_credit_balance - eligible.subscription_consumed, 0)
+                            credit_balance = eligible.next_balance,
+                            subscription_credit_balance = eligible.next_subscription_balance
                         FROM eligible
                         WHERE bc.organization_id = eligible.organization_id
                           AND EXISTS (SELECT 1 FROM inserted)
@@ -674,7 +759,11 @@ export class CreditsService extends Service {
             const rawTx = this.asRawTx(tx);
             const [result] = await rawTx.$queryRaw<Array<GenerationRefundResultRow>>`
                 WITH customer AS (
-                    SELECT organization_id, credit_balance, subscription_credit_balance
+                    SELECT
+                        organization_id,
+                        credit_balance,
+                        subscription_credit_balance,
+                        unlimited_credits
                     FROM billing_customer
                     WHERE organization_id = ${organizationId}
                     FOR UPDATE
@@ -696,21 +785,30 @@ export class CreditsService extends Service {
                     ORDER BY created_at DESC
                     LIMIT 1
                 ),
+                -- The refund row is written for a billing-exempt org too, so its ledger stays a
+                -- symmetric record of what was charged and reversed - but neither balance moves,
+                -- because the consumption it reverses never took anything off one.
                 adjusted AS (
                     SELECT
                         customer.organization_id,
                         consumed.id AS consumption_id,
                         consumed.refunded_amount,
-                        customer.credit_balance + consumed.refunded_amount AS new_balance,
-                        customer.subscription_credit_balance
-                            + LEAST(
-                                consumed.refunded_amount,
-                                GREATEST(
-                                    COALESCE((SELECT credits_per_subscription FROM pricing), 0)
-                                        - customer.subscription_credit_balance,
-                                    0
+                        CASE
+                            WHEN customer.unlimited_credits THEN customer.credit_balance
+                            ELSE customer.credit_balance + consumed.refunded_amount
+                        END AS new_balance,
+                        CASE
+                            WHEN customer.unlimited_credits THEN customer.subscription_credit_balance
+                            ELSE customer.subscription_credit_balance
+                                + LEAST(
+                                    consumed.refunded_amount,
+                                    GREATEST(
+                                        COALESCE((SELECT credits_per_subscription FROM pricing), 0)
+                                            - customer.subscription_credit_balance,
+                                        0
+                                    )
                                 )
-                            ) AS new_subscription_balance
+                        END AS new_subscription_balance
                     FROM customer
                     JOIN consumed ON consumed.organization_id = customer.organization_id
                 ),

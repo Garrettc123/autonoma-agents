@@ -23,9 +23,15 @@ export function useFreeStartEligibility() {
  * Plain `useQuery`, not the suspense one above: callers use this to decide whether to offer an action,
  * and suspending an onboarding screen on that decision would blank a working page.
  */
-export function useCreditBalance(): number | undefined {
+/**
+ * Whether the org has run its wallet down far enough that the server will refuse new work. A
+ * billing-exempt org never has, however low its (frozen) balance reads. Undefined while the status
+ * loads - callers must not gate on that, a slow read is not an answer.
+ */
+export function useIsOutOfCredits(): boolean | undefined {
     const { data } = useQuery(trpc.billing.status.queryOptions());
-    return data?.creditBalance;
+    if (data == null) return undefined;
+    return !data.unlimitedCredits && data.creditBalance <= 0;
 }
 
 export type BillingStatusData = ReturnType<typeof useBillingStatus>["data"];

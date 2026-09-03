@@ -202,6 +202,11 @@ export type BillingStatusResult = {
      */
     autoTopUpLastFailureReason: AutoTopUpFailureReasonValue | undefined;
     autoTopUpLastFailureAt: Date | undefined;
+    /**
+     * Billing-exempt org: every gate passes and no usage is deducted from the balances above, so
+     * the UI shows "Unlimited" rather than a number that consumption no longer moves.
+     */
+    unlimitedCredits: boolean;
     /** All-time credits spent through the managed LLM proxy (planner CLI). */
     cliCreditsSpent: number;
     transactions: CreditTransaction[];
@@ -233,6 +238,7 @@ export interface BillingService {
     checkPreviewDeployCreditsGate(organizationId: string): Promise<PreviewDeployGateResult>;
     checkAnalysisCreditsGate(organizationId: string): Promise<AnalysisCreditsGateResult>;
     updateCreditFloor(organizationId: string, creditFloor: number): Promise<void>;
+    updateUnlimitedCredits(organizationId: string, unlimitedCredits: boolean): Promise<void>;
     updateKillJobsOnCreditExhaustion(organizationId: string, killJobsOnCreditExhaustion: boolean): Promise<void>;
     refundCreditsForGeneration(generationId: string): Promise<void>;
     redeemPromoCode(organizationId: string, code: string): Promise<RedeemPromoCodeResult>;

@@ -5,6 +5,10 @@ Enforces the zero-tolerance credit policy against previewkit. An org with
 its balance sits at-or-below its `creditFloor`, instead of letting the run finish and floor-clamp
 like every other org does.
 
+A billing-exempt org (`unlimitedCredits`) is never swept, whatever its balance and floor read. Its
+balance is frozen, so one sitting at or under its floor would read as exhausted on every pass and
+have each new preview killed shortly after it started.
+
 Previewkit has no in-process moment to detect this itself: build-cost deduction only fires after
 every app in a deploy attempt has already finished building, so by the time any deduction lands
 there is nothing left running to interrupt. Hence an external process.

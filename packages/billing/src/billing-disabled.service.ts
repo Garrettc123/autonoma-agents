@@ -106,6 +106,10 @@ export class DisabledBillingService implements BillingService {
         return Promise.resolve();
     }
 
+    updateUnlimitedCredits(_organizationId: string, _unlimitedCredits: boolean) {
+        return Promise.resolve();
+    }
+
     updateKillJobsOnCreditExhaustion(_organizationId: string, _killJobsOnCreditExhaustion: boolean) {
         return Promise.resolve();
     }

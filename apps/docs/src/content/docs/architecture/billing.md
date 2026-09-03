@@ -47,7 +47,8 @@ Five paths consume credits. Three share one primitive; two predate it.
 
 **`deductCreditsFloored`** is the shared primitive. It never refuses: it clamps the balance at the
 organization's `creditFloor` (default `0`) instead of requiring sufficient funds, because work already
-in flight must never be half-billed.
+in flight must never be half-billed. For an organization with unlimited credits it writes the ledger
+row and leaves both balances untouched - see [Guardrails](#guardrails).
 
 | Path | Priced by | Uses the primitive |
 |---|---|---|
@@ -135,6 +136,23 @@ payment that justified it.
 
 **Grace period** - an unpaid invoice starts a countdown on either rail. Once it expires, the gates
 begin refusing work.
+
+**Unlimited credits** - an organization marked `unlimitedCredits` is exempt from billing for usage:
+every gate passes whatever its balance, the grace period does not apply to it, and no deduction
+moves its balance. Consumption is still priced and written to the ledger, so the transaction history
+answers "what did this organization cost us" for the whole period the exemption was on. It is a
+deliberate admin action (`admin.billing.updateUnlimitedCredits`), not something an organization can
+reach on its own. Auto top-up is skipped for these organizations: a balance that consumption never
+moves would otherwise sit under `autoTopUpThreshold` forever and recharge a card for credits nothing
+spends. The previewkit credits watcher skips them for the same reason - it is level-triggered, so an
+exempt organization at or under its floor would read as exhausted on every pass.
+
+**The exemption covers usage, not the plan.** Grants still land on the balance exactly as they
+always did - a promo code, a top-up purchase, a subscription renewal - and a subscription the
+organization holds keeps being charged by Stripe. So the balance can move while the exemption is on;
+what cannot move it is consumption. Revoking the exemption resumes deducting from whatever the
+balance reads at that moment. An organization that should stop paying altogether needs its
+subscription cancelled as well.
 
 Note that `autoTopUpThreshold` is a *floor* that triggers a purchase, not a ceiling on spending. It is
 easy to mistake for one.

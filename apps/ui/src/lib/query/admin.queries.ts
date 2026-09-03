@@ -166,6 +166,23 @@ export function useCreateOrg() {
     });
 }
 
+/**
+ * Marks an org billing-exempt, or takes the exemption back. Invalidates the org list because the
+ * flag is rendered there - it is the only place in the product that shows which orgs are exempt.
+ */
+export function useUpdateUnlimitedCreditsAdmin() {
+    const queryClient = useQueryClient();
+    return useAPIMutation({
+        ...trpc.admin.billing.updateUnlimitedCredits.mutationOptions({
+            onSettled: () => {
+                void queryClient.invalidateQueries({ queryKey: trpc.admin.listOrganizations.queryKey() });
+            },
+        }),
+        successToast: { title: "Credit exemption updated" },
+        errorToast: { title: "Failed to update credit exemption" },
+    });
+}
+
 export function useAdminPromoCodes(input: AdminPromoCodesInput) {
     return useSuspenseQuery(trpc.admin.billing.listPromoCodes.queryOptions(input));
 }

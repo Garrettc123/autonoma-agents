@@ -49,6 +49,7 @@ const SHELL_READY = { timeout: 15_000 };
 /** No subscription, so the Upgrade call to action renders. Everything else matches the baseline fixture. */
 const UNSUBSCRIBED: RouterOutputs["billing"]["status"] = {
   creditBalance: 0,
+  unlimitedCredits: false,
   subscriptionCreditBalance: 0,
   topupCreditBalance: 0,
   provider: "stripe",

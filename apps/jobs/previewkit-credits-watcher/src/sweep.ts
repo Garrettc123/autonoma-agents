@@ -55,8 +55,13 @@ export type SweepOutcome = {
  * point, and a briefly stale row costs less than unpaid compute.
  */
 export async function sweepExhaustedOrgs(logger: Logger): Promise<SweepOutcome> {
+    // Billing-exempt orgs are excluded here rather than filtered below, because being level-triggered
+    // is exactly what makes them dangerous: an exempt org's balance is frozen, so one sitting at or
+    // under its floor reads as exhausted on every pass forever, and every preview it builds would be
+    // killed 30 seconds later. The in-process half cannot reach this state - it reacts to
+    // `crossedIntoExhaustion`, which a frozen balance never raises - so the exclusion has to be here.
     const killModeCustomers = await db.billingCustomer.findMany({
-        where: { killJobsOnCreditExhaustion: true },
+        where: { killJobsOnCreditExhaustion: true, unlimitedCredits: false },
         select: { organizationId: true, creditBalance: true, creditFloor: true },
     });
     const exhaustedOrgIds = killModeCustomers

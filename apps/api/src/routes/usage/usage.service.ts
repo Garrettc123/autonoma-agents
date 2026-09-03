@@ -84,7 +84,12 @@ export interface ComputeBillingProjectionRow {
     totalUsd: number;
     creditBalance: number;
     creditFloor: number;
-    /** Where the balance would land. Below `creditFloor`, so deliberately allowed to go negative. */
+    /** Billing-exempt org: priced like any other, but the charge never reaches its balance. */
+    unlimitedCredits: boolean;
+    /**
+     * Where the balance would land. Below `creditFloor`, so deliberately allowed to go negative.
+     * Equal to `creditBalance` for a billing-exempt org, whose balance a charge never moves.
+     */
     balanceAfter: number;
     /**
      * True when this charge is what CROSSES the org's floor - which blocks it from starting new
@@ -93,7 +98,8 @@ export interface ComputeBillingProjectionRow {
      *
      * An org already at or below its floor is excluded: it is blocked either way, so counting it
      * would overstate the rate's blast radius. Those rows are still visible - `creditBalance` is
-     * already at or under `creditFloor` on them.
+     * already at or under `creditFloor` on them. A billing-exempt org is excluded too - no charge
+     * of any size can block it.
      */
     goesUnderwater: boolean;
 }
@@ -279,7 +285,12 @@ export class UsageService extends Service {
             }),
             this.db.billingCustomer.findMany({
                 where: { organizationId: { in: organizationIds } },
-                select: { organizationId: true, creditBalance: true, creditFloor: true },
+                select: {
+                    organizationId: true,
+                    creditBalance: true,
+                    creditFloor: true,
+                    unlimitedCredits: true,
+                },
             }),
         ]);
 
@@ -300,7 +311,11 @@ export class UsageService extends Service {
             const customer = customerByOrg.get(organizationId);
             const creditBalance = customer?.creditBalance ?? 0;
             const creditFloor = customer?.creditFloor ?? 0;
-            const balanceAfter = creditBalance - totalCredits;
+            const unlimitedCredits = customer?.unlimitedCredits ?? false;
+            // A billing-exempt org's balance does not move, so the charge lands nowhere and no rate
+            // can block it. Still priced into the row above: the projection is also how we read what
+            // an exempt org costs us.
+            const balanceAfter = unlimitedCredits ? creditBalance : creditBalance - totalCredits;
             const wasAboveFloor = creditBalance > creditFloor;
 
             return {
@@ -312,8 +327,9 @@ export class UsageService extends Service {
                 totalUsd,
                 creditBalance,
                 creditFloor,
+                unlimitedCredits,
                 balanceAfter,
-                goesUnderwater: totalCredits > 0 && wasAboveFloor && balanceAfter <= creditFloor,
+                goesUnderwater: !unlimitedCredits && totalCredits > 0 && wasAboveFloor && balanceAfter <= creditFloor,
             };
         });
 

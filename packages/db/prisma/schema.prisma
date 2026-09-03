@@ -1653,6 +1653,21 @@ model BillingCustomer {
   autoTopUpLastFailureReason AutoTopUpFailureReason? @map("auto_top_up_last_failure_reason")
   autoTopUpLastFailureAt     DateTime?               @map("auto_top_up_last_failure_at")
 
+  // Billing-exempt organization (enterprise/design-partner/internal): every credits gate passes
+  // regardless of balance, and no deduction ever moves creditBalance or subscriptionCreditBalance.
+  // Consumption is still priced and written to credit_transaction, so what the org would have been
+  // charged stays fully auditable - the ledger is the record, and no usage comes off the wallet.
+  //
+  // Scoped to usage, not to money: grants still land on the balance as they always did (a promo
+  // code, a top-up purchase, a subscription renewal), and a subscription an exempt org holds keeps
+  // being charged by Stripe. The exemption stops us billing for consumption, not the plan.
+  //
+  // Distinct from a large grant (which drains) and from creditFloor (which only relaxes the
+  // previewkit/analysis gates, not the generation or LLM-proxy ones). Defaults to false for every
+  // org; set only via a deliberate admin action (admin.billing.updateUnlimitedCredits), same
+  // rollout shape as creditFloor.
+  unlimitedCredits Boolean @default(false) @map("unlimited_credits")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

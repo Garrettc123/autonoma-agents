@@ -143,6 +143,7 @@ export const WaitingWithoutCredits: Story = {
           // Balance is what gates; eligibility only supplies the reason shown.
           status: {
             creditBalance: 0,
+            unlimitedCredits: false,
             subscriptionCreditBalance: 0,
             topupCreditBalance: 0,
             provider: "stripe",

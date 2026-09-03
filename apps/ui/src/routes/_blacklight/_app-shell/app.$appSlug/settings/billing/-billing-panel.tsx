@@ -163,13 +163,24 @@ export function BillingPanel() {
 
   return (
     <div className="space-y-4">
+      {data.unlimitedCredits && (
+        <Alert>
+          <AlertTitle>Unlimited credits</AlertTitle>
+          <AlertDescription>
+            This organization is not billed for usage. Runs, previews and CLI requests are never turned away, and
+            nothing is deducted from the balances below - each charge is still recorded in the history for reference.
+          </AlertDescription>
+        </Alert>
+      )}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Panel>
           <PanelHeader>
             <PanelTitle>Total credits</PanelTitle>
           </PanelHeader>
           <PanelBody>
-            <p className="text-3xl font-semibold text-text-primary">{data.creditBalance.toLocaleString()}</p>
+            <p className="text-3xl font-semibold text-text-primary">
+              {data.unlimitedCredits ? "Unlimited" : data.creditBalance.toLocaleString()}
+            </p>
           </PanelBody>
         </Panel>
 
