@@ -167,7 +167,7 @@ pnpm build        # Full build
 
 ### `pnpm install` fails
 
-Make sure you're using pnpm 11.x. Run `corepack enable` to let Node manage the pnpm version, then try again.
+Make sure you're using pnpm 12.x. Run `corepack enable` to let Node manage the pnpm version, then try again.
 
 ### Database connection refused
 
