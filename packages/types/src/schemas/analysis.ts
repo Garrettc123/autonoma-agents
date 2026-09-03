@@ -532,17 +532,17 @@ export function analysisFlowPillLabel(
     openBugCount: number,
 ): string {
     if (openBugCount > 0) return `${openBugCount} ${openBugCount === 1 ? "bug" : "bugs"}`;
-    if (analysisFlowPillNamesFeatures(tally, openBugCount)) return `${tally.verified}/${tally.total} features verified`;
+    if (analysisFlowPillNamesFlows(tally, openBugCount)) return `${tally.verified}/${tally.total} flows verified`;
     return DERIVED_PILL[state];
 }
 
 /**
- * Whether the pill states the verified-features RATIO ("X/Y features verified") rather than a bug count or a
- * verdict-word fallback - the one shape where the noun "feature" appears. The single source of that condition:
- * {@link analysisFlowPillLabel} returns the ratio exactly when this holds, so a surface that defines the "feature"
+ * Whether the pill states the verified-flows RATIO ("X/Y flows verified") rather than a bug count or a
+ * verdict-word fallback - the one shape where the noun "flow" appears. The single source of that condition:
+ * {@link analysisFlowPillLabel} returns the ratio exactly when this holds, so a surface that defines the "flow"
  * unit (the verdict badge's tooltip) can gate on it and never label a bug or no-tests-needed pill.
  */
-export function analysisFlowPillNamesFeatures(tally: AnalysisFlowTally, openBugCount: number): boolean {
+export function analysisFlowPillNamesFlows(tally: AnalysisFlowTally, openBugCount: number): boolean {
     return openBugCount === 0 && tally.total > 0;
 }
 
@@ -556,7 +556,7 @@ export function coverageGapReason(count: number): string {
 
 /**
  * The header pill's tone per verdict: only a bug is raised as an alarm, so an unconfirmed change stays NEUTRAL
- * rather than amber - the coarse feature ratio ("0/8") already looks alarming enough without a warning colour.
+ * rather than amber - the coarse flow ratio ("0/8") already looks alarming enough without a warning colour.
  */
 const VERDICT_PILL_TONE: Record<AnalysisVerdictState, CheckpointTone> = {
     bug_found: "critical",
@@ -574,25 +574,27 @@ export interface AnalysisVerdictPill {
 
 /**
  * The PR-level verdict as the pipeline-status pill the PR-page and main-branch headers render: "N bugs" when the
- * branch has open bugs, else the accumulated "X/Y features verified" ratio with the unconfirmed-feature count as
- * the reason. Shares {@link analysisFlowPillLabel} and {@link coverageGapReason} with the report card, so the
- * header and the card can never word the same verdict two ways.
+ * branch has open bugs, else the accumulated "X/Y flows verified" ratio read off the branch's flow itemization -
+ * accumulated across the PR's commits, the same source the report card and the GitHub comment read, never the
+ * newest run alone. Shares {@link analysisFlowPillLabel} with the report card, so the header and the card can
+ * never word the same verdict two ways.
  *
- * The ratio AND the reason are read off the branch's flow itemization - accumulated across the PR's commits, the
- * same source the report card and the GitHub comment read - never the newest run alone. A report written before
- * flows existed has none, so both fall back to the verdict's own (per-run) coverage count.
+ * The "Z couldn't confirm" reason rides ONLY the word-fallback label a pre-itemization report (no ratio) falls
+ * back to. Beside the ratio it would just restate the ratio's own remainder (total - verified), so it is dropped.
  */
 export function analysisVerdictPill(
     verdict: AnalysisVerdictSummary,
     flows: readonly AnalysisFlow[],
 ): AnalysisVerdictPill {
     const tally = tallyAnalysisFlows(flows);
-    const unconfirmed = tally.total > 0 ? tally.total - tally.verified : verdict.coverageGapCount;
-    const hasUnconfirmed = verdict.bugCount === 0 && unconfirmed > 0;
+    // The reason rides only the word-fallback label a pre-itemization report (no ratio) falls back to; beside a
+    // ratio it would just restate the remainder (total - verified).
+    const labelIsWordFallback = verdict.bugCount === 0 && !analysisFlowPillNamesFlows(tally, verdict.bugCount);
+    const showReason = labelIsWordFallback && verdict.coverageGapCount > 0;
     return {
         tone: VERDICT_PILL_TONE[verdict.state],
         label: analysisFlowPillLabel(verdict.state, tally, verdict.bugCount),
-        reason: hasUnconfirmed ? coverageGapReason(unconfirmed) : undefined,
+        reason: showReason ? coverageGapReason(verdict.coverageGapCount) : undefined,
     };
 }
 

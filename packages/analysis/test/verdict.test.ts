@@ -2,7 +2,7 @@ import {
     type AnalysisFlow,
     type AnalysisFlowMember,
     analysisFlowPillLabel,
-    analysisFlowPillNamesFeatures,
+    analysisFlowPillNamesFlows,
     analysisPrTitle,
     summarizeAnalysisFlow,
     tallyAnalysisFlows,
@@ -68,15 +68,15 @@ describe("PR-level reads over the tally", () => {
     const both = [verified, blocked];
 
     it("compresses to a ratio pill, and only an open bug reads as an alarm", () => {
-        expect(analysisFlowPillLabel("not_confirmed", tallyAnalysisFlows(both), 0)).toBe("1/2 features verified");
-        expect(analysisFlowPillLabel("healthy", tallyAnalysisFlows([verified]), 0)).toBe("1/1 features verified");
+        expect(analysisFlowPillLabel("not_confirmed", tallyAnalysisFlows(both), 0)).toBe("1/2 flows verified");
+        expect(analysisFlowPillLabel("healthy", tallyAnalysisFlows([verified]), 0)).toBe("1/1 flows verified");
         expect(analysisFlowPillLabel("bug_found", tallyAnalysisFlows(both), 2)).toBe("2 bugs");
     });
 
-    it("names features only on the ratio pill, so the definition tooltip never labels a bug or fallback pill", () => {
-        expect(analysisFlowPillNamesFeatures(tallyAnalysisFlows(both), 0)).toBe(true); // "1/2 features verified"
-        expect(analysisFlowPillNamesFeatures(tallyAnalysisFlows(both), 2)).toBe(false); // "2 bugs"
-        expect(analysisFlowPillNamesFeatures(tallyAnalysisFlows([]), 0)).toBe(false); // "Not confirmed" / "Passing"
+    it("names flows only on the ratio pill, so the definition tooltip never labels a bug or fallback pill", () => {
+        expect(analysisFlowPillNamesFlows(tallyAnalysisFlows(both), 0)).toBe(true); // "1/2 flows verified"
+        expect(analysisFlowPillNamesFlows(tallyAnalysisFlows(both), 2)).toBe(false); // "2 bugs"
+        expect(analysisFlowPillNamesFlows(tallyAnalysisFlows([]), 0)).toBe(false); // "Not confirmed" / "Passing"
     });
 
     it("derives the same verdict state every surface renders", () => {

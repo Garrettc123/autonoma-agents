@@ -83,23 +83,23 @@ describe("analysisVerdictPill", () => {
         expect(pill).toEqual({ tone: "critical", label: "2 bugs", reason: undefined });
     });
 
-    it("states the accumulated feature ratio with a NEUTRAL tone when a change is unconfirmed, not amber", () => {
+    it("states the accumulated flow ratio with a NEUTRAL tone when a change is unconfirmed, and drops the redundant reason", () => {
         const flows = [flow("verified"), flow("verified"), ...Array.from({ length: 6 }, () => flow("unverified"))];
-        // coverageGapCount is the newest run's (3), but the ratio and reason both read the branch's 8 flows: 6
-        // features could not be confirmed, not 3 - re-pointing off the per-snapshot count is the whole ticket.
+        // The ratio reads the branch's 8 flows (2 verified), so its remainder is already the 6 that could not be
+        // confirmed; a "6 couldn't confirm" reason would only restate it, so the ratio pill carries no reason.
         const pill = analysisVerdictPill(
             verdict({ state: "not_confirmed", bugCount: 0, coverageGapCount: 3, investigatedCount: 8 }),
             flows,
         );
-        expect(pill).toEqual({ tone: "neutral", label: "2/8 features verified", reason: "6 couldn't confirm" });
+        expect(pill).toEqual({ tone: "neutral", label: "2/8 flows verified", reason: undefined });
     });
 
-    it("shows a full ratio with no reason when every feature verified", () => {
+    it("shows a full ratio with no reason when every flow verified", () => {
         const pill = analysisVerdictPill(
             verdict({ state: "healthy", bugCount: 0, coverageGapCount: 0, investigatedCount: 4 }),
             [flow("verified"), flow("verified"), flow("verified"), flow("verified")],
         );
-        expect(pill).toEqual({ tone: "success", label: "4/4 features verified", reason: undefined });
+        expect(pill).toEqual({ tone: "success", label: "4/4 flows verified", reason: undefined });
     });
 
     it("falls back to the verdict's word and its own coverage count when no flows were itemized", () => {

@@ -146,7 +146,7 @@ export class BranchLedger {
 
     /**
      * The verdict together with the flow itemization it was resolved from. The PR-page and main-branch headers
-     * need both - the state and open-bug count from the verdict, the "X/Y features verified" ratio from the flows -
+     * need both - the state and open-bug count from the verdict, the "X/Y flows verified" ratio from the flows -
      * so this hands back the very report the verdict resolved against instead of the caller reading it a second
      * time. The flows are the branch's, accumulated across its commits; a report predating them yields `[]`, which
      * the pill renders as the verdict's own word.

@@ -957,16 +957,17 @@ const notConfirmedLatest: (typeof snapshotHistory)[number] = {
   },
 };
 
-// The header speaks for the whole PR, so its pill reads the branch-accumulated verdict - "1/3 features verified"
+// The header speaks for the whole PR, so its pill reads the branch-accumulated verdict - "1/3 flows verified"
 // off the report's flow tally - not the newest snapshot's per-run "3/5 verified". Neutral, because only a bug is
-// an alarm. This is the divergence the header re-point creates: the rail row below still shows the per-commit ratio.
+// an alarm. The ratio's remainder already states what couldn't be confirmed, so the header pill carries no reason.
+// This is the divergence the header re-point creates: the rail row below still shows the per-commit ratio.
 const notConfirmedHeaderStatus: PrPipelineStatus = {
   kind: "checkpoint",
   summary: {
     ...notConfirmedLatest.summary!,
     tone: "neutral",
-    label: "1/3 features verified",
-    reason: "2 couldn't confirm",
+    label: "1/3 flows verified",
+    reason: undefined,
   },
 };
 
