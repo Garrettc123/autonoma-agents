@@ -166,7 +166,7 @@ export class ClassifierAgent extends Agent<ClassifierInput, RunVerdict, Classifi
                 ...envTools,
                 ...appLogTools,
             ],
-            reportTool: this.verdictTool,
+            reportTools: [this.verdictTool],
             compactor: sharedCompactor(),
             codebase: input.codebase,
             run: input.run,

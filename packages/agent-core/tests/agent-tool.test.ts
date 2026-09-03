@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { AgentLoop } from "../src/agent/agent-loop";
+import { FinishTool } from "../src/agent/tools/agent-result";
 import { AgentTool } from "../src/agent/tools/agent-tool";
 import { FatalToolError, FixableToolError } from "../src/agent/tools/tool-errors";
 
@@ -82,7 +83,7 @@ function wrapTool(toolInstance: AgentTool<unknown, unknown>): ExecutableTool {
         model: undefined as never,
         systemPrompt: "",
         tools: [],
-        reportTool: undefined as never,
+        reportTools: [new FinishTool({ resultSchema: z.never() })],
     });
     return toolInstance.toTool(loop) as unknown as ExecutableTool;
 }

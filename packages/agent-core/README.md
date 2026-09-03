@@ -38,7 +38,7 @@ calls with it to get the same robustness the agent loop already has per-step.
 
 ## The loop, briefly
 
-`AgentLoop` forces `toolChoice: "required"` on every step and stops only when the report tool has produced a result (`hasProducedResult`), never on a bare tool call - so a rejected `finish` (thrown as a `FixableToolError`) is delivered back to the model and self-corrects in the same loop.
+`AgentLoop` requires `reportTools` to contain at least one entry and every ordinary and terminal tool to have a unique name. It forces `toolChoice: "required"` on every step and stops only when a report tool has produced a result (`hasProducedResult`), never on a bare tool call - so a rejected terminal call (thrown as a `FixableToolError`) is delivered back to the model and self-corrects in the same loop.
 
 `hasProducedResult` is evaluated at the END of a step, so a second report call can only ever be a second tool call inside the same assistant message - never a revision the loop had a chance to act on. `setResult` therefore keeps the first result and throws `MultipleResultCalls`, a `FixableToolError`: the step finishes, the stop condition trips, and the first result is what the caller gets. Both payloads are logged at `warn`, so it stays visible whether the two calls agree - if they systematically disagree, first-wins is the wrong default. The guard tests `!== undefined`, not `!= null`, so that a result type admitting `null` cannot set a value that stops the loop yet slips past the guard.
 

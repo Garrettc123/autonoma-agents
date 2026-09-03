@@ -62,7 +62,7 @@ describe("imageToolContent", () => {
             model,
             systemPrompt: "system",
             tools: [new FrameTool()],
-            reportTool: new FinishTool({ resultSchema: z.object({ payload: z.string() }) }),
+            reportTools: [new FinishTool({ resultSchema: z.object({ payload: z.string() }) })],
         }).runLoop([{ role: "user", content: "go" }]);
 
         const secondCall = model.doGenerateCalls[1];

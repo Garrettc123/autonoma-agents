@@ -53,7 +53,7 @@ export interface AgentConfig<TResult> {
      * Maximum number of steps the agent will take before failing with {@link MaxStepsReached}.
      * Defaults to {@link DEFAULT_MAX_STEPS}. Because the loop forces a structured tool call on
      * every step (`toolChoice: "required"`), the model can never end its turn with plain text;
-     * this cap is the loop's only other stop besides the report tool firing, so it is always set.
+     * this cap is the loop's only other stop besides a report tool firing, so it is always set.
      */
     maxSteps?: number;
 
@@ -72,8 +72,8 @@ export interface AgentConfig<TResult> {
      */
     systemPrompt: string;
 
-    /** The tool used to report the result of the agent execution. */
-    reportTool: ReportResultTool<unknown, TResult>;
+    /** The terminal tools that may report the result of the agent execution. */
+    reportTools: ReportResultTool<unknown, TResult>[];
 
     /** Tools that may be used during the execution of the agent loop. */
     tools: AgentTool<unknown, unknown>[];
@@ -238,26 +238,25 @@ export class AgentLoop<TResult = unknown> {
     private readonly model: LanguageModel;
     private readonly systemPrompt: string;
     private readonly tools: AgentTool<unknown, unknown>[];
-    private readonly resultTool: ReportResultTool<unknown, TResult>;
+    private readonly reportTools: ReportResultTool<unknown, TResult>[];
     private readonly maxSteps: number;
     private readonly budget: AgentBudget;
     private readonly compactor: { strategy: MessageCompactor; threshold: number } | undefined;
 
-    constructor({
-        name,
-        model,
-        systemPrompt,
-        tools,
-        reportTool: resultTool,
-        maxSteps,
-        budget,
-        compactor,
-    }: AgentConfig<TResult>) {
+    constructor({ name, model, systemPrompt, tools, reportTools, maxSteps, budget, compactor }: AgentConfig<TResult>) {
+        if (reportTools.length === 0) throw new Error("AgentLoop requires at least one report tool");
+
+        const toolNames = new Set<string>();
+        for (const tool of [...tools, ...reportTools]) {
+            if (toolNames.has(tool.name)) throw new Error(`AgentLoop tool names must be unique: ${tool.name}`);
+            toolNames.add(tool.name);
+        }
+
         this.name = name;
         this.model = model;
         this.systemPrompt = systemPrompt;
         this.tools = tools;
-        this.resultTool = resultTool;
+        this.reportTools = reportTools;
         this.maxSteps = maxSteps ?? DEFAULT_MAX_STEPS;
         this.budget = budget ?? DEFAULT_AGENT_BUDGET;
         this.compactor = compactor;
@@ -312,7 +311,7 @@ export class AgentLoop<TResult = unknown> {
 
     /**
      * Optional hook subclasses can implement to expose a partial result when the loop terminates
-     * without the report tool firing (e.g. max-steps reached, agent gave up). The returned value
+     * without a report tool firing (e.g. max-steps reached, agent gave up). The returned value
      * is attached to {@link NoAgentResultError.partialResult} / {@link MaxStepsReached.partialResult}
      * so callers can persist partial state for debugging.
      */
@@ -339,7 +338,7 @@ export class AgentLoop<TResult = unknown> {
     }
 
     /**
-     * Custom stop condition that fires once the report tool has produced a result.
+     * Custom stop condition that fires once a report tool has produced a result.
      */
     private readonly hasProducedResult: StopCondition<GenericToolSet> = () => this.result !== undefined;
 
@@ -350,7 +349,7 @@ export class AgentLoop<TResult = unknown> {
         this.logger.info("Starting agent loop", { tools: this.tools.map((t) => t.name) });
 
         const tools: GenericToolSet = Object.fromEntries(
-            [...this.tools, this.resultTool].map((t) => [t.name, t.toTool(this)]),
+            [...this.tools, ...this.reportTools].map((t) => [t.name, t.toTool(this)]),
         );
 
         const agent = new ToolLoopAgent({
@@ -362,7 +361,7 @@ export class AgentLoop<TResult = unknown> {
             // Force a structured tool call on every step. Without this the AI SDK stops the loop as
             // soon as a step returns finishReason !== "tool-calls" (e.g. the model writes its result
             // as prose, ends with an empty turn, or types a tool call as text), which surfaced as
-            // NoAgentResultError. "required" keeps finishReason at "tool-calls" until the report tool
+            // NoAgentResultError. "required" keeps finishReason at "tool-calls" until a report tool
             // sets the result and trips hasProducedResult.
             toolChoice: "required",
             stopWhen: [this.hasProducedResult, this.hasFatalToolError, stepCountIs(this.maxSteps)],

@@ -61,7 +61,7 @@ function makeLoop(): AgentLoop<FakeResult> {
         model: undefined as never,
         systemPrompt: "",
         tools: [],
-        reportTool: undefined as never,
+        reportTools: [new FinishTool({ resultSchema: z.object({ payload: z.string() }) })],
     });
 }
 
@@ -78,7 +78,7 @@ describe("AgentLoop.setResult", () => {
             model: undefined as never,
             systemPrompt: "",
             tools: [],
-            reportTool: undefined as never,
+            reportTools: [new FinishTool({ resultSchema: z.object({ payload: z.string() }).nullable() })],
         });
         loop.setResult(null);
 
@@ -113,6 +113,50 @@ class NoopTool extends AgentTool<{ note: string }, { ok: true }> {
     }
 }
 
+describe("AgentLoop configuration", () => {
+    it("requires at least one report tool", () => {
+        expect(
+            () =>
+                new AgentLoop<FakeResult>({
+                    name: "no-report-tools",
+                    model: undefined as never,
+                    systemPrompt: "",
+                    tools: [],
+                    reportTools: [],
+                }),
+        ).toThrow("AgentLoop requires at least one report tool");
+    });
+
+    it("requires unique names across report tools", () => {
+        expect(
+            () =>
+                new AgentLoop<FakeResult>({
+                    name: "duplicate-report-tools",
+                    model: undefined as never,
+                    systemPrompt: "",
+                    tools: [],
+                    reportTools: [
+                        new FinishTool({ name: "done", resultSchema: z.object({ payload: z.string() }) }),
+                        new FinishTool({ name: "done", resultSchema: z.object({ payload: z.string() }) }),
+                    ],
+                }),
+        ).toThrow("AgentLoop tool names must be unique: done");
+    });
+
+    it("requires unique names across ordinary and report tools", () => {
+        expect(
+            () =>
+                new AgentLoop<FakeResult>({
+                    name: "colliding-tools",
+                    model: undefined as never,
+                    systemPrompt: "",
+                    tools: [new NoopTool()],
+                    reportTools: [new FinishTool({ name: "noop", resultSchema: z.object({ payload: z.string() }) })],
+                }),
+        ).toThrow("AgentLoop tool names must be unique: noop");
+    });
+});
+
 /** A model that calls `noop` on every step and never finishes - exercises the step-cap backstop. */
 function alwaysCallsNoopModel(): MockLanguageModelV3 {
     let step = 0;
@@ -142,7 +186,7 @@ function makeBoundedLoop(model: MockLanguageModelV3, maxSteps?: number): AgentLo
         model,
         systemPrompt: "system",
         tools: [new NoopTool()],
-        reportTool: new FinishTool({ resultSchema: z.object({ payload: z.string() }) }),
+        reportTools: [new FinishTool({ resultSchema: z.object({ payload: z.string() }) })],
         maxSteps,
     });
 }
@@ -169,7 +213,7 @@ describe("AgentLoop forces tool calls and stays bounded", () => {
             model: alwaysCallsNoopModel(),
             systemPrompt: "system",
             tools: [new NoopTool()],
-            reportTool: new FinishTool({ resultSchema: z.object({ payload: z.string() }) }),
+            reportTools: [new FinishTool({ resultSchema: z.object({ payload: z.string() }) })],
             maxSteps: 2,
         })
             .runLoop([{ role: "user", content: "go" }])
@@ -188,14 +232,14 @@ describe("AgentLoop forces tool calls and stays bounded", () => {
         expect(model.doGenerateCalls.length).toBe(4);
     });
 
-    it("returns the result and stops once the report tool fires", async () => {
+    it("returns the result and stops once any report tool fires", async () => {
         const model = new MockLanguageModelV3({
             doGenerate: async () => ({
                 content: [
                     {
                         type: "tool-call",
-                        toolCallId: "finish-1",
-                        toolName: "finish",
+                        toolCallId: "complete-1",
+                        toolName: "complete",
                         input: JSON.stringify({ payload: "done" }),
                     },
                 ],
@@ -209,7 +253,10 @@ describe("AgentLoop forces tool calls and stays bounded", () => {
             model,
             systemPrompt: "system",
             tools: [],
-            reportTool: new FinishTool({ resultSchema: z.object({ payload: z.string() }) }),
+            reportTools: [
+                new FinishTool({ resultSchema: z.object({ payload: z.string() }) }),
+                new FinishTool({ name: "complete", resultSchema: z.object({ payload: z.string() }) }),
+            ],
         });
 
         const { result } = await loop.runLoop([{ role: "user", content: "go" }]);
@@ -231,8 +278,8 @@ describe("AgentLoop forces tool calls and stays bounded", () => {
                     },
                     {
                         type: "tool-call",
-                        toolCallId: "finish-2",
-                        toolName: "finish",
+                        toolCallId: "complete-2",
+                        toolName: "complete",
                         input: JSON.stringify({ payload: "second" }),
                     },
                 ],
@@ -246,7 +293,10 @@ describe("AgentLoop forces tool calls and stays bounded", () => {
             model,
             systemPrompt: "system",
             tools: [],
-            reportTool: new FinishTool({ resultSchema: z.object({ payload: z.string() }) }),
+            reportTools: [
+                new FinishTool({ resultSchema: z.object({ payload: z.string() }) }),
+                new FinishTool({ name: "complete", resultSchema: z.object({ payload: z.string() }) }),
+            ],
             maxSteps: 5,
         });
 
@@ -338,7 +388,7 @@ describe("buildTranscript shapes both outcomes", () => {
             model,
             systemPrompt: "system",
             tools: [new NoopTool()],
-            reportTool: new FinishTool({ resultSchema: z.object({ payload: z.string() }) }),
+            reportTools: [new FinishTool({ resultSchema: z.object({ payload: z.string() }) })],
             maxSteps,
         });
     }
@@ -400,7 +450,7 @@ describe("a transcript never carries inline media", () => {
             model,
             systemPrompt: "system",
             tools: [new ScreenshotTool()],
-            reportTool: new FinishTool({ resultSchema: z.object({ payload: z.string() }) }),
+            reportTools: [new FinishTool({ resultSchema: z.object({ payload: z.string() }) })],
             maxSteps: 5,
         });
     }
@@ -497,7 +547,7 @@ describe("logs never carry inline media", () => {
             model: callsThenFinishesModel(),
             systemPrompt: "system",
             tools: [new BigFrameTool()],
-            reportTool: new FinishTool({ resultSchema: z.object({ payload: z.string() }) }),
+            reportTools: [new FinishTool({ resultSchema: z.object({ payload: z.string() }) })],
             maxSteps: 5,
         }).runLoop([{ role: "user", content: "go" }]);
 
@@ -519,7 +569,7 @@ describe("a tool's FatalToolError ends the run", () => {
             model,
             systemPrompt: "system",
             tools: [new FatalTool()],
-            reportTool: new FinishTool({ resultSchema: z.object({ payload: z.string() }) }),
+            reportTools: [new FinishTool({ resultSchema: z.object({ payload: z.string() }) })],
             maxSteps: 5,
         });
     }
@@ -612,7 +662,7 @@ describe("ReportResultTool", () => {
             model: undefined as never,
             systemPrompt: "",
             tools: [],
-            reportTool: undefined as never,
+            reportTools: [new CustomReport()],
         });
         loop.actions.push("a", "b", "c");
 

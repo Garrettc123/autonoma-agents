@@ -15,7 +15,7 @@ function loop(model: MockLanguageModelV3, budget: { totalMs: number; stepMs: num
         model,
         systemPrompt: "system",
         tools: [],
-        reportTool: new FinishTool({ resultSchema: z.object({ payload: z.string() }) }),
+        reportTools: [new FinishTool({ resultSchema: z.object({ payload: z.string() }) })],
         budget,
     });
 }

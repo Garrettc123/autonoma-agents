@@ -57,7 +57,7 @@ export class Subagent extends Agent<SubagentInput, SubagentResult, SubagentLoop>
             maxSteps: this.maxSteps,
             systemPrompt: SUBAGENT_SYSTEM_PROMPT,
             tools: this.tools,
-            reportTool: this.reportTool,
+            reportTools: [this.reportTool],
             codebase: input.codebase,
         });
     }

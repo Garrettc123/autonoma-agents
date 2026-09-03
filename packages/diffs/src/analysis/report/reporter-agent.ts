@@ -83,7 +83,7 @@ export class ReporterAgent extends Agent<ReporterInput, ReporterResult, Reporter
                 this.carryForwardIssueTool,
                 this.resolveIssueTool,
             ],
-            reportTool: this.resultTool,
+            reportTools: [this.resultTool],
             compactor: sharedCompactor(),
             codebase: input.codebase,
             screenshotLoader: input.screenshotLoader,

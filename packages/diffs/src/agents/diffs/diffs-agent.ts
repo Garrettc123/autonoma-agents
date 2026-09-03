@@ -216,7 +216,7 @@ export class DiffsAgent extends Agent<DiffsAgentInput, DiffsAgentResult, DiffsAg
             model: this.model,
             systemPrompt: SYSTEM_PROMPT,
             tools,
-            reportTool: this.resultTool,
+            reportTools: [this.resultTool],
             compactor: sharedCompactor(),
             codebase: input.codebase,
             flowIndex: input.flowIndex,
