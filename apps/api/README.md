@@ -326,8 +326,9 @@ whatever run starts next claims it. (This is a deliberate reversal of the earlie
 billing `onCreditsGranted` hook.)
 
 Each producer threads its `source`
-(`webhook`/`label`/`comment`/`ui`/`vercel`/`ci`/`onboarding`/`mcp`/`admin`/`http`) down to the seam; the merge-gate
-maps its activation `ANALYSIS_RUN_SOURCE` onto that enum.
+(`webhook`/`label`/`comment`/`ui`/`vercel`/`ci`/`onboarding`/`mcp`/`admin`/`http`/`chat`) down to the seam; the
+merge-gate maps its activation `ANALYSIS_RUN_SOURCE` onto that enum. `chat` is a PR-review chat agent's forward,
+recorded once the host confirms it.
 
 ### Agent-authored messages (`user_prompt` events)
 

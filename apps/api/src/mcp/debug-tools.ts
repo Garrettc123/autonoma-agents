@@ -2,6 +2,7 @@ import { NotFoundError } from "@autonoma/errors";
 import { ANALYSIS_RUN_SOURCE } from "@autonoma/github/check";
 import { logger as rootLogger } from "@autonoma/logger";
 import {
+    analysisEventSourceSchema,
     AUTONOMA_ELEVATOR_PITCH,
     describeIssueKindRouting,
     describeRecheckLoop,
@@ -153,6 +154,17 @@ const sendMessageInput = {
                 "a file). Today Autonoma can only RE-ANALYZE with your instruction; it cannot edit the test suite, " +
                 "so ask for coverage of something, not for a test to be written or changed.",
         ),
+    // The only surfaces this tool legitimately represents: a chat agent's host-confirmed forward, or a
+    // direct MCP call. Accepting the full source enum would let a caller mislabel provenance as a webhook/CI.
+    source: analysisEventSourceSchema
+        .extract(["mcp", "chat"])
+        .optional()
+        .describe('Which surface the message came from, for provenance. Defaults to "mcp".'),
+    author: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Who is sending it, recorded for attribution. Defaults to the MCP actor."),
 };
 
 /**
@@ -552,8 +564,12 @@ export function registerDebugTools(server: McpServer, deps: DebugToolDeps): void
         },
         async (input) =>
             analytics.track("send_analysis_message", async () => {
-                const { prNumber, message } = input;
-                logger.info("send_analysis_message", { extra: { target: describeTarget(input), prNumber } });
+                const { prNumber, message, source, author } = input;
+                const resolvedSource = source ?? "mcp";
+                const resolvedAuthor = author ?? MCP_ACTOR_LOGIN;
+                logger.info("send_analysis_message", {
+                    extra: { target: describeTarget(input), prNumber, source: resolvedSource, author: resolvedAuthor },
+                });
                 try {
                     const { organizationId, githubRepositoryId, repoFullName } = await resolveTarget(input);
                     if (githubRepositoryId == null) return errorResult(noLinkedRepositoryMessage(repoFullName));
@@ -562,8 +578,8 @@ export function registerDebugTools(server: McpServer, deps: DebugToolDeps): void
                         repoId: githubRepositoryId,
                         prNumber,
                         text: message,
-                        author: MCP_ACTOR_LOGIN,
-                        source: "mcp",
+                        author: resolvedAuthor,
+                        source: resolvedSource,
                     });
                     switch (receipt.status) {
                         case "started":

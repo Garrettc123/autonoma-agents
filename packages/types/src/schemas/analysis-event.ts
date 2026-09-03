@@ -20,6 +20,8 @@ export const analysisEventSourceSchema = z.enum([
     "mcp",
     "admin",
     "http",
+    // A forward from the PR-review chat, once the host confirms it (neutral across chat agents).
+    "chat",
 ]);
 export type AnalysisEventSource = z.infer<typeof analysisEventSourceSchema>;
 

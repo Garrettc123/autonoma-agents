@@ -44,7 +44,7 @@ apiTestSuite({
             defaultBranch: "main",
             commits: ["initial-sha"],
         });
-        for (const prNum of [10, 20, 30, 40, 50]) {
+        for (const prNum of [10, 20, 30, 40, 50, 60]) {
             fakeClient.addPullRequest("org/prompt-repo", {
                 number: prNum,
                 title: `Test PR #${prNum}`,
@@ -105,6 +105,30 @@ apiTestSuite({
             expect(signal).toHaveBeenCalledWith(
                 expect.objectContaining({ branchId: receipt.branchId, headSha: "head-sha-10" }),
             );
+        });
+
+        test('records source "chat" and its author for a host-confirmed chat forward', async ({ harness }) => {
+            const { service } = buildService(harness, allowGate);
+
+            const receipt = await service.deliverUserPrompt({
+                organizationId: harness.organizationId,
+                repoId: 2001,
+                prNumber: 60,
+                text: "The engineer says the env is fixed - re-verify the checkout flow.",
+                author: "autonoma-chat",
+                source: "chat",
+            });
+
+            expect(receipt.status).toBe("started");
+            if (receipt.status !== "started") throw new Error("expected started");
+
+            const events = await harness.db.analysisEvent.findMany({ where: { branchId: receipt.branchId } });
+            expect(events).toHaveLength(1);
+            expect(events[0]!.source).toBe("chat");
+            expect(events[0]!.payload).toEqual({
+                text: "The engineer says the env is fixed - re-verify the checkout flow.",
+                author: "autonoma-chat",
+            });
         });
 
         test("starts a run under activation (requested-like bypass)", async ({ harness }) => {
