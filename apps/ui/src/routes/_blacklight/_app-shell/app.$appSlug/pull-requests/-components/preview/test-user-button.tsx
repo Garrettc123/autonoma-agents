@@ -475,14 +475,14 @@ function CopyActionButton({ value, label, icon: Icon }: { value: string; label: 
 // value gets its own copy button since a user typically pastes one at a time.
 function CredentialFields({ fields }: { fields: Record<string, string> }) {
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <div className="flex flex-col gap-3">
       {Object.entries(fields).map(([key, value]) => (
         <div key={key} className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
             <span className="font-mono text-3xs uppercase tracking-widest text-text-secondary">{humanize(key)}</span>
             <CopyButton value={value} />
           </div>
-          <div className="flex h-9 items-center break-all border border-border-mid bg-surface-void px-3 font-mono text-2xs text-text-primary">
+          <div className="flex min-h-9 items-center break-all border border-border-mid bg-surface-void px-3 py-2 font-mono text-2xs text-text-primary">
             {value}
           </div>
         </div>
