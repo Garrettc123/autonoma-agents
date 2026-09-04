@@ -46,3 +46,4 @@ export * from "./activation-triggers";
 export * from "./suite-health";
 export * from "./suite-health-fix-plan";
 export * from "./application-activity";
+export * from "./application-memory";

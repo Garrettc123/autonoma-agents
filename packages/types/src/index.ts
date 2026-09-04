@@ -8,6 +8,7 @@ export * from "./preview-url";
 export * from "./sdk-endpoint";
 export * from "./org-domain";
 export * from "./app-links";
+export * from "./application-memory-index";
 export * from "./agent-handoff-links";
 export * from "./agent-guidance";
 export * from "./agent-handoff-prompt";

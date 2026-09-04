@@ -144,6 +144,7 @@ model Organization {
   stepOutputs              StepOutput[]
   stepAttempts             StepAttempt[]
   tags                     Tag[]
+  applicationMemories      ApplicationMemory[]
   scenarios                Scenario[]
   scenarioRecipeVersions   ScenarioRecipeVersion[]
   scenarioRecipeEdits      ScenarioRecipeEdit[]
@@ -425,6 +426,7 @@ model Application {
   folders                  Folder[]
   testCases                TestCase[]
   tags                     Tag[]
+  memories                 ApplicationMemory[]
   scenarios                Scenario[]
   scenarioSchemaSnapshots  ScenarioSchemaSnapshot[]
   scenarioRecipeVersions   ScenarioRecipeVersion[]
@@ -1213,6 +1215,44 @@ model TestTag {
   @@unique([testCaseId, tagId])
   @@index([tagId])
   @@map("test_tag")
+}
+
+// ─── Application Memory ───────────────────────────────────────────────────────
+
+/// One piece of owner-authored knowledge about an application, read by every pipeline agent
+/// through progressive disclosure: the prompt carries an index of `slug - title: description`,
+/// and a `read_memory` tool returns one memory's `content` on demand.
+model ApplicationMemory {
+  id            String @id @default(cuid())
+  applicationId String @map("application_id")
+
+  /// The handle agents and tools address this memory by. It is the memory file's name (already in
+  /// `toSlug` form), set when the row is created and never rewritten, so a later title edit does
+  /// not break a slug an agent has read.
+  slug String
+
+  title String
+
+  /// One line: WHEN an agent should read this memory. Progressive disclosure keys on it - it is
+  /// the only thing an agent sees before deciding to read the content.
+  description String
+
+  content String
+
+  /// Disabled memories are invisible to the pipeline: absent from the index and unreadable by
+  /// the tool. With none enabled, the pipeline behaves exactly as if memories did not exist.
+  enabled Boolean @default(true)
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, slug])
+  @@index([organizationId])
+  @@map("application_memory")
 }
 
 // ─── AI Cost Tracking ─────────────────────────────────────────────

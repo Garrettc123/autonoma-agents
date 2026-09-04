@@ -29,6 +29,29 @@ pnpm test          # unit tests (vitest)
 pnpm test:integration  # integration tests (vitest, Testcontainers)
 ```
 
+## Application memories
+
+An application's memories are owner-authored notes every pipeline agent can read through progressive disclosure: the prompt carries an index of the memories (rendered by `renderApplicationMemoryIndex` in `@autonoma/types`), and a `read_memory` tool returns one memory's content on demand. Nothing in the pipeline writes them; a human does, from a local directory with one markdown file per memory:
+
+```bash
+pnpm --filter @autonoma/api memories:upsert -- --application-id <id> --dir ./memories
+```
+
+`DATABASE_URL` decides which environment is written. The run is idempotent: a memory the application does not have is created, one it has is rewritten in place, and memories the directory does not contain are left alone. Each `.md` file directly inside the directory is one memory, in the same shape as an E2E test file - YAML frontmatter, then the body:
+
+```markdown
+---
+title: Checkout toast is transient
+description: Read when a success toast disappeared before you could verify it.
+---
+The checkout success toast auto-dismisses after about three seconds. Seeing it vanish
+before an assertion is expected behavior, not a bug.
+```
+
+- **The file name is the slug** (`checkout-toast-is-transient.md`), the identity the row is upserted by and the handle agents address it by. It must already be slug-shaped (lowercase words joined by dashes); the script tells you what to rename a file to otherwise. Renaming a file makes a new memory and leaves the old row behind, while editing `title` does not.
+- `description` is what an agent sees before deciding to read the memory, so write it as *when to read this*. Any other frontmatter key is rejected, so a typo cannot silently drop a field.
+- Whether a memory is visible to the pipeline is the `enabled` column, which the script never writes: rows are created enabled, and a re-run does not flip a row that was switched off in SQL. To run an application with its memories off (the control arm of an experiment), flip the column in SQL.
+
 ## Environment Variables
 
 Defined in `src/env.ts` using `@t3-oss/env-core` with Zod validation. Also extends env schemas from `@autonoma/db`, `@autonoma/logger`, and `@autonoma/storage`.

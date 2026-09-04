@@ -53,6 +53,11 @@ Webhook response schemas for the Environment Factory protocol:
 
 - `RedeployPreviewkitAppInputSchema` - Validates an application-scoped request to rebuild or restart one preview app
 
+### Application Memories
+
+- `ApplicationMemorySchema` / `ApplicationMemory` - one piece of owner-authored knowledge about an application: `slug` (the handle agents address it by, in `toSlug` form), `title`, `description` (when an agent should read it) and free-form `content`. This is the one validator for an authored memory; the `enabled` switch lives on the stored row, not on the memory
+- `READ_MEMORY_TOOL_NAME` - the name of the tool that reads one memory in full, shared by the index wording and the tool registrations so they cannot drift
+
 ### Review Verdict
 
 - `reviewVerdictSchema` / `ReviewVerdict` - AI reviewer output classifying test failures as `"agent_error"` or `"application_bug"` with severity, evidence, and reasoning
@@ -73,6 +78,7 @@ Pure functions with no Zod or Node dependencies, living here because more than o
 - `isColdStartMessage` / `isColdStartStatus` / `sdkErrorStatus` (`sdk-error-signals.ts`), plus `isColdStartFailure` (`sdk-failure.ts`, the tag-native counterpart that reads a structured `SdkFailure` instead of a message string) - tell a customer SDK endpoint that answered wrongly apart from a scaled-to-zero preview that had not woken up. `@autonoma/scenario` retries on these; the UI uses the same rules to decide whether a failed validation is worth handing to a coding agent.
 - `AUTONOMA_ELEVATOR_PITCH` / `ISSUE_KIND_FIX_GUIDANCE` / `describeIssueKindRouting` / `FALSE_POSITIVE_GUIDANCE` / `describeRecheckLoop` / `buildAutonomaMcpHint` (`agent-guidance.ts`) - what a coding agent has to be told about Autonoma, above all where each issue kind's fix lives (a `bug` in the repo, an `environment` issue in the preview's configuration, a `scenario` issue in the test data). The MCP server's connect-time instructions and the pull request's fix prompt both read these, because an agent handed a prompt out of a browser has no server instructions to fall back on.
 - `buildAgentFixPrompt` / `MAX_DEEP_LINK_PROMPT_CHARS` (`agent-handoff-prompt.ts`) - the paste-ready brief the PR fix page hands a coding agent, rebuilt in the browser from whichever issues the reader kept. `full` carries the run's whole account of itself (flows, report prose, code snippets, covering tests, signed media); `link` is the condensed variant a deep-link URL can hold.
+- `renderApplicationMemoryIndex` (`application-memory-index.ts`) - the `## App memories` section every pipeline agent's prompt carries: the framing sentence (memories describe expected behavior and explain observations without replacing them), one `slug - title: description` line per memory in slug order, and the one instruction to call `read_memory` with a slug when its description matches the task at hand. This is the single source of that wording for every consumer. It renders whatever it is given - which rows the pipeline may see (the `enabled` gate) is the reader's decision, made once for the index and the tool alike - and returns `undefined` for none, so the caller drops the section and the prompt is byte-identical to one for an application without memories.
 - `buildPrPageUrl` / `buildPrFixUrl` / `buildAnalysisIssueUrl` / `buildAnalysisFindingUrl` (`app-links.ts`) - the in-app URL shapes for a pull request's analysis surfaces.
 
 ## Usage
