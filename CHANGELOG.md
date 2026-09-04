@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.260904.1](https://github.com/Autonoma-AI/agent/compare/v1.260902.1...v1.260904.1) (2026-09-04)
+
+
+### Features
+
+* **agent-core:** add message storage translation with S3 image refs ([#2940](https://github.com/Autonoma-AI/agent/issues/2940)) ([bad4585](https://github.com/Autonoma-AI/agent/commit/bad4585e5b5a682490ee893b51e53a608abc854d))
+* **analysis:** add a chat AnalysisEventSource and let send_analysis_message carry source/author ([#2952](https://github.com/Autonoma-AI/agent/issues/2952)) ([97aef46](https://github.com/Autonoma-AI/agent/commit/97aef46b0807eecc13f4ef4555444ea40511e61c))
+* application memories table, shared index renderer, and authoring script ([#2965](https://github.com/Autonoma-AI/agent/issues/2965)) ([8b60952](https://github.com/Autonoma-AI/agent/commit/8b609524284da8e3df785274ece4a7dfe5e82cf7))
+* capture main-branch classifier eval cases ([#2939](https://github.com/Autonoma-AI/agent/issues/2939)) ([30fd0f9](https://github.com/Autonoma-AI/agent/commit/30fd0f96f8943e8c3ab1a61740c4b16f70265c8c))
+* capture the head commit message and author on push events ([#2967](https://github.com/Autonoma-AI/agent/issues/2967)) ([f3f96e2](https://github.com/Autonoma-AI/agent/commit/f3f96e293b8b6f00c3fd4229e769ba714cea2bbd))
+* checkpoint timeline of the events each checkpoint handled ([#2964](https://github.com/Autonoma-AI/agent/issues/2964)) ([73b8249](https://github.com/Autonoma-AI/agent/commit/73b824904647e0c27cf579ea21368ac5a07c122d))
+* classifier reads app memories via the shared read_memory tool ([#2966](https://github.com/Autonoma-AI/agent/issues/2966)) ([359c7ba](https://github.com/Autonoma-AI/agent/commit/359c7baa3b7f152862d8c735cc8ccc99ec2aa381))
+* **ui:** add the PR-chat panel ([#2938](https://github.com/Autonoma-AI/agent/issues/2938)) ([4720dc1](https://github.com/Autonoma-AI/agent/commit/4720dc13b1a6ed635fe442a44a48979bc8c2464f))
+* unlimited credits ([#2934](https://github.com/Autonoma-AI/agent/issues/2934)) ([d432361](https://github.com/Autonoma-AI/agent/commit/d432361f985f131f2da324a7a87aca04c0993588))
+
+
+### Bug Fixes
+
+* **ci:** ship libatomic on the runner AMI so pnpm can switch versions ([#2954](https://github.com/Autonoma-AI/agent/issues/2954)) ([924a858](https://github.com/Autonoma-AI/agent/commit/924a858d823f4f0d3abc0e2e8afed9611ba755fc))
+* **deployment:** raise worker-diffs memory request to measured p95 usage ([#2936](https://github.com/Autonoma-AI/agent/issues/2936)) ([3172127](https://github.com/Autonoma-AI/agent/commit/31721275a19482ed477f7fa73d47c62e4796c31e))
+* one terminal tool per verdict ([#2946](https://github.com/Autonoma-AI/agent/issues/2946)) ([2526d97](https://github.com/Autonoma-AI/agent/commit/2526d97a8b4e6bdb3f5da6d55bb48b1f971d33eb))
+* resolve the flow findings dropdown from the branch's cumulative test runs ([#2913](https://github.com/Autonoma-AI/agent/issues/2913)) ([0183fe2](https://github.com/Autonoma-AI/agent/commit/0183fe20193380a318d28c5fa0b978d65e821ada))
+* support multiple agent terminal tools ([#2945](https://github.com/Autonoma-AI/agent/issues/2945)) ([8e48ce6](https://github.com/Autonoma-AI/agent/commit/8e48ce689911fbd88f4cf1f0982f537843256a02))
+* **terraform:** declare the encrypted root volumes on the utility EC2 hosts ([#2953](https://github.com/Autonoma-AI/agent/issues/2953)) ([3c9fb0d](https://github.com/Autonoma-AI/agent/commit/3c9fb0d2a24adb7266dff70e3e25278d601ed371))
+* test-user credential box clipping wrapped values ([#2928](https://github.com/Autonoma-AI/agent/issues/2928)) ([a086f57](https://github.com/Autonoma-AI/agent/commit/a086f5788549b02bda9951b39966791509cb5d6b))
+
 ## [1.260902.1](https://github.com/Autonoma-AI/agent/compare/v1.260831.1...v1.260902.1) (2026-09-02)
 
 
