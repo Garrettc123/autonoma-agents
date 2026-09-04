@@ -627,6 +627,14 @@ export class GitHubInstallationService extends Service {
         return commit;
     }
 
+    // A commit by repo id (no application lookup), for the trigger paths that hold a repo id and a head sha and
+    // want to stamp the commit's subject/author onto the push event they are about to enqueue.
+    async getCommitByRepo(organizationId: string, repoId: number, sha: string): Promise<Commit> {
+        this.logger.info("Fetching commit by repo", { organizationId, extra: { repoId, sha } });
+        const client = await this.getOrgInstallationClient(organizationId);
+        return client.getCommit(repoId, sha);
+    }
+
     /**
      * The repositories this org's GitHub App installation can see, each tagged with
      * the Autonoma application it is linked to. Never throws: a missing or broken

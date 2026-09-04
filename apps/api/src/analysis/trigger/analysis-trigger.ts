@@ -11,7 +11,11 @@ import { postInsufficientCreditsComment } from "../../github/insufficient-credit
 import { upsertPrBranch } from "../../routes/branches/upsert-pr-branch";
 import { Service } from "../../routes/service";
 import { analysisPokeGate } from "../analysis-poke-gate";
-import { enqueueAnalysisEvent, enqueueAndStartAnalysisRun } from "../enqueue-and-start-analysis-run";
+import {
+    enqueueAnalysisEvent,
+    enqueueAndStartAnalysisRun,
+    resolveHeadCommitMeta,
+} from "../enqueue-and-start-analysis-run";
 import { isActivationGated } from "../is-activation-gated";
 import type { AnalysisOccurrence, OccurrenceDeployment } from "./occurrence";
 import type { DeliveryReceipt } from "./receipt";
@@ -19,7 +23,13 @@ import type { DeliveryReceipt } from "./receipt";
 /** The GitHub reads the trigger needs: a PR's head/base, a branch's head, the repo, and posting the credits comment. */
 export type AnalysisTriggerGitHubReader = Pick<
     GitHubInstallationService,
-    "getPullRequest" | "getBranchHead" | "getRepository" | "postComment" | "updateComment" | "deleteComment"
+    | "getPullRequest"
+    | "getBranchHead"
+    | "getRepository"
+    | "getCommitByRepo"
+    | "postComment"
+    | "updateComment"
+    | "deleteComment"
 >;
 
 /** The starter a producer injects. Returns the workflow id when it has one; the diffs producer does not. */
@@ -177,7 +187,8 @@ export class AnalysisTrigger extends Service {
 
         // A real analyzable event from here on: persist it whether or not we can act on it now, so a deferred push
         // is never lost. Only the poke (starting the run) is gated.
-        const launch = { branchId: branch.id, organizationId, source, headSha, baseSha };
+        const commitMeta = await resolveHeadCommitMeta(this.githubInstallationService, organizationId, repoId, headSha);
+        const launch = { branchId: branch.id, organizationId, source, headSha, baseSha, ...commitMeta };
 
         // Ahead of the gate: a customer-hosted deployment is recorded even when its analysis is deferred.
         await this.recordDeploymentIfKnown(branch.id, organizationId, headSha, occurrence.deployment);
@@ -202,7 +213,14 @@ export class AnalysisTrigger extends Service {
 
         // The poke cleared the credits gate, so a stale "insufficient credits" block must not linger on the branch.
         await clearBranchTriggerBlock(this.db, branch.id);
-        const workflowId = await this.startRun({ branchId: branch.id, organizationId, source, headSha, baseSha });
+        const workflowId = await this.startRun({
+            branchId: branch.id,
+            organizationId,
+            source,
+            headSha,
+            baseSha,
+            ...commitMeta,
+        });
 
         this.logger.info("PR diffs analysis triggered successfully", {
             branchId: branch.id,
@@ -293,11 +311,13 @@ export class AnalysisTrigger extends Service {
         headSha: string;
         /** The PR base, for a branch with no active snapshot yet. Main always has one, so it passes none. */
         baseSha?: string;
+        message?: string;
+        author?: string;
     }): Promise<string | undefined> {
-        const { branchId, organizationId, source, headSha, baseSha } = params;
+        const { branchId, organizationId, source, headSha, baseSha, message, author } = params;
         return enqueueAndStartAnalysisRun(
             { events: this.events, startAnalysisRun: this.startAnalysisRun },
-            { branchId, organizationId, source, headSha, baseSha },
+            { branchId, organizationId, source, headSha, baseSha, message, author },
         );
     }
 

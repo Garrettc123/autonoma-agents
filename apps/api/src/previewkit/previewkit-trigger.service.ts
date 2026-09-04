@@ -18,7 +18,11 @@ import {
 } from "@autonoma/types";
 import type { AnalysisRunWorkflowInput, PreviewBuildWorkflowInput } from "@autonoma/workflow";
 import { z } from "zod";
-import { type AnalysisRunLaunch, enqueueAnalysisEvent } from "../analysis/enqueue-and-start-analysis-run";
+import {
+    type AnalysisRunLaunch,
+    enqueueAnalysisEvent,
+    resolveHeadCommitMeta,
+} from "../analysis/enqueue-and-start-analysis-run";
 import { isActivationGated } from "../analysis/is-activation-gated";
 import { env } from "../env";
 import { applicationBranchRefs } from "../github/application-branch-refs";
@@ -108,7 +112,13 @@ interface MainBranchPushTarget {
 /** The GitHub reads the main-branch preflight and redeploy head-resolution need, plus posting the credits-blocked comment. */
 export type PreviewkitGitHubReader = Pick<
     GitHubInstallationService,
-    "getRepository" | "getBranchHead" | "getPullRequest" | "postComment" | "updateComment" | "deleteComment"
+    | "getRepository"
+    | "getBranchHead"
+    | "getPullRequest"
+    | "getCommitByRepo"
+    | "postComment"
+    | "updateComment"
+    | "deleteComment"
 >;
 
 /**
@@ -190,6 +200,12 @@ export class PreviewkitTriggerService extends Service {
             return {};
         }
 
+        const commitMeta = await resolveHeadCommitMeta(
+            this.githubInstallationService,
+            request.organizationId,
+            request.githubRepositoryId,
+            request.headSha,
+        );
         const launch: AnalysisRunLaunch = {
             branchId: request.branchId,
             organizationId: request.organizationId,
@@ -198,6 +214,8 @@ export class PreviewkitTriggerService extends Service {
             baseSha: request.baseSha,
             beforeSha: request.beforeSha,
             deliveryId: request.deliveryId,
+            message: commitMeta.message,
+            author: commitMeta.author,
         };
 
         await this.enqueueEventIfWarranted(request, launch);
@@ -422,6 +440,12 @@ export class PreviewkitTriggerService extends Service {
                 repo: repo.full_name,
                 pr: pr.number,
             });
+            const commitMeta = await resolveHeadCommitMeta(
+                this.githubInstallationService,
+                organizationId,
+                repo.id,
+                pr.head.sha,
+            );
             await enqueueAnalysisEvent(this.events, {
                 branchId,
                 organizationId,
@@ -430,6 +454,8 @@ export class PreviewkitTriggerService extends Service {
                 baseSha: pr.base.sha,
                 beforeSha: parsed.data.before,
                 deliveryId,
+                message: commitMeta.message,
+                author: commitMeta.author,
             });
             return;
         }
