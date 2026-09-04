@@ -105,8 +105,6 @@ description: "what this case exercises"
 skip: false
 capturedCategory: engine_artifact   # what production said when frozen. Provenance, never edited
 category: passed                    # the verdict this case ASSERTS (blank at capture, by design)
-planFidelity: exact                 # optional: exact | partial | diverged
-expectRewrite: true                 # a plan_mismatch must carry a revised plan (see below)
 ---
 
 Free-text judge rubric. The judge sees only the structured verdict plus this body -
@@ -119,13 +117,12 @@ records what production said, and is never edited - so when an expectation is la
 re-baselined (an `engine_artifact` that should now read `passed` because the engine
 grew the capability), the case still shows where it started.
 
-Only `category`, `planFidelity` and a `plan_mismatch`'s `suggestedTestUpdate` are
+Only `category` and a `plan_mismatch`'s `suggestedTestUpdate` are
 graded deterministically. `confidence` is not - it is the field most likely to move
 between two runs of an unchanged classifier. `evidence` and `keyStepIndex` are not
 either: whether the cited evidence supports the verdict, and which frame best shows a
-finding, are judgements the rubric exists for. Set `expectRewrite: false` for a case
-whose right answer is the empty rewrite, which the self-heal loop reads as "keep this
-test without re-running it" - a real answer a blanket requirement would train away.
+finding, are judgements the rubric exists for. Every `plan_mismatch` carries a rewrite by
+contract, so `suggestedTestUpdate` is graded for length whenever the category is `plan_mismatch`.
 
 **The vision probes run live, every time.** A case stores no scans: the agent reads the
 recording itself on every run, exactly as production does. Each run therefore costs four

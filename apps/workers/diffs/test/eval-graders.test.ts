@@ -61,25 +61,19 @@ describe("analysis dedup grader", () => {
 describe("classifier suggestedTestUpdate grader", () => {
     it("passes a plan_mismatch that carries a substantive revised plan", () => {
         const verdict = planMismatchVerdict("Navigate to /settings, open the Billing tab, assert the plan name.");
-        const failures = checkClassifierVerdict(verdict, { expectRewrite: true });
+        const failures = checkClassifierVerdict(verdict, {});
         expect(failures).toEqual([]);
     });
 
     it("flags a plan_mismatch whose revised plan is a trivial placeholder", () => {
         const verdict = planMismatchVerdict("n/a");
-        const failures = checkClassifierVerdict(verdict, { expectRewrite: true });
+        const failures = checkClassifierVerdict(verdict, {});
         expect(failures.map((f) => f.check)).toEqual(["suggestedTestUpdate"]);
     });
 
     it("flags a plan_mismatch whose revised plan is blank", () => {
         const verdict = planMismatchVerdict("   ");
-        const failures = checkClassifierVerdict(verdict, { expectRewrite: true });
+        const failures = checkClassifierVerdict(verdict, {});
         expect(failures.map((f) => f.check)).toEqual(["suggestedTestUpdate"]);
-    });
-
-    it("accepts an empty revised plan as the sanctioned answer when expectRewrite is false", () => {
-        const verdict = planMismatchVerdict("");
-        const failures = checkClassifierVerdict(verdict, { expectRewrite: false });
-        expect(failures).toEqual([]);
     });
 });

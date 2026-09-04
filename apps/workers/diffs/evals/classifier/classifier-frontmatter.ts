@@ -1,6 +1,6 @@
-import { Category, PlanFidelity, type RunVerdict } from "@autonoma/diffs/analysis";
+import { Category, type RunVerdict } from "@autonoma/diffs/analysis";
 import { type CheckFailure, baseFrontmatterSchema, checkEnumEquality } from "@autonoma/evals";
-import { z } from "zod";
+import type { z } from "zod";
 
 /**
  * The shortest a revised plan can be and still carry instruction. A `plan_mismatch` carries the COMPLETE
@@ -13,7 +13,7 @@ const MIN_SUGGESTED_TEST_UPDATE_LENGTH = 20;
 /**
  * Deterministic checks for a Classifier case, layered on the shared base.
  *
- * Only three things are graded here, and the omissions are deliberate:
+ * Only two things are graded here, and the omissions are deliberate:
  *
  * - `confidence` is NOT graded. It is the field most likely to move between two runs of an unchanged
  *   classifier, so asserting it would make a case flaky without saying anything a reader could act on.
@@ -35,26 +35,13 @@ export const classifierFrontmatterSchema = baseFrontmatterSchema.extend({
      * because the engine grew the capability), this still shows where the case started.
      */
     capturedCategory: Category.optional(),
-    /** How closely the run followed the written steps. Orthogonal to the verdict, so graded separately. */
-    planFidelity: PlanFidelity.optional(),
-    /**
-     * Whether a `plan_mismatch` must carry a rewritten plan. Defaults to requiring one, because a
-     * `plan_mismatch` that proposes nothing leaves the test exactly as broken as it found it. Set false for a
-     * case whose right answer is the empty rewrite - the loop reads that as "keep this test without re-running
-     * it", a real answer that a blanket requirement would train the classifier out of giving.
-     */
-    expectRewrite: z.boolean().default(true),
 });
 
 export type ClassifierFrontmatter = z.infer<typeof classifierFrontmatterSchema>;
 
 /** Apply the Classifier deterministic checks to one verdict. An empty list means the checks passed. */
 export function checkClassifierVerdict(verdict: RunVerdict, frontmatter: ClassifierFrontmatter): CheckFailure[] {
-    return [
-        ...checkCategory(verdict, frontmatter),
-        ...checkPlanFidelity(verdict, frontmatter),
-        ...checkSuggestedTestUpdate(verdict, frontmatter),
-    ];
+    return [...checkCategory(verdict, frontmatter), ...checkSuggestedTestUpdate(verdict)];
 }
 
 function checkCategory(verdict: RunVerdict, frontmatter: ClassifierFrontmatter): CheckFailure[] {
@@ -62,22 +49,13 @@ function checkCategory(verdict: RunVerdict, frontmatter: ClassifierFrontmatter):
     return checkEnumEquality("category", verdict.category, frontmatter.category);
 }
 
-function checkPlanFidelity(
-    verdict: RunVerdict & { planFidelity?: PlanFidelity },
-    frontmatter: ClassifierFrontmatter,
-): CheckFailure[] {
-    if (frontmatter.planFidelity == null) return [];
-    return checkEnumEquality("planFidelity", verdict.planFidelity, frontmatter.planFidelity);
-}
-
 /**
- * A `plan_mismatch` verdict is the entry point to the self-heal loop, and `suggestedTestUpdate` is the plan
- * that loop re-runs - so a blank OR placeholder-length one on a case that expects a rewrite means the classifier
- * diagnosed a fixable test and then fixed nothing. Only applies to the arm that carries the field; every other
- * category is silent.
+ * A `plan_mismatch` carries the COMPLETE rewritten plan the self-heal loop re-runs, so a blank or
+ * placeholder-length one means the classifier diagnosed a fixable test and then fixed nothing. Only applies to
+ * the arm that carries the field; every other category is silent.
  */
-function checkSuggestedTestUpdate(verdict: RunVerdict, frontmatter: ClassifierFrontmatter): CheckFailure[] {
-    if (verdict.category !== "plan_mismatch" || !frontmatter.expectRewrite) return [];
+function checkSuggestedTestUpdate(verdict: RunVerdict): CheckFailure[] {
+    if (verdict.category !== "plan_mismatch") return [];
 
     const revisedPlan = verdict.suggestedTestUpdate.trim();
     if (revisedPlan.length >= MIN_SUGGESTED_TEST_UPDATE_LENGTH) return [];
@@ -85,7 +63,7 @@ function checkSuggestedTestUpdate(verdict: RunVerdict, frontmatter: ClassifierFr
     return [
         {
             check: "suggestedTestUpdate",
-            message: `plan_mismatch carried a ${revisedPlan.length}-char revised plan (min ${MIN_SUGGESTED_TEST_UPDATE_LENGTH}); set expectRewrite: false if the empty rewrite is the right answer`,
+            message: `plan_mismatch carried a ${revisedPlan.length}-char revised plan (min ${MIN_SUGGESTED_TEST_UPDATE_LENGTH})`,
         },
     ];
 }
