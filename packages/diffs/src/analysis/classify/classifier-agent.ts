@@ -2,6 +2,7 @@ import { Agent, TextGenerator, type LanguageModel, type ModelMessage, type Retry
 import { type Logger, logger as rootLogger } from "@autonoma/logger";
 import { sharedCompactor } from "../../agents/compaction";
 import { buildCodebaseTools } from "../../agents/tools/codebase/build-codebase-tools";
+import { buildReadMemoryTools } from "../../agents/tools/lookup/read-memory-tool";
 import { ViewStepDetailsTool } from "../../agents/tools/run-evidence/view-step-details-tool";
 import { buildRepoManifestSection } from "../../codebase";
 import type { RunVerdict } from "../schema";
@@ -34,6 +35,9 @@ const VISION_RETRY: RetryConfig = { maxRetries: 2, initialDelayInMs: 1000, backo
  * chain of timeouts that exhausts the retry budget and drops the scan entirely.
  */
 const RECORDING_TIMEOUT_MS = 4 * 60_000;
+
+/** This agent's name, the single source for its loop name and the `read_memory` reads it attributes to itself. */
+const AGENT_NAME = "ClassifierAgent";
 
 export interface ClassifierAgentConfig {
     /** The reasoning model that drives the loop. */
@@ -152,9 +156,12 @@ export class ClassifierAgent extends Agent<ClassifierInput, RunVerdict, Classifi
         // spends a step being told no by a tool instead of reading the prompt's no-recording note.
         const recording = input.run.recording;
         const videoTools = recording != null ? [new AnalyzeVideoTool(this.recordingReader, recording)] : [];
+        // read_memory is offered only when the application has enabled memories - with none, the tool set
+        // (and the prompt, which drops the index the same way) is byte-identical to an app that has none.
+        const memoryTools = buildReadMemoryTools(input.memories, AGENT_NAME);
 
         return new ClassifierAgentLoop({
-            name: "ClassifierAgent",
+            name: AGENT_NAME,
             model: this.model,
             systemPrompt: CLASSIFIER_SYSTEM_PROMPT,
             tools: [
@@ -165,6 +172,7 @@ export class ClassifierAgent extends Agent<ClassifierInput, RunVerdict, Classifi
                 ...scriptTools,
                 ...envTools,
                 ...appLogTools,
+                ...memoryTools,
             ],
             reportTools: this.verdictTools,
             compactor: sharedCompactor(),

@@ -3,7 +3,7 @@
  * iterated on without touching the agent. The prompt is intentionally GENERIC - no client- or
  * case-specific details - so it generalizes across every project.
  */
-import type { AnalysisRunTarget } from "@autonoma/types";
+import { type AnalysisRunTarget, renderApplicationMemoryIndex } from "@autonoma/types";
 import type { ProbeScans } from "./probes";
 import type { ClassifierInput } from "./types";
 
@@ -138,12 +138,17 @@ export interface ClassifierPromptInput {
  */
 export function buildClassifierPrompt({ input, scans, evidenceLimits }: ClassifierPromptInput): string {
     const run = input.run;
+    // The index carries only title+description per memory; the model reads a memory's content with
+    // `read_memory` when a description matches what it is doing. Undefined for an app with no enabled
+    // memories, so the section - and nothing else - drops out, leaving a byte-identical prompt.
+    const memoryIndex = renderApplicationMemoryIndex(input.memories);
     return [
         "Classify this test run.",
         ...(evidenceLimits != null ? [`\n--- WHAT YOU CANNOT PROVE ON THIS RUN ---\n${evidenceLimits}`] : []),
         ...(input.priorPass != null ? [buildPriorPassSection(input.priorPass)] : []),
         `App: ${input.appSlug}  ${describeRunTarget(input.target)}  Test: ${input.test.slug}`,
         buildRunIntentSection(input.target),
+        ...(memoryIndex != null ? [`\n${memoryIndex}`] : []),
         `\nTest instruction:\n${input.test.plan}`,
         `\nWhy this test was selected for the diff:\n${input.test.affectedReason}`,
         `\nDiff stat:\n${input.diffSummary}`,

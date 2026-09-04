@@ -29,6 +29,7 @@ import type {
     InvestigationTestResult,
 } from "@autonoma/workflow/activities";
 import ffmpeg from "@ffmpeg-installer/ffmpeg";
+import { loadEnabledApplicationMemories } from "../analysis/load-application-memories";
 import { resolveRunTarget } from "../codebase/run-target";
 import { type SnapshotContext, withSnapshotContext } from "../codebase/snapshot-context";
 import { env } from "../env";
@@ -163,7 +164,12 @@ export async function classifyInvestigationRun(input: ClassifyInvestigationRunIn
             // cannot know - so the entry's own factory would silently fail to transcode a pre-optimizer webm.
             const recordingModel = session.getVideoModel({ model: "smart-video", tag: "investigation-vision-video" });
             const uploader = new InlineMp4VideoUploader(ffmpeg.path);
-            const { run: runArtifacts, recordingBytes } = await buildRunArtifacts(generation, uploader);
+            // The app's enabled memories load in parallel with the run's media - an independent read keyed on
+            // the application, the same way the DiffsAgent context load reads its test-scope guidelines.
+            const [{ run: runArtifacts, recordingBytes }, memories] = await Promise.all([
+                buildRunArtifacts(generation, uploader),
+                loadEnabledApplicationMemories(context.applicationId),
+            ]);
 
             // Gate the previewkit-dependent tools on whether this run's preview is actually managed by previewkit. The
             // namespace only resolves for a previewkit-deployed preview; when it does not (a self-hosted / non-integrated
@@ -201,6 +207,7 @@ export async function classifyInvestigationRun(input: ClassifyInvestigationRunIn
             });
             const { result: verdict, conversation } = await classifier.run({
                 appSlug: context.appSlug,
+                memories,
                 target,
                 test: { slug, plan: generation.testPlan.prompt, affectedReason: reason },
                 provision: describeProvision(generation),

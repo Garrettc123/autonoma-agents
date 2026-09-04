@@ -10,6 +10,7 @@ export { SubagentTool } from "./subagent/subagent-tool";
 export { ListFlowsTool } from "./lookup/list-flows-tool";
 export { ListTestsTool } from "./lookup/list-tests-tool";
 export { ReadTestsTool } from "./lookup/read-tests-tool";
+export { ReadMemoryTool, buildReadMemoryTools } from "./lookup/read-memory-tool";
 export { ListScenariosTool } from "./lookup/list-scenarios-tool";
 export { ReadScenarioTool } from "./lookup/read-scenario-tool";
 export type { ScenarioLookupLoop } from "./lookup/scenario-lookup-loop";

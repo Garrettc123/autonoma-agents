@@ -210,6 +210,9 @@ export function rehydrateClassifierInput(parsed: ClassifierCaseInput): Rehydrate
         priorPass: parsed.priorPass,
         baseSha: parsed.codebase.baseSha,
         headSha: parsed.codebase.headSha,
+        // Captured cases predate app memories, so they replay as the no-memories control arm until the case
+        // schema grows a field to freeze them.
+        memories: [],
         previewEnv: parsed.previewEnvNames != null ? frozenPreviewEnv(parsed.previewEnvNames) : undefined,
         run: {
             success: parsed.run.success,

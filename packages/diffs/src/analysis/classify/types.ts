@@ -1,6 +1,6 @@
 import type { UploadedVideo } from "@autonoma/ai";
 import type { ApplicationArchitecture } from "@autonoma/db";
-import type { AnalysisRunTarget } from "@autonoma/types";
+import type { AnalysisRunTarget, ApplicationMemory } from "@autonoma/types";
 import type { InspectableStep, ScreenshotLoader } from "../../agents/tools/run-evidence/run-evidence-types";
 import type { Codebase } from "../../codebase";
 
@@ -66,6 +66,13 @@ export interface PreviewScriptAccess {
  */
 export interface ClassifierInput {
     appSlug: string;
+    /**
+     * The application's ENABLED memories (owner-authored notes) - `[]` when it has none. The prompt renders
+     * their `## App memories` index and the classifier registers `read_memory` only when it is non-empty, so
+     * an application with no memories gets a byte-identical prompt and tool set. The worker's context load
+     * reads only enabled rows, so a disabled memory never reaches here.
+     */
+    memories: readonly ApplicationMemory[];
     /**
      * What this run analyzed - a PR (with the author's stated intent, a hint only: it is often written at the
      * first commit and never updated, so the diff + code comments are the authoritative intent signal, as the

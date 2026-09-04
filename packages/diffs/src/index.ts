@@ -30,6 +30,8 @@ export {
     ListFlowsTool,
     ListScenariosTool,
     ListTestsTool,
+    ReadMemoryTool,
+    buildReadMemoryTools,
     ReadScenarioRecipeEntitiesTool,
     ReadScenarioTool,
     ReadTestsTool,
