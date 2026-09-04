@@ -15,7 +15,7 @@ import { PreviewEnvTool } from "./tools/preview-env-tool";
 import { PriorRunsTool } from "./tools/prior-runs-tool";
 import { RunScriptTool } from "./tools/run-script-tool";
 import type { ClassifierInput } from "./types";
-import { VerdictTool } from "./verdict-tool";
+import { buildVerdictTools } from "./verdict-tool";
 
 /**
  * Bounded retry for the vision reads, tighter than the shared default.
@@ -52,8 +52,8 @@ export interface ClassifierAgentConfig {
  *
  * One loop: the four deterministic vision probes run pre-loop in {@link buildUserPrompt} (in parallel, and
  * only for a run that recorded something - the model gets those four signals wrong when left to its
- * discretion, which is why they are not tools), then the model investigates and commits through `finish` with
- * every tool result still in scope - so evidence reaches the verdict without the model having to restate it.
+ * discretion, which is why they are not tools), then the model investigates and commits through one of the seven
+ * category-specific verdict tools with every tool result still in scope - so choosing the tool chooses the category.
  *
  * On exhaustion `MaxStepsReached` propagates and the Investigator workflow contains the test as a
  * coverage-plane `engine_artifact` - there is deliberately no fallback verdict path, because a guessed
@@ -72,7 +72,7 @@ export class ClassifierAgent extends Agent<ClassifierInput, RunVerdict, Classifi
     // this model can read itself. It returns the before AND after frame, each labelled, so the settled state is
     // never confused with the one that was acted on - the distinction the timing-race check depends on.
     private readonly viewStepDetailsTool = new ViewStepDetailsTool();
-    private readonly verdictTool = new VerdictTool();
+    private readonly verdictTools = buildVerdictTools();
 
     constructor({ model, videoModel }: ClassifierAgentConfig) {
         super();
@@ -166,7 +166,7 @@ export class ClassifierAgent extends Agent<ClassifierInput, RunVerdict, Classifi
                 ...envTools,
                 ...appLogTools,
             ],
-            reportTools: [this.verdictTool],
+            reportTools: this.verdictTools,
             compactor: sharedCompactor(),
             codebase: input.codebase,
             run: input.run,

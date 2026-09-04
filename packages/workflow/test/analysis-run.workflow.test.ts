@@ -332,7 +332,6 @@ const investigatorActivities = {
             stepCount: 2,
             verdict: {
                 category: "passed",
-                isClientBug: false,
                 ran: true,
                 confidence: "high",
                 headline: "checkout works",

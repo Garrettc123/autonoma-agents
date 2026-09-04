@@ -31,8 +31,8 @@ Be exhaustive - if the same error appears multiple times, report each. Quote tex
 
 /**
  * A deterministic FIRST-PASS probe: give the vision model the test's intended steps + the video and ask,
- * plainly, whether the run actually followed them or diverged. Makes planFidelity a measured fact (not an
- * inference) and guards against false positives - a diverged run never exercised the behavior under test.
+ * plainly, whether the run actually followed them or diverged. Makes divergence an observed input to the owner
+ * decision and guards against false positives - a diverged run never exercised the behavior under test.
  * The intended steps are appended after this prompt.
  */
 const FIDELITY_PROBE_PROMPT = `You are checking whether an automated test run actually FOLLOWED its written steps. Do NOT judge whether the app is buggy - only compare what the steps INTENDED against what the recording SHOWS.

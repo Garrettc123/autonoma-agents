@@ -146,7 +146,6 @@ function verdict(
 ): InvestigationVerdict {
     return {
         category,
-        isClientBug: category === "client_bug",
         ran: true,
         confidence: "high",
         headline: options.headline ?? `verdict: ${category}`,
@@ -416,7 +415,9 @@ describe("investigatorWorkflow verdict state machine", () => {
             "plan_mismatch",
             "plan_mismatch",
         ]);
-        expect(harness.persistCalls[1]?.classification.report).toEqual(expectedReport());
+        expect(harness.persistCalls[1]?.classification.report).toEqual(
+            expectedReport({ suggestedTestUpdate: REVISED_PLAN }),
+        );
         // The verdict is recorded before the revert it explains.
         expect(harness.events).toEqual([
             "startRun",
@@ -428,49 +429,45 @@ describe("investigatorWorkflow verdict state machine", () => {
         ]);
     });
 
-    it("keeps a proposed test as plan_mismatch without re-running when the classifier proposes no revised plan", async () => {
-        harness.classifyQueue = [classified(verdict("plan_mismatch", { headline: "asserts a removed feature" }))];
-
-        // A proposed (this-run-authored) test that cannot be established.
-        const finding = await runInvestigator("proposed");
-
-        // No suggestedTestUpdate (no viable rewrite), so there is nothing to re-run: the correct-app test resolves
-        // straight to a KEPT `plan_mismatch` on the first pass - not removed, and no rewrite was applied to revert.
-        expect(finding).toEqual({
-            slug: SLUG,
-            testCaseId: TEST_CASE_ID,
-            category: "plan_mismatch",
-            headline: "asserts a removed feature",
-            origin: "proposed",
-        });
-        expect(harness.webRuns).toEqual([ORIGINAL_GENERATION]);
-        expect(harness.selfHealCalls).toHaveLength(0);
-        expect(harness.revertCalls).toHaveLength(0);
-        // One iteration, filed as the `plan_mismatch` it resolved to, carrying the run's evidence.
-        expect(harness.persistCalls).toHaveLength(1);
-        expect(harness.persistCalls[0]?.classification).toEqual({
-            generationId: ORIGINAL_GENERATION,
-            category: "plan_mismatch",
-            headline: "asserts a removed feature",
-            report: expectedReport(),
-        });
-    });
-
-    it("keeps as plan_mismatch without re-running when the revised plan is only whitespace", async () => {
-        // A whitespace-only suggestedTestUpdate is the classifier's "no viable rewrite" signal squeezed through a
-        // schema that forbids the empty string. It must be read as "no rewrite" - never authored and re-run as a
-        // blank plan, which would drive the browser agent with no instructions and re-classify as plan_mismatch.
+    it("applies a passed verdict's suggested update without re-running", async () => {
         harness.classifyQueue = [
-            classified(verdict("plan_mismatch", { suggestedTestUpdate: " ", headline: "no viable rewrite yet" })),
+            classified(
+                verdict("passed", {
+                    suggestedTestUpdate: REVISED_PLAN,
+                    headline: "checkout passed with stale wording",
+                }),
+            ),
         ];
 
+        const finding = await runInvestigator();
+
+        expect(finding).toEqual({
+            slug: SLUG,
+            testCaseId: TEST_CASE_ID,
+            category: "passed",
+            headline: "checkout passed with stale wording",
+            origin: "pre_existing",
+        });
+        expect(harness.webRuns).toEqual([ORIGINAL_GENERATION]);
+        expect(harness.selfHealCalls).toEqual([{ snapshotId: "snap-1", slug: SLUG, plan: REVISED_PLAN }]);
+        expect(harness.revertCalls).toHaveLength(0);
+        expect(harness.persistCalls).toHaveLength(1);
+        expect(harness.persistCalls[0]?.classification.report).toEqual(
+            expectedReport({ suggestedTestUpdate: REVISED_PLAN, runSuccess: true }),
+        );
+        expect(harness.events).toEqual(["startRun", "persist:passed", "selfHeal"]);
+    });
+
+    it("keeps as plan_mismatch without re-running when the verdict carries no rewrite", async () => {
+        harness.classifyQueue = [classified(verdict("plan_mismatch", { headline: "asserts a removed feature" }))];
+
         const finding = await runInvestigator("proposed");
 
         expect(finding).toEqual({
             slug: SLUG,
             testCaseId: TEST_CASE_ID,
             category: "plan_mismatch",
-            headline: "no viable rewrite yet",
+            headline: "asserts a removed feature",
             origin: "proposed",
         });
         expect(harness.webRuns).toEqual([ORIGINAL_GENERATION]);

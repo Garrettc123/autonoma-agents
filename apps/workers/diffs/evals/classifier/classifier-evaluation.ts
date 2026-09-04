@@ -6,6 +6,7 @@ import {
     CLASSIFIER_SYSTEM_PROMPT,
     ClassifierAgent,
     type ModelSession,
+    type PlanFidelity,
     type RunVerdict,
 } from "@autonoma/diffs/analysis";
 import { type CheckFailure, type LoadedCase, type RunCaseHelpers } from "@autonoma/evals";
@@ -216,6 +217,7 @@ export class ClassifierEvaluation extends ScoredReplayEvaluation<
             caseName: testCase.name,
             conversation,
         });
+        const legacyEvalVerdict: RunVerdict & { planFidelity?: PlanFidelity } = verdict;
 
         // `evidence` and `transcriptPath` carry the REASONING - the cited proof in the result file, the whole tool
         // loop on disk - so a verdict can be explained, not just counted.
@@ -227,7 +229,7 @@ export class ClassifierEvaluation extends ScoredReplayEvaluation<
                 // and a comparison across runs knows whether the prompt or the model moved.
                 modelId: classifierModel.modelId,
                 confidence: verdict.confidence,
-                planFidelity: verdict.planFidelity,
+                planFidelity: legacyEvalVerdict.planFidelity,
                 headline: verdict.headline,
                 evidence: verdict.evidence,
                 evidenceCount: verdict.evidence.length,

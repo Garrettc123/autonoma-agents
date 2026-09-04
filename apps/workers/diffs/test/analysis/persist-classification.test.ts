@@ -172,7 +172,10 @@ integrationTestSuite({
                 number: 1,
                 classification: classification("plan_mismatch", generationIds[0], {
                     headline: "The test asserts the old copy",
-                    report: { conversationUrl: "s3://conversations/pass-1.json" },
+                    report: {
+                        suggestedTestUpdate: "First proposed rewrite",
+                        conversationUrl: "s3://conversations/pass-1.json",
+                    },
                 }),
             });
             const second = await persistAnalysisClassification({
@@ -182,7 +185,10 @@ integrationTestSuite({
                 number: 2,
                 classification: classification("plan_mismatch", generationIds[1], {
                     headline: "Still wrong after the rewrite",
-                    report: { conversationUrl: "s3://conversations/pass-2.json" },
+                    report: {
+                        suggestedTestUpdate: "Second proposed rewrite",
+                        conversationUrl: "s3://conversations/pass-2.json",
+                    },
                 }),
             });
 
@@ -204,8 +210,10 @@ integrationTestSuite({
             const [first, latest] = finding?.classifications ?? [];
             expect(first?.category).toBe("plan_mismatch");
             expect(first?.generationId).toBe(generationIds[0]);
+            expect(first?.suggestedTestUpdate).toBe("First proposed rewrite");
             expect(first?.conversationUrl).toBe("s3://conversations/pass-1.json");
             expect(latest?.generationId).toBe(generationIds[1]);
+            expect(latest?.suggestedTestUpdate).toBe("Second proposed rewrite");
             expect(latest?.conversationUrl).toBe("s3://conversations/pass-2.json");
         });
 

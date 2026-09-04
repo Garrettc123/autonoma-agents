@@ -62,7 +62,10 @@ function checkCategory(verdict: RunVerdict, frontmatter: ClassifierFrontmatter):
     return checkEnumEquality("category", verdict.category, frontmatter.category);
 }
 
-function checkPlanFidelity(verdict: RunVerdict, frontmatter: ClassifierFrontmatter): CheckFailure[] {
+function checkPlanFidelity(
+    verdict: RunVerdict & { planFidelity?: PlanFidelity },
+    frontmatter: ClassifierFrontmatter,
+): CheckFailure[] {
     if (frontmatter.planFidelity == null) return [];
     return checkEnumEquality("planFidelity", verdict.planFidelity, frontmatter.planFidelity);
 }

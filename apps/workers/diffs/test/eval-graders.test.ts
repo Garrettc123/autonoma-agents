@@ -11,7 +11,6 @@ function diffsResult(createdTests: CreatedTest[]): DiffsAgentResult {
 function planMismatchVerdict(suggestedTestUpdate: string): RunVerdict {
     return {
         category: "plan_mismatch",
-        isClientBug: false,
         ran: true,
         confidence: "high",
         headline: "The test asserts a label the page no longer renders.",

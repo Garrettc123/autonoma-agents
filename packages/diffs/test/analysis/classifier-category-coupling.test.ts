@@ -1,5 +1,6 @@
 import { analysisVerdictSchema } from "@autonoma/types";
 import { describe, expect, it } from "vitest";
+import { buildVerdictTools } from "../../src/analysis/classify/verdict-tool";
 import { Category } from "../../src/analysis/schema";
 
 /**
@@ -17,5 +18,10 @@ import { Category } from "../../src/analysis/schema";
 describe("classifier Category <-> AnalysisVerdict coupling", () => {
     it("holds the same values as the platform verdict taxonomy", () => {
         expect([...Category.options].sort()).toEqual([...analysisVerdictSchema.options].sort());
+    });
+
+    it("has exactly one terminal tool for every classifier category", () => {
+        const expectedToolNames = Category.options.map((category) => `verdict_${category}`);
+        expect(buildVerdictTools().map((tool) => tool.name)).toEqual(expectedToolNames);
     });
 });

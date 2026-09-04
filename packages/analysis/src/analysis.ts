@@ -346,6 +346,7 @@ function buildClassificationFields(input: RecordClassificationInput) {
         expectedBehavior: report?.expectedBehavior,
         actualBehavior: report?.actualBehavior,
         whatHappened: report?.whatHappened,
+        suggestedTestUpdate: report?.suggestedTestUpdate,
         planMismatchNote: report?.planMismatchNote,
         invalidTestNote: report?.invalidTestNote,
         observedAppIssues: report?.observedAppIssues,

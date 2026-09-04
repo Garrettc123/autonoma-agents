@@ -326,7 +326,6 @@ export interface InvestigationEvidence {
 }
 export interface InvestigationVerdict {
     category: string;
-    isClientBug: boolean;
     ran: boolean;
     confidence: string;
     planFidelity?: string;

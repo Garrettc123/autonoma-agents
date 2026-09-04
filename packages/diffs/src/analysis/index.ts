@@ -8,7 +8,6 @@ export { openModelSession } from "./ai/model-session";
 export type { ModelSession, InvestigationModelName, InvestigationModelConfig } from "./ai/model-session";
 export { APP_LOGS_LIMIT, loadPreviewAppLogs } from "./logs/preview-app-logs";
 export type { LogQuerier, PreviewAppLogsInput } from "./logs/preview-app-logs";
-export { VerdictForModel } from "./classify/verdict-schema";
 export { ClassifierAgent } from "./classify/classifier-agent";
 export type { ClassifierAgentConfig } from "./classify/classifier-agent";
 export { CLASSIFIER_SYSTEM_PROMPT } from "./classify/prompt";

@@ -221,20 +221,33 @@ async function runWithSelfHeal(params: SelfHealParams): Promise<AnalysisCandidat
         // the removal does not land, `planIdBeforeSelfHeal` is passed to undo it - the snapshot must never promote a
         // known-failing rewrite for a test the run declared irreparable.
         if (category === "invalid_test") await removeInvalidTest(snapshotId, slug, planIdBeforeSelfHeal);
+
+        // A passing run can still expose an approximate or stale plan. Apply the classifier's surgical rewrite through
+        // the same snapshot-local write path, but do not re-run: the observed behavior already passed, and this update
+        // only tightens the plan to what the run proved.
+        if (category === "passed" && outcome.verdict.suggestedTestUpdate != null) {
+            const rewrite = await investigator.selfHealAnalysisTest({
+                snapshotId,
+                slug,
+                plan: outcome.verdict.suggestedTestUpdate,
+            });
+            log.info("Applied a passing run's suggested plan update without re-running", {
+                snapshot: { snapshotId },
+                extra: { slug, prepared: rewrite.prepared },
+            });
+            return finding;
+        }
+
         // Every verdict but `plan_mismatch` is final on the spot. `plan_mismatch` means the app rendered correctly and
         // the test's plan does not match it, so it gets a self-heal attempt before it settles.
         if (category !== "plan_mismatch") return finding;
 
-        // A rewrite + re-run is available unless this is the final iteration (which withholds the plan-edit path so the
-        // loop always terminates) or the classifier proposed no revised plan.
+        // The final iteration withholds the plan-edit path so the loop always terminates. The verdict tool makes the
+        // rewrite mandatory; a verdict without one is kept, never thrown on.
         const isFinalIteration = iteration === MAX_INVESTIGATOR_ITERATIONS;
-        // Trim so a whitespace-only rewrite (a blank plan the classifier could not fill) is treated as "no rewrite"
-        // and never re-run verbatim; a real plan is unaffected.
-        const revisedPlan = outcome.verdict.suggestedTestUpdate?.trim();
-        const canSelfHeal = !isFinalIteration && revisedPlan != null && revisedPlan !== "";
-        if (!canSelfHeal) {
-            // Out of self-heal budget: the test is KEPT as `plan_mismatch`, never removed - it may be salvageable in a
-            // later snapshot, or may be surfacing a defect the classifier misdiagnosed.
+        const revisedPlan = outcome.verdict.suggestedTestUpdate;
+        if (isFinalIteration || revisedPlan == null) {
+            // Kept as `plan_mismatch`, never removed: it may heal on a later snapshot or be a misdiagnosed defect.
             log.info("Test could not be stabilized on a healthy app; keeping it as plan_mismatch", {
                 snapshot: { snapshotId },
                 extra: { slug, origin, revertToPlanId: planIdBeforeSelfHeal },
@@ -312,6 +325,7 @@ function toClassificationReport(result: InvestigationTestResult): AnalysisClassi
         expectedBehavior: verdict?.expectedBehavior,
         actualBehavior: verdict?.actualBehavior,
         whatHappened: verdict?.whatHappened,
+        suggestedTestUpdate: verdict?.suggestedTestUpdate,
         planMismatchNote: verdict?.planMismatchNote,
         invalidTestNote: verdict?.invalidTestNote,
         rootCause: verdict?.rootCause,

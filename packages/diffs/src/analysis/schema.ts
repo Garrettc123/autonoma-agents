@@ -28,16 +28,17 @@ export type Confidence = z.infer<typeof Confidence>;
 
 export const Evidence = z.object({
     source: EvidenceSource,
-    detail: z.string().describe("What you observed and what it showed."),
+    detail: z.string().min(1).describe("What you observed and what it showed."),
     repo: z
         .string()
+        .min(1)
         .optional()
         .describe(
             "owner/repo when the file is in a dependency repo (from the Repositories section); omit for the primary.",
         ),
-    file: z.string().optional().describe("repo-relative path (when source=code/diff)."),
-    lines: z.string().optional().describe("line range, e.g. '34-41'."),
-    snippet: z.string().optional().describe("the exact code excerpt that matters."),
+    file: z.string().min(1).optional().describe("repo-relative path (when source=code/diff)."),
+    lines: z.string().min(1).optional().describe("line range, e.g. '34-41'."),
+    snippet: z.string().min(1).optional().describe("the exact code excerpt that matters."),
     stepIndex: z
         .number()
         .int()
@@ -57,17 +58,14 @@ export type Evidence = z.infer<typeof Evidence>;
  * doesn't apply to.
  */
 const verdictBase = z.object({
-    /** True iff `category === "client_bug"`. The only strict true positive. */
-    isClientBug: z.boolean(),
     /** Did the test actually execute against the running app (vs blocked before it could run)? */
     ran: z.boolean(),
     confidence: Confidence,
-    planFidelity: PlanFidelity.optional(),
     /** App problems visible in the video independent of this test's pass/fail (broken images, empty content,
      * layout/overlap, things not loading). Absent when the app looked healthy. */
     observedAppIssues: z.string().optional(),
-    headline: z.string().describe("ONE sentence: the takeaway, with the key `code`/file if relevant."),
-    evidence: z.array(Evidence),
+    headline: z.string().min(1).describe("ONE sentence: the takeaway, with the key `code`/file if relevant."),
+    evidence: z.array(Evidence).min(1),
     /**
      * The trace step (its `order`, not a position in the list) whose captured screenshot MOST clearly shows this
      * finding to a human reviewer - the frame to feature in the report. Deliberately the agent's call, not the
@@ -82,44 +80,41 @@ const verdictBase = z.object({
 const behaviorVerdictBase = verdictBase.extend({
     /** What the app SHOULD have done. Always stated; when the correct behavior genuinely cannot be determined
      * the agent says so explicitly here rather than leaving it blank. */
-    expectedBehavior: z.string(),
+    expectedBehavior: z.string().min(1),
     /** What the app actually did in the run - including any observed errors and the proven mechanism. */
-    actualBehavior: z.string(),
+    actualBehavior: z.string().min(1),
 });
 
 /** The app-health bug verdict (`client_bug`) adds the explicit false-positive self-check. */
 const problemVerdictBase = behaviorVerdictBase.extend({
     /** The agent's explicit false-positive self-check (could this be an intended change / setup gap, not a defect?). */
-    falsePositiveRisk: z.string(),
+    falsePositiveRisk: z.string().min(1),
 });
 
 /** Coverage-plane verdicts describe a NON-app cause in free-form prose instead of app expected/actual. */
 const coverageVerdictBase = verdictBase.extend({
     /** Free-form account of what happened - the coverage plane's analog of expected/actual. */
-    whatHappened: z.string(),
+    whatHappened: z.string().min(1),
 });
 
 /** A setup/infra failure (`environment_failure` / `scenario_issue`) adds the false-positive self-check
  * ("am I sure this is env/data, not a real bug?") on top of the coverage narrative. */
 const setupFailureBase = coverageVerdictBase.extend({
-    falsePositiveRisk: z.string(),
+    falsePositiveRisk: z.string().min(1),
 });
 
 /**
  * `plan_mismatch`: the app rendered correctly but the test's plan does not match it. Carries the complete revised plan
  * the self-heal loop re-runs, plus the self-heal post-mortem. No app expected/actual - the app is fine.
  *
- * Both fields DEFAULT to empty rather than being strictly required. An empty `suggestedTestUpdate` is a real answer -
- * "no viable rewrite exists", which the loop reads as "keep this test without re-running it" - and neither field is
- * worth failing the parse over: a rejected verdict is contained as an `engine_artifact`, which would turn this
- * pipeline's own flagship case (a kept `plan_mismatch`) into a harness fault and lose the diagnosis entirely.
+ * Both fields are required: choosing this verdict means a concrete, intent-preserving rewrite exists.
  */
 const planMismatchBase = verdictBase.extend({
-    /** The COMPLETE revised test plan the self-heal loop re-runs; empty when no viable rewrite exists. */
-    suggestedTestUpdate: z.string().default(""),
+    /** The COMPLETE revised test plan the self-heal loop re-runs. */
+    suggestedTestUpdate: z.string().min(1),
     /** The self-heal post-mortem: what the test asserted that was wrong, the rewrite attempted, and - on a re-run -
      * why the prior rewrite still failed. */
-    planMismatchNote: z.string().default(""),
+    planMismatchNote: z.string().min(1),
 });
 
 /**
@@ -131,9 +126,9 @@ const planMismatchBase = verdictBase.extend({
 const invalidTestBase = verdictBase.extend({
     /** The justification, prescribed: which failure mode (nonexistent feature / structurally unexecutable steps /
      * wrong premise contradicting the app / otherwise unrecoverable) and the PROOF of impossibility. */
-    invalidTestNote: z.string(),
+    invalidTestNote: z.string().min(1),
     /** The mandatory "could this actually be salvageable?" self-check - the guardrail against over-removal. */
-    falsePositiveRisk: z.string(),
+    falsePositiveRisk: z.string().min(1),
 });
 
 /**
@@ -141,17 +136,19 @@ const invalidTestBase = verdictBase.extend({
  * that category needs. The app-health verdicts (`passed`, `client_bug`) describe app behavior (expected/actual); the
  * coverage faults (`engine_artifact`, `environment_failure`, `scenario_issue`) carry a free-form `whatHappened`;
  * `plan_mismatch` carries the revised plan + its post-mortem; `invalid_test` carries its impossibility justification +
- * a mandatory false-positive check + required evidence. The wire schema the model fills is a flat object (see
- * `VerdictForModel`) piped into this union, so the model sees a plain object while consumers get per-category
- * narrowing and no category is forced to emit fields that don't apply to it.
+ * a mandatory false-positive check + required evidence. Each terminal tool attaches its category before parsing
+ * through this union, so consumers get per-category narrowing and no category carries fields that do not apply.
  */
 export const RunVerdict = z.discriminatedUnion("category", [
-    behaviorVerdictBase.extend({ category: z.literal("passed") }),
-    problemVerdictBase.extend({ category: z.literal("client_bug"), evidence: z.array(Evidence).min(1) }),
+    behaviorVerdictBase.extend({
+        category: z.literal("passed"),
+        suggestedTestUpdate: z.string().min(1).optional(),
+    }),
+    problemVerdictBase.extend({ category: z.literal("client_bug") }),
     setupFailureBase.extend({ category: z.literal("environment_failure") }),
     setupFailureBase.extend({ category: z.literal("scenario_issue") }),
-    coverageVerdictBase.extend({ category: z.literal("engine_artifact") }),
+    coverageVerdictBase.extend({ category: z.literal("engine_artifact"), evidence: z.array(Evidence).min(0) }),
     planMismatchBase.extend({ category: z.literal("plan_mismatch") }),
-    invalidTestBase.extend({ category: z.literal("invalid_test"), evidence: z.array(Evidence).min(1) }),
+    invalidTestBase.extend({ category: z.literal("invalid_test") }),
 ]);
 export type RunVerdict = z.infer<typeof RunVerdict>;

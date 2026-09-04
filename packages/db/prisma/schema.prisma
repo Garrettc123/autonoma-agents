@@ -3000,26 +3000,28 @@ model AnalysisClassification {
   /// scenario_issue/plan_mismatch/invalid_test). A superseded self-heal iteration carries `plan_mismatch`, the same
   /// terminal it routes to. Stored as a plain string so an older row (pre-merge `outdated_test`/`bad_test`/`delete`)
   /// still reads.
-  category          String
-  confidence        String?
-  headline          String   @db.Text
+  category            String
+  confidence          String?
+  headline            String   @db.Text
   /// What the app SHOULD have done / what it actually did - the classifier's per-category behavior fields that
   /// replace the free-form `whatHappened` (kept for rows written before the expected/actual split).
-  expectedBehavior  String?  @map("expected_behavior") @db.Text
-  actualBehavior    String?  @map("actual_behavior") @db.Text
-  whatHappened      String?  @map("what_happened") @db.Text
+  expectedBehavior    String?  @map("expected_behavior") @db.Text
+  actualBehavior      String?  @map("actual_behavior") @db.Text
+  whatHappened        String?  @map("what_happened") @db.Text
+  /// The complete test-plan rewrite proposed by a `plan_mismatch`, or an optional tightening from `passed`.
+  suggestedTestUpdate String?  @map("suggested_test_update") @db.Text
   /// The `plan_mismatch` self-heal post-mortem: what the test asserted that was wrong, the rewrite attempted, and
   /// why it still failed. Set only for a `plan_mismatch` verdict.
-  planMismatchNote  String?  @map("plan_mismatch_note") @db.Text
+  planMismatchNote    String?  @map("plan_mismatch_note") @db.Text
   /// The `invalid_test` justification: which impossibility failure mode (nonexistent feature / unexecutable steps /
   /// wrong premise / unrecoverable) and the proof the test cannot be recovered. Set only for an `invalid_test` verdict.
-  invalidTestNote   String?  @map("invalid_test_note") @db.Text
-  observedAppIssues String?  @map("observed_app_issues") @db.Text
-  remediation       String?  @db.Text
-  rootCause         String?  @map("root_cause") @db.Text
-  falsePositiveRisk String?  @map("false_positive_risk") @db.Text
-  runSuccess        Boolean? @map("run_success")
-  stepCount         Int?     @map("step_count")
+  invalidTestNote     String?  @map("invalid_test_note") @db.Text
+  observedAppIssues   String?  @map("observed_app_issues") @db.Text
+  remediation         String?  @db.Text
+  rootCause           String?  @map("root_cause") @db.Text
+  falsePositiveRisk   String?  @map("false_positive_risk") @db.Text
+  runSuccess          Boolean? @map("run_success")
+  stepCount           Int?     @map("step_count")
 
   /// string[] run-step trace and InvestigationRunStep[] structured trace - display blobs, never queried.
   /// [InvestigationRunSteps]

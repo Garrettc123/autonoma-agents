@@ -1,199 +1,178 @@
 import { describe, expect, it } from "vitest";
-import type { z } from "zod";
-import { VerdictForModel } from "../../src/analysis/classify/verdict-schema";
-import { VerdictTool } from "../../src/analysis/classify/verdict-tool";
-import type { RunVerdict } from "../../src/analysis/schema";
+import { buildVerdictTools } from "../../src/analysis/classify/verdict-tool";
+import { Category, type RunVerdict } from "../../src/analysis/schema";
 
-type WireVerdict = z.input<typeof VerdictForModel>;
+const tools = buildVerdictTools();
 
-function wireVerdict(overrides: Partial<WireVerdict>): WireVerdict {
+function baseVerdictInput(overrides: Record<string, unknown> = {}): Record<string, unknown> {
     return {
-        category: "passed",
-        isClientBug: false,
         ran: true,
         confidence: "high",
-        planFidelity: "exact",
-        headline: "headline",
-        expectedBehavior: null,
-        actualBehavior: null,
-        whatHappened: null,
-        falsePositiveRisk: null,
-        suggestedTestUpdate: null,
-        planMismatchNote: null,
-        invalidTestNote: null,
-        observedAppIssues: null,
+        headline: "The run reached a clear outcome",
         evidence: [
             {
                 source: "run",
-                detail: "what the run showed",
-                repo: null,
-                file: null,
-                lines: null,
-                snippet: null,
-                stepIndex: null,
+                detail: "The trace records the settled state.",
+                repo: undefined,
+                file: undefined,
+                lines: undefined,
+                snippet: undefined,
+                stepIndex: undefined,
             },
         ],
-        keyStepIndex: null,
+        keyStepIndex: undefined,
+        observedAppIssues: undefined,
         ...overrides,
     };
 }
 
-const tool = new VerdictTool();
-
-async function classify(wire: WireVerdict): Promise<RunVerdict> {
-    return await tool.buildResult(VerdictForModel.parse(wire));
+async function classify(toolName: string, input: Record<string, unknown>): Promise<RunVerdict> {
+    const tool = tools.find((candidate) => candidate.name === toolName);
+    if (tool == null) throw new Error(`Missing classifier tool ${toolName}`);
+    return await tool.buildResult(input);
 }
 
-describe("the classifier's finish contract", () => {
-    it("narrows a passed verdict to expected/actual and drops the problem-only fields", async () => {
-        const verdict = await classify(
-            wireVerdict({ category: "passed", expectedBehavior: "cart shows the item", actualBehavior: "it did" }),
-        );
-        expect(verdict).toMatchObject({
-            category: "passed",
-            expectedBehavior: "cart shows the item",
-            actualBehavior: "it did",
-        });
-        // A passing finding never carries a false-positive check or remediation-style filler.
-        expect("falsePositiveRisk" in verdict).toBe(false);
-        expect("suggestedTestUpdate" in verdict).toBe(false);
+const validInputByCategory: Record<Category, Record<string, unknown>> = {
+    passed: baseVerdictInput({
+        expectedBehavior: "The cart shows the selected item.",
+        actualBehavior: "The cart showed the selected item.",
+        suggestedTestUpdate: undefined,
+    }),
+    client_bug: baseVerdictInput({
+        expectedBehavior: "Saving persists the edited value.",
+        actualBehavior: "The value reverted after reload.",
+        falsePositiveRisk: "The diff and backend result rule out an intended change.",
+    }),
+    engine_artifact: baseVerdictInput({
+        evidence: [],
+        whatHappened: "A native browser dialog blocked the harness before the request was sent.",
+    }),
+    environment_failure: baseVerdictInput({
+        whatHappened: "The preview lacked the integration key required to load the page.",
+        falsePositiveRisk: "The seed cannot provide preview-level secrets.",
+    }),
+    scenario_issue: baseVerdictInput({
+        whatHappened: "The Environment Factory did not seed the required account entitlement.",
+        falsePositiveRisk: "The entitlement is app state rather than preview configuration.",
+    }),
+    plan_mismatch: baseVerdictInput({
+        suggestedTestUpdate: "Setup\n1. Open checkout.\nSteps\n1. Click Pay.\nVerification\n1. Assert Order placed.",
+        planMismatchNote: "The plan used the retired label; the rewrite targets the rendered Pay action.",
+    }),
+    invalid_test: baseVerdictInput({
+        invalidTestNote: "The feature was removed with its route and handler, so no equivalent flow exists.",
+        falsePositiveRisk: "The repository contains no replacement surface that could preserve the description.",
+    }),
+};
+
+const expectedResultByCategory: Record<Category, Record<string, unknown>> = {
+    passed: {
+        expectedBehavior: "The cart shows the selected item.",
+        actualBehavior: "The cart showed the selected item.",
+    },
+    client_bug: {
+        expectedBehavior: "Saving persists the edited value.",
+        actualBehavior: "The value reverted after reload.",
+        falsePositiveRisk: "The diff and backend result rule out an intended change.",
+    },
+    engine_artifact: {
+        whatHappened: "A native browser dialog blocked the harness before the request was sent.",
+    },
+    environment_failure: {
+        whatHappened: "The preview lacked the integration key required to load the page.",
+        falsePositiveRisk: "The seed cannot provide preview-level secrets.",
+    },
+    scenario_issue: {
+        whatHappened: "The Environment Factory did not seed the required account entitlement.",
+        falsePositiveRisk: "The entitlement is app state rather than preview configuration.",
+    },
+    plan_mismatch: {
+        suggestedTestUpdate: "Setup\n1. Open checkout.\nSteps\n1. Click Pay.\nVerification\n1. Assert Order placed.",
+        planMismatchNote: "The plan used the retired label; the rewrite targets the rendered Pay action.",
+    },
+    invalid_test: {
+        invalidTestNote: "The feature was removed with its route and handler, so no equivalent flow exists.",
+        falsePositiveRisk: "The repository contains no replacement surface that could preserve the description.",
+    },
+};
+
+describe("the classifier's category terminal tools", () => {
+    it("narrows every tool to its RunVerdict arm", async () => {
+        for (const category of Category.options) {
+            const verdict = await classify(`verdict_${category}`, validInputByCategory[category]);
+            expect(verdict).toMatchObject({ category, ...expectedResultByCategory[category] });
+        }
     });
 
-    it("carries a dependency-repo attribution on an evidence item through the parse", async () => {
+    it("carries a passed verdict's optional rewrite when supplied", async () => {
+        const suggestedTestUpdate =
+            "Setup\n1. Open checkout.\nSteps\n1. Click Pay.\nVerification\n1. Assert Order placed.";
         const verdict = await classify(
-            wireVerdict({
-                category: "client_bug",
-                isClientBug: true,
-                expectedBehavior: "the total uses the 10% tax rate",
-                actualBehavior: "the total is 10x too high",
-                falsePositiveRisk: "the PR did not intend this",
-                evidence: [
-                    {
-                        source: "diff",
-                        detail: "tax rate changed in the backend",
-                        repo: "eon-rides-org/teslarents-be",
-                        file: "pricing.ts",
-                        lines: "1",
-                        snippet: "export const tax = 1.0;",
-                        stepIndex: null,
-                    },
-                ],
+            "verdict_passed",
+            baseVerdictInput({
+                expectedBehavior: "Checkout completes.",
+                actualBehavior: "Checkout completed.",
+                suggestedTestUpdate,
             }),
         );
-        expect(verdict.evidence[0]).toMatchObject({ repo: "eon-rides-org/teslarents-be", file: "pricing.ts" });
+
+        expect(verdict).toMatchObject({ category: "passed", suggestedTestUpdate });
     });
 
-    it("declines repo to undefined for a primary-repo evidence item", async () => {
-        const verdict = await classify(wireVerdict({ category: "passed", expectedBehavior: "x", actualBehavior: "y" }));
+    it("preserves genuinely optional fields as undefined in the result", async () => {
+        const verdict = await classify("verdict_passed", validInputByCategory.passed);
+
+        expect(verdict.keyStepIndex).toBeUndefined();
+        expect(verdict.observedAppIssues).toBeUndefined();
         expect(verdict.evidence[0]?.repo).toBeUndefined();
+        expect(verdict.category === "passed" ? verdict.suggestedTestUpdate : "wrong arm").toBeUndefined();
     });
 
-    it("keeps the false-positive check on a client bug alongside expected/actual", async () => {
-        const verdict = await classify(
-            wireVerdict({
-                category: "client_bug",
-                isClientBug: true,
-                expectedBehavior: "save persists",
-                actualBehavior: "value reverts after reload",
-                falsePositiveRisk: "the PR did not intend this",
-            }),
-        );
-        expect(verdict).toMatchObject({
-            category: "client_bug",
-            expectedBehavior: "save persists",
-            actualBehavior: "value reverts after reload",
-            falsePositiveRisk: "the PR did not intend this",
-        });
-    });
-
-    it("rejects a client bug missing its expected behavior (per-category requirement enforced at parse)", async () => {
+    it("rejects a missing field required by the selected tool", async () => {
         await expect(
             classify(
-                wireVerdict({
-                    category: "client_bug",
-                    isClientBug: true,
-                    expectedBehavior: null,
-                    actualBehavior: "value reverts",
-                    falsePositiveRisk: "n/a",
-                }),
+                "verdict_plan_mismatch",
+                baseVerdictInput({ planMismatchNote: "The old plan targeted a label the app no longer renders." }),
             ),
         ).rejects.toThrow();
     });
 
-    it("carries whatHappened but no app-behavior fields on an engine artifact", async () => {
-        const verdict = await classify(
-            wireVerdict({
-                category: "engine_artifact",
-                whatHappened: "the native confirm dialog could not be driven",
-            }),
-        );
-        expect(verdict).toMatchObject({
-            category: "engine_artifact",
-            whatHappened: "the native confirm dialog could not be driven",
-        });
-        // A coverage fault describes what happened, not app expected-vs-actual, and carries no false-positive check.
-        expect("expectedBehavior" in verdict).toBe(false);
-        expect("actualBehavior" in verdict).toBe(false);
-        expect("falsePositiveRisk" in verdict).toBe(false);
-    });
-
-    it("carries the revised plan and post-mortem on a plan_mismatch verdict", async () => {
-        const verdict = await classify(
-            wireVerdict({
-                category: "plan_mismatch",
-                suggestedTestUpdate: "Setup / Steps / Verification ...",
-                planMismatchNote: "asserted old copy; rewrote to the new label; still failed",
-            }),
-        );
-        expect(verdict).toMatchObject({
-            category: "plan_mismatch",
-            suggestedTestUpdate: "Setup / Steps / Verification ...",
-            planMismatchNote: "asserted old copy; rewrote to the new label; still failed",
-        });
-        // A plan_mismatch is on the coverage plane - it carries no app expected/actual.
-        expect("expectedBehavior" in verdict).toBe(false);
-        expect("actualBehavior" in verdict).toBe(false);
-    });
-
-    // "No viable rewrite" is a real answer on a plan_mismatch, and the self-heal loop reads an empty rewrite as "keep
-    // this test without re-running it". Rejecting the verdict instead would be contained upstream as an
-    // engine_artifact - turning this pipeline's flagship outcome into a harness fault and losing the diagnosis.
-    it("defaults a plan_mismatch's rewrite and post-mortem to empty rather than rejecting the verdict", async () => {
-        const verdict = await classify(
-            wireVerdict({ category: "plan_mismatch", suggestedTestUpdate: null, planMismatchNote: null }),
-        );
-
-        expect(verdict).toMatchObject({ category: "plan_mismatch", suggestedTestUpdate: "", planMismatchNote: "" });
-    });
-
-    it("carries the impossibility note + false-positive check on an invalid_test verdict", async () => {
-        const verdict = await classify(
-            wireVerdict({
-                category: "invalid_test",
-                invalidTestNote: "asserts a Reports tab; git history shows it never existed",
-                falsePositiveRisk: "checked git blame - the component was never added, so not salvageable",
-            }),
-        );
-        expect(verdict).toMatchObject({
-            category: "invalid_test",
-            invalidTestNote: "asserts a Reports tab; git history shows it never existed",
-            falsePositiveRisk: "checked git blame - the component was never added, so not salvageable",
-        });
-        // invalid_test is a coverage-plane removal - the app is fine, so it carries no app expected/actual.
-        expect("expectedBehavior" in verdict).toBe(false);
-        expect("actualBehavior" in verdict).toBe(false);
-    });
-
-    it("rejects an invalid_test with no evidence (impossibility must be proven - schema min 1)", async () => {
+    it("requires evidence for every verdict except engine_artifact", async () => {
         await expect(
             classify(
-                wireVerdict({
-                    category: "invalid_test",
-                    invalidTestNote: "not browser-executable",
-                    falsePositiveRisk: "none",
+                "verdict_passed",
+                baseVerdictInput({
+                    expectedBehavior: "Checkout completes.",
+                    actualBehavior: "Checkout completed.",
+                    suggestedTestUpdate: undefined,
                     evidence: [],
                 }),
             ),
         ).rejects.toThrow();
+
+        await expect(classify("verdict_engine_artifact", validInputByCategory.engine_artifact)).resolves.toMatchObject({
+            category: "engine_artifact",
+            evidence: [],
+        });
+    });
+
+    it("strips fields belonging to another verdict arm", async () => {
+        const verdict = await classify(
+            "verdict_passed",
+            baseVerdictInput({
+                expectedBehavior: "Checkout completes.",
+                actualBehavior: "Checkout completed.",
+                suggestedTestUpdate: undefined,
+                whatHappened: "coverage-only filler",
+                invalidTestNote: "invalid-test-only filler",
+                isClientBug: false,
+                planFidelity: "exact",
+            }),
+        );
+
+        expect("whatHappened" in verdict).toBe(false);
+        expect("invalidTestNote" in verdict).toBe(false);
+        expect("isClientBug" in verdict).toBe(false);
+        expect("planFidelity" in verdict).toBe(false);
     });
 });

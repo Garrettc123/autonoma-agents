@@ -707,6 +707,8 @@ export const analysisClassificationReportSchema = z.object({
     /** Free-form "what happened" narrative - the coverage plane's analog of expected/actual: `engine_artifact`,
      * `environment_failure`, and `scenario_issue` carry it (also holds rows written before the expected/actual split). */
     whatHappened: z.string().optional(),
+    /** The complete test-plan rewrite proposed by a `plan_mismatch`, or an optional tightening from `passed`. */
+    suggestedTestUpdate: z.string().optional(),
     /** The `plan_mismatch` self-heal post-mortem: what the test asserted that was wrong, the rewrite attempted, and
      * why it still failed. Set only for a `plan_mismatch` verdict. */
     planMismatchNote: z.string().optional(),
