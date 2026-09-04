@@ -76,6 +76,14 @@ export const branchesRouter = router({
             services.branches.getAnalysisReportData(input.snapshotId, organizationId),
         ),
 
+    // The analysis events a checkpoint claimed (pushes + prompts, oldest-first), fetched lazily when a row
+    // expands. User-facing; empty for an unknown snapshot.
+    checkpointEvents: protectedProcedure
+        .input(z.object({ snapshotId: z.string() }))
+        .query(({ ctx: { services, organizationId }, input }) =>
+            services.branches.getCheckpointEvents(input.snapshotId, organizationId),
+        ),
+
     // The authoritative `AnalysisJob` lifecycle for a snapshot (null for a diffs snapshot). The PR page reads this
     // to identify an authoritative snapshot before its report exists and to show the run's status as a fallback
     // while findings are still being produced. User-facing.

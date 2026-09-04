@@ -29,6 +29,11 @@ export function useAnalysisReport(snapshotId: string, opts?: { jobStatus?: Analy
     });
 }
 
+/** A checkpoint's handled analysis events (pushes + prompts, oldest-first), fetched lazily when its row expands. */
+export function useCheckpointEvents(snapshotId: string) {
+    return useSuspenseQuery(trpc.branches.checkpointEvents.queryOptions({ snapshotId }));
+}
+
 /**
  * Whether the merged analysis pipeline ran on this snapshot (`analyzed`) and whether its Reporter settled
  * (`settled`), as the server resolved them.

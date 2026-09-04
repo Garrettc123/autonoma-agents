@@ -36,6 +36,10 @@ export const commitsPushedPayloadSchema = z.object({
     baseSha: z.string().optional(),
     beforeSha: z.string().optional(),
     deliveryId: z.string().optional(),
+    // The head commit's subject and author, captured at enqueue: a timeline that shows the message must not depend
+    // on a later GitHub round-trip that a force-push can render unresolvable.
+    message: z.string().optional(),
+    author: z.string().optional(),
 });
 export type CommitsPushedPayload = z.infer<typeof commitsPushedPayloadSchema>;
 

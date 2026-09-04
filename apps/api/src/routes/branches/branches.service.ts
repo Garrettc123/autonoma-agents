@@ -1,4 +1,6 @@
 import {
+    type AnalysisEventRecord,
+    AnalysisEventStore,
     type AnalysisLifecycleSummary,
     AnalysisStore,
     type CoveredFinding,
@@ -22,6 +24,7 @@ import {
     TestSuiteStore,
 } from "@autonoma/test-suite";
 import {
+    type AnalysisEventView,
     type AnalysisForPr,
     type AnalysisIssueDetail,
     type AnalysisIssueSummary,
@@ -1319,6 +1322,24 @@ export class BranchesService extends Service {
         });
     }
 
+    async getCheckpointEvents(snapshotId: string, organizationId: string): Promise<AnalysisEventView[]> {
+        this.logger.info("Getting checkpoint events", { snapshot: { snapshotId } });
+        const snapshot = await this.db.branchSnapshot.findFirst({
+            where: { id: snapshotId, branch: { application: { organizationId } } },
+            select: { id: true },
+        });
+        if (snapshot == null) {
+            this.logger.warn("Checkpoint not found for events", { snapshot: { snapshotId } });
+            return [];
+        }
+        const records = await new AnalysisEventStore(this.db).listForSnapshot(snapshotId);
+        this.logger.info("Loaded checkpoint events", {
+            snapshot: { snapshotId },
+            extra: { count: records.length },
+        });
+        return records.map(toCheckpointEventView);
+    }
+
     async getBranchByPr(applicationId: string, prNumber: number, organizationId: string) {
         this.logger.info("Getting branch by PR", { applicationId, prNumber });
 
@@ -1634,4 +1655,26 @@ function firstPreviewUrl(urls: unknown): string | undefined {
         if (url.length > 0) return url;
     }
     return undefined;
+}
+
+function toCheckpointEventView(record: AnalysisEventRecord): AnalysisEventView {
+    if (record.type === "commits_pushed") {
+        return {
+            type: "commits_pushed",
+            id: record.id,
+            source: record.source,
+            createdAt: record.createdAt,
+            headSha: record.payload.headSha,
+            message: record.payload.message,
+            author: record.payload.author,
+        };
+    }
+    return {
+        type: "user_prompt",
+        id: record.id,
+        source: record.source,
+        createdAt: record.createdAt,
+        text: record.payload.text,
+        author: record.payload.author,
+    };
 }

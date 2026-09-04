@@ -356,10 +356,36 @@ const failedSnapshotHistoryItem: (typeof snapshotHistory)[number] = {
   },
 };
 
+// A push then a chat prompt. trpcHandler answers by procedure, not per snapshotId, so every expanded checkpoint
+// reads this same set - fine here, where only the newest opens by default.
+const checkpointEvents: NonNullable<TrpcFixtures["branches"]>["checkpointEvents"] = [
+  {
+    type: "commits_pushed",
+    id: "evt_push_1",
+    source: "webhook",
+    createdAt: STARTED_AT,
+    headSha: HEAD_SHA,
+    message: "Recompute checkout form validity after address validation",
+    author: "jrivera",
+  },
+  {
+    type: "user_prompt",
+    id: "evt_prompt_1",
+    source: "chat",
+    createdAt: RUN_AT,
+    text:
+      "Focus on the coupon flow - a customer reported that applying a valid coupon at checkout silently does " +
+      "nothing: no discount, no error, and the Place order button stays disabled. Please reproduce it end to end " +
+      "with a real seeded coupon and confirm whether the totals recompute after the address validation resolves.",
+    author: "jrivera",
+  },
+];
+
 // Chrome the app shell + PR header/tab bar need on every PR page, independent of the checkpoint content.
 const chromeFixtures: TrpcFixtures = {
   branches: {
     list: branchPage(),
+    checkpointEvents,
     detailByName: {
       id: baseApplication.mainBranchId ?? "branch_fixture_01",
       name: "main",

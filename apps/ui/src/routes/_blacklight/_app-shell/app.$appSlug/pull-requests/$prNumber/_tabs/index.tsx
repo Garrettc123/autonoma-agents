@@ -1,7 +1,10 @@
 import { Badge, cn, Panel, PanelBody, PanelHeader, PanelTitle, Skeleton, StatusDot } from "@autonoma/blacklight";
-import type { AnalysisFlow, AnalysisIssueSummary, AnalysisTestRun } from "@autonoma/types";
+import type { AnalysisFlow, AnalysisIssueSummary, AnalysisTestRun, CheckpointTone } from "@autonoma/types";
 import { ArrowRightIcon } from "@phosphor-icons/react/ArrowRight";
+import { ArrowSquareOutIcon } from "@phosphor-icons/react/ArrowSquareOut";
 import { CaretRightIcon } from "@phosphor-icons/react/CaretRight";
+import { ChatCircleIcon } from "@phosphor-icons/react/ChatCircle";
+import { GitCommitIcon } from "@phosphor-icons/react/GitCommit";
 import { GitPullRequestIcon } from "@phosphor-icons/react/GitPullRequest";
 import { useSuspenseQueries } from "@tanstack/react-query";
 import { createFileRoute, notFound } from "@tanstack/react-router";
@@ -14,6 +17,7 @@ import { AnalysisTestsRunSection } from "components/analysis/tests-run-section";
 import { VerdictBanner } from "components/analysis/verdict-banner";
 import { InfoHint } from "components/info-hint";
 import { CheckpointSummaryPill } from "components/pr-status/checkpoint-summary-pill";
+import { prStatusPresentation } from "components/pr-status/pr-status-presentation";
 import { ShaRange } from "components/snapshot/sha-range";
 import { CATEGORY, buildSections, type EntryCategory } from "components/snapshot/snapshot-entries";
 import { formatRelativeTime } from "lib/format";
@@ -27,18 +31,20 @@ import {
   useAnalysisJob,
   useAnalysisReport,
   useBranchByPr,
+  useCheckpointEvents,
   useSnapshotHistory,
 } from "lib/query/branches.queries";
 import { useCommitFromGitHub } from "lib/query/github.queries";
 import { trpc } from "lib/trpc";
 import type { RouterOutputs } from "lib/trpc";
-import { Suspense, useMemo } from "react";
+import { type ReactNode, Suspense, useMemo, useState } from "react";
 import { AppLink } from "routes/_blacklight/_app-shell/-app-link";
 import { useCurrentApplication } from "routes/_blacklight/_app-shell/-use-current-application";
 import { ExecutedTestLink } from "../../-components/executed-test-link";
 import { formatCheckpointMetrics } from "../../-components/format-checkpoint-metrics";
 
 type Snapshot = RouterOutputs["branches"]["snapshotHistory"][number];
+type CheckpointEvent = RouterOutputs["branches"]["checkpointEvents"][number];
 type SnapshotDetail = RouterOutputs["branches"]["snapshotDetail"];
 type ExecutedTest = SnapshotDetail["executedTests"][number];
 type PRExecutedTest = ExecutedTest & { snapshotId: string; category?: EntryCategory };
@@ -368,9 +374,41 @@ function RailTestsRun({ snapshotId }: { snapshotId: string }) {
   return <AnalysisTestsRunSection testRuns={report.testRuns} />;
 }
 
-// The checkpoint history panel: every checkpoint on the PR, newest-first, each a two-row summary linking to its
-// snapshot page. The list caps its own height and scrolls internally so a long history never stretches the rail.
+const CHECKPOINT_TONE_DOT: Record<CheckpointTone, string> = {
+  success: "bg-status-success",
+  critical: "bg-status-critical",
+  warning: "bg-status-warn",
+  neutral: "bg-text-secondary",
+};
+const CHECKPOINT_TONE_TEXT: Record<CheckpointTone, string> = {
+  success: "text-status-success",
+  critical: "text-status-critical",
+  warning: "text-status-warn",
+  neutral: "text-text-secondary",
+};
+
+// A seat on the spine: a fixed-width slot centred on the rail, unfilled so the line runs continuously behind it.
+function SpineNode({ children }: { children: ReactNode }) {
+  return <span className="relative z-10 flex size-6 shrink-0 items-center justify-center">{children}</span>;
+}
+
+// A same-width invisible seat, so a nodeless row still aligns to the content column.
+function SpineSpacer() {
+  return <span className="size-6 shrink-0" aria-hidden />;
+}
+
+// The checkpoint history: a vertical spine, newest-first. The newest opens by default; the list caps its height and
+// scrolls internally so a long history never stretches the rail.
 function AuthoritativeCheckpointRail({ prNumber, snapshots }: { prNumber: number; snapshots: Snapshot[] }) {
+  const [openIds, setOpenIds] = useState<Set<string>>(() => new Set(snapshots[0] != null ? [snapshots[0].id] : []));
+  function toggle(id: string) {
+    setOpenIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
   return (
     <Panel>
       <PanelHeader>
@@ -381,13 +419,16 @@ function AuthoritativeCheckpointRail({ prNumber, snapshots }: { prNumber: number
           </InfoHint>
         </PanelTitle>
       </PanelHeader>
-      <PanelBody className="max-h-80 overflow-auto p-0">
+      <PanelBody className="relative max-h-96 overflow-auto p-0">
+        <div className="pointer-events-none absolute inset-y-6 left-7 w-px bg-border-dim" aria-hidden />
         {snapshots.map((snapshot, index) => (
           <AuthoritativeCheckpointItem
             key={snapshot.id}
             prNumber={prNumber}
             snapshot={snapshot}
             isLatest={index === 0}
+            open={openIds.has(snapshot.id)}
+            onToggle={() => toggle(snapshot.id)}
           />
         ))}
       </PanelBody>
@@ -395,37 +436,117 @@ function AuthoritativeCheckpointRail({ prNumber, snapshots }: { prNumber: number
   );
 }
 
-// One checkpoint box: the summary pill (status dot + "N/M verified · reason") and its relative time on row one, the
-// sha range on row two. The newest carries a subtle accent left-border and a muted "Latest" label.
-// Every earlier row is dimmed: those checkpoints are superseded, so a past "N bugs" reads as history rather than a
-// live alarm - only the latest row stays vivid (the header pill owns the current verdict).
+// Earlier checkpoints are dimmed: they are superseded, so a past "N bugs" reads as history, not a live alarm.
 function AuthoritativeCheckpointItem({
   prNumber,
   snapshot,
   isLatest,
+  open,
+  onToggle,
 }: {
   prNumber: number;
   snapshot: Snapshot;
   isLatest: boolean;
+  open: boolean;
+  onToggle: () => void;
 }) {
+  const presentation =
+    snapshot.summary != null ? prStatusPresentation({ kind: "checkpoint", summary: snapshot.summary }) : undefined;
+  const tone = presentation?.tone ?? "neutral";
   return (
-    <AppLink
-      to="/app/$appSlug/pull-requests/$prNumber/snapshots/$snapshotId"
-      params={{ prNumber, snapshotId: snapshot.id }}
-      className={cn(
-        "flex flex-col gap-1.5 border-b border-l-2 border-l-transparent border-border-dim px-4 py-3 transition-colors last:border-b-0 hover:bg-surface-raised",
-        isLatest ? "border-l-primary" : "opacity-60",
-      )}
-    >
-      <div className="flex items-center gap-2">
-        {snapshot.summary != null && <CheckpointSummaryPill summary={snapshot.summary} />}
-        <div className="ml-auto flex shrink-0 items-center gap-2 font-mono text-2xs text-text-secondary">
-          {isLatest && <span className="text-3xs uppercase tracking-widest">Latest</span>}
-          <span>{formatRelativeTime(snapshot.createdAt)}</span>
-        </div>
+    <div className={cn(!isLatest && "opacity-60")}>
+      {/* Row toggles the events; the Details link is layered over the date and revealed on hover/focus, so
+          disclosure and navigation never share a click target. */}
+      <div className="group relative">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left transition-colors group-hover:bg-surface-raised"
+        >
+          <SpineNode>
+            <span className={cn("size-3 rounded-full", CHECKPOINT_TONE_DOT[tone])} aria-hidden />
+          </SpineNode>
+          <CaretRightIcon
+            size={12}
+            weight="bold"
+            className={cn("shrink-0 text-text-secondary transition-transform", open && "rotate-90")}
+          />
+          <span className={cn("truncate font-mono text-2xs font-bold uppercase", CHECKPOINT_TONE_TEXT[tone])}>
+            {presentation?.label ?? "Checkpoint"}
+          </span>
+          <span className="ml-auto shrink-0 font-mono text-2xs text-text-secondary transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">
+            {isLatest ? "Latest · " : ""}
+            {formatRelativeTime(snapshot.createdAt)}
+          </span>
+        </button>
+        <AppLink
+          to="/app/$appSlug/pull-requests/$prNumber/snapshots/$snapshotId"
+          params={{ prNumber, snapshotId: snapshot.id }}
+          className="pointer-events-none absolute top-1/2 right-4 flex -translate-y-1/2 items-center gap-1 font-mono text-2xs font-semibold uppercase tracking-widest text-text-secondary opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 hover:text-text-primary focus-visible:pointer-events-auto focus-visible:opacity-100"
+        >
+          <span className="underline">Details</span>
+          <ArrowSquareOutIcon size={12} />
+        </AppLink>
       </div>
-      <ShaRange baseSha={snapshot.baseSha} headSha={snapshot.headSha} />
-    </AppLink>
+      {open && (
+        <Suspense fallback={<CheckpointEventsSkeleton />}>
+          <CheckpointEvents snapshotId={snapshot.id} />
+        </Suspense>
+      )}
+    </div>
+  );
+}
+
+function CheckpointEvents({ snapshotId }: { snapshotId: string }) {
+  const { data: events } = useCheckpointEvents(snapshotId);
+  if (events.length === 0) {
+    return (
+      <div className="flex items-center gap-2.5 px-4 pb-2">
+        <SpineSpacer />
+        <span className="font-mono text-2xs text-text-secondary">No events recorded.</span>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-0.5 pb-2">
+      {events.map((event) => (
+        <CheckpointEventRow key={event.id} event={event} />
+      ))}
+    </div>
+  );
+}
+
+function CheckpointEventRow({ event }: { event: CheckpointEvent }) {
+  if (event.type === "commits_pushed") {
+    return (
+      <div className="flex items-center gap-2.5 px-4 py-0.5">
+        <SpineNode>
+          <GitCommitIcon size={13} className="text-primary" />
+        </SpineNode>
+        <span className="shrink-0 font-mono text-3xs text-text-secondary">{event.headSha.slice(0, 7)}</span>
+        <span className="min-w-0 flex-1 truncate text-2xs text-text-primary">{event.message}</span>
+        <span className="shrink-0 font-mono text-3xs text-text-secondary">{formatRelativeTime(event.createdAt)}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2.5 px-4 py-0.5">
+      <SpineNode>
+        <ChatCircleIcon size={13} weight="fill" className="text-status-warn" />
+      </SpineNode>
+      <span className="min-w-0 flex-1 truncate text-2xs italic text-text-primary">&ldquo;{event.text}&rdquo;</span>
+      <span className="shrink-0 font-mono text-3xs text-text-secondary">{formatRelativeTime(event.createdAt)}</span>
+    </div>
+  );
+}
+
+function CheckpointEventsSkeleton() {
+  return (
+    <div className="flex flex-col gap-2">
+      <Skeleton className="h-6 w-3/4" />
+      <Skeleton className="h-6 w-1/2" />
+    </div>
   );
 }
 
